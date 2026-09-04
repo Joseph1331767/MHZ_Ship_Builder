@@ -1,0 +1,196 @@
+{
+  "_description": "Every field of ShipConfig (API_CONTRACT section 3), with its default value, a human description, and a min/max for a dev slider where a slider makes sense. ShipConfig.from_dict() reads the 'value' of each entry; the rest is documentation and UI bounds. A lever missing from ShipConfig.snapshot() is a bug per SPEC section 8.",
+  "max_bbox_m": {
+    "value": [
+      250.0,
+      120.0,
+      250.0
+    ],
+    "description": "Per-axis bounding box cap in metres (x, y, z), not a diagonal cap - a 200x20x200 hull is legal where a 78 m cube is not. Enforcement blocks edits that would grow usage past 1.0 on any axis; loading, deleting, and undo are always exempt.",
+    "min": 1.0,
+    "max": 1000.0
+  },
+  "max_internal_volume_m3": {
+    "value": 200000.0,
+    "description": "Cap on internal volume in cubic metres - the region where sdf(p) < -hull_thickness_m. This is the Phase 2 interior budget, tracked and gauged from Phase 1 even though nothing yet builds into that interior.",
+    "min": 1.0,
+    "max": 5000000.0
+  },
+  "max_weight_kg": {
+    "value": 5000000.0,
+    "description": "Cap on total ship weight in kilograms, computed as surface_area_m2 * areal_density_kg_m2 (a shell model - see areal_density_kg_m2). Deliberately shell-shaped so plugging in MHZ_Materials later only changes how areal_density is derived, not this formula.",
+    "min": 1.0,
+    "max": 100000000.0
+  },
+  "max_cost": {
+    "value": -1.0,
+    "description": "Cap on total ship cost in credits. JSON has no Infinity literal, so -1 is the sentinel for 'unbounded' and is the Phase 1 default: cost is always computed, displayed, and gauged, but never blocks an edit until a real cap is set here.",
+    "min": -1.0,
+    "max": 10000000.0
+  },
+  "max_complexity": {
+    "value": 148.0,
+    "description": "Complexity budget cap enforced by ShipComplexity/ShipGate (API_CONTRACT_SPORE.md section 5); per-part cost is data/shapes/families.json's 'complexity' field, doubled for a symmetric part. This is Spore's documented CREATURE cap (138, or 148 fully outfitted) - the UFO editor's own complexity ceiling is confirmed to exist by modder testing but its numeric value was never published anywhere reachable, across four independent research passes (SPORE_CLONE_SPEC.md section 5). We reuse the documented creature number as the closest sourced value rather than invent one for the ship editor.",
+    "min": 10.0,
+    "max": 1000.0
+  },
+  "min_parts_to_save": {
+    "value": 3,
+    "description": "Minimum part count required to save or upload a creation, enforced by ShipGate.check_save() (API_CONTRACT_SPORE.md section 6). Verified directly against the manual and modder testing: Spore's vehicle, spacecraft, and building editors all refuse to save or upload below 3 parts (SPORE_CLONE_SPEC.md section 5).",
+    "min": 1,
+    "max": 20
+  },
+  "areal_density_kg_m2": {
+    "value": 40.0,
+    "description": "Kilograms of hull shell per square metre of surface area, standing in for thickness * material.density until MHZ_Materials plugs in. Feeds max_weight_kg via weight_kg = surface_area_m2 * areal_density_kg_m2.",
+    "min": 0.1,
+    "max": 500.0
+  },
+  "hull_thickness_m": {
+    "value": 0.15,
+    "description": "Shell thickness in metres used to define the interior isosurface (sdf(p) < -hull_thickness_m) and, in Phase 2, the partition plate at a hatched joint. Purely geometric in Phase 1 - the bake still produces the all-open studio hull.",
+    "min": 0.01,
+    "max": 2.0
+  },
+  "bake_cell_m": {
+    "value": 0.25,
+    "description": "Voxel edge length in metres for the Surface Nets bake grid. Smaller cells give a crisper shell mesh at a steep cost in bake time and triangle count; the AABB is padded by hull_thickness_m before gridding.",
+    "min": 0.02,
+    "max": 2.0
+  },
+  "metrics_cell_m": {
+    "value": 0.5,
+    "description": "Sample cell size in metres for the volume/area/weight/cost metrics grid, kept coarser than bake_cell_m so budget gauges can refresh live while editing without paying full bake cost.",
+    "min": 0.05,
+    "max": 5.0
+  },
+  "snap_deg": {
+    "value": 0.5,
+    "description": "Default angular snap increment in degrees, applied independently per axis to yaw/pitch/roll at input time (the doc stores exactly what is displayed). The picker offers 0.1 / 0.5 / 1 / 5 / 15 / off; a held modifier bypasses snapping momentarily.",
+    "min": 0.0,
+    "max": 15.0
+  },
+  "snap_m": {
+    "value": 0.05,
+    "description": "Default linear snap increment in metres, applied to a part's attach offset at input time.",
+    "min": 0.0,
+    "max": 5.0
+  },
+  "snap_scale": {
+    "value": 0.05,
+    "description": "Default snap increment applied to a part's scale factor at input time, independently per axis unless the uniform-lock toggle is on.",
+    "min": 0.0,
+    "max": 1.0
+  },
+  "symmetry_plane_epsilon": {
+    "value": 0.01,
+    "description": "Distance in metres from ShipDoc.symmetry_plane inside which a part is treated as sitting ON the plane and generates no mirrored twin. Read by ShipSymmetry.generates_twin() (API_CONTRACT_SPORE.md section 4).",
+    "min": 0.0001,
+    "max": 1.0
+  },
+  "snap_tolerance_m": {
+    "value": 0.35,
+    "description": "Capture radius in metres for SnapTargets.nearest() (API_CONTRACT_SPORE.md section 1): a drop point farther than this from every candidate snap target on the parent misses, and placement falls back to the unsnapped yaw/pitch/roll/offset attach path.",
+    "min": 0.01,
+    "max": 5.0
+  },
+  "budget_priority": {
+    "value": [
+      "weight",
+      "volume",
+      "bbox",
+      "cost"
+    ],
+    "description": "Fixed tie-break order used when two or more budgets max out at once (ShipBudgets.top_violation honours this order). Values are the four budget keys - 'weight', 'volume', 'bbox', 'cost' - and every ship uses the same order; this is a dev lever for tuning which alert palette wins a tie, not a per-ship setting."
+  },
+  "gradient_eps": {
+    "value": 0.001,
+    "description": "Step size in metres for the central-difference SDF gradient (6 samples) used to derive surface normals and the attach mount axis. Too large blurs sharp features; too small loses precision to float32 noise.",
+    "min": 1e-05,
+    "max": 0.1
+  },
+  "trace_epsilon": {
+    "value": 0.0005,
+    "description": "Distance in metres below which the attach sphere-trace considers the ray to have hit the surface. Tightened it hugs the true surface more closely at the cost of more marching steps.",
+    "min": 1e-05,
+    "max": 0.01
+  },
+  "trace_max_steps": {
+    "value": 128,
+    "description": "Hard cap on sphere-trace iterations for a single attach ray before giving up and reporting a miss. Bounded so a pathological or degenerate shape (near-zero Lipschitz bound) cannot hang the editor.",
+    "min": 8,
+    "max": 1024
+  },
+  "part_scale_min": {
+    "value": 0.1,
+    "description": "Lower bound on any per-axis part scale factor. Prevents a part from being scaled down to a degenerate sliver that breaks the sphere-trace's Lipschitz safety margin.",
+    "min": 0.01,
+    "max": 1.0
+  },
+  "part_scale_max": {
+    "value": 20.0,
+    "description": "Upper bound on any per-axis part scale factor. Prevents a single part from being stretched past the point where its non-uniform-scale Lipschitz correction (max(scale)/min(scale)) makes sphere-tracing impractically slow.",
+    "min": 1.0,
+    "max": 100.0
+  },
+  "root_span_m": {
+    "value": 5.0,
+    "description": "Widest bounding-box axis, in metres, that a freshly founded root part is scaled to when the player picks a starting module. Before this lever existed the first part was left at its family's own base_size, so a ship founded on a sphere started 2 m across and one founded on a torus started 4 m across, and the player's whole sense of scale depended on which icon they clicked. Raise it for capital hulls; lower it toward room_span_m for a builder that starts at one habitable module.",
+    "min": 0.5,
+    "max": 60.0
+  },
+  "room_span_m": {
+    "value": 3.0,
+    "description": "Widest axis, in metres, of the primitive a template ROOM module is built from. 3 m is the smallest module a person can stand up and turn around in, which is the cramped, modular, non-futuristic scale the ship templates are authored against. Room-to-room spacing in a template is derived from this plus tunnel_length_m.",
+    "min": 1.0,
+    "max": 20.0
+  },
+  "tunnel_bore_m": {
+    "value": 1.0,
+    "description": "Outside diameter, in metres, of a template hallway cylinder. 1 m is a crawl-through with shoulders touching - deliberately uncomfortable, and deliberately much narrower than room_span_m so a template ship reads as modules joined by ducts rather than as one blob.",
+    "min": 0.4,
+    "max": 6.0
+  },
+  "tunnel_length_m": {
+    "value": 2.0,
+    "description": "Open run, in metres, of a template hallway between two room modules - the crawl a crew member actually makes, not the room-centre spacing, which is this plus both room radii. Raise it for a sprawling station, drop it toward zero for rooms that share a bulkhead.",
+    "min": 0.0,
+    "max": 30.0
+  },
+  "attach_embed_m": {
+    "value": 0.45,
+    "description": "How deep a newly placed part is sunk into its parent by default, in metres: the part's lowest point ends up this far below the parent's surface, measured on the actual surfaces, so a ring seated on a sphere is sunk at its rim and not at the empty axis. A part seated flush touches a curved parent at a single point and reads as resting on it rather than joined to it. Keep this above twice hull_thickness_m: the interiors then meet through the join, and a hatch there opens onto air instead of solid hull. This only sets the offset a new part STARTS at - 0 still means flush, and the offset stays editable.",
+    "min": 0.0,
+    "max": 5.0
+  },
+  "attach_embed_max_fraction": {
+    "value": 0.5,
+    "description": "Cap on the default embed as a fraction of the new part's own height, so a thin plate or a small fitting is not buried out of sight: a 0.4 m plate sinks at most 0.2 m whatever attach_embed_m says.",
+    "min": 0.0,
+    "max": 1.0
+  },
+  "doorway_width_m": {
+    "value": 0.8,
+    "description": "Clear width in metres of the plain DOORWAY cut into the seam wall between two rooms that are linked without a hatch (joint mode 'doorway', ADR 0008). Centred on the seam automatically. 0.8 m is a shoulders-turned squeeze, in keeping with the cramped modular scale of room_span_m.",
+    "min": 0.3,
+    "max": 4.0
+  },
+  "doorway_height_m": {
+    "value": 1.9,
+    "description": "Clear height in metres of the plain DOORWAY (see doorway_width_m). 1.9 m clears a standing crew member without a duck; drop it toward 1.2 m for a crawl-through the crew has to stoop into.",
+    "min": 0.3,
+    "max": 4.0
+  },
+  "explode_gap_m": {
+    "value": 1.5,
+    "description": "EXPLODE view: the fixed gap in metres each module is pulled away from the module it stands on, along its own seam normal, in addition to half its own extent along that normal. Larger reads clearer on a crowded ship at the cost of a wider frame; 0 packs the modules back to touching so only the seam faces show.",
+    "min": 0.0,
+    "max": 20.0
+  },
+  "explode_cells_per_axis": {
+    "value": 32,
+    "description": "EXPLODE view bake resolution, as Surface Nets cells across each module's longest axis (never finer than bake_cell_m). 32 is a preview - a 5 m module resolves at about 0.16 m - chosen so a ten-module ship explodes in seconds rather than the minutes a full-grid bake costs (FOLLOWUPS F5).",
+    "min": 8,
+    "max": 96
+  }
+}

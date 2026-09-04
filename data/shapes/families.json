@@ -1,0 +1,359 @@
+{
+  "_complexity_note": "Per-part 'complexity' below is scaled against Spore's own real reference points (docs/SPORE_CLONE_SPEC.md section 5 / API_CONTRACT_SPORE.md section 5): a creature spine segment costs 1, a limb segment 1.5, most detail parts 1, and the single most expensive part in the entire shipped game costs 11. Our families are full structural hull primitives, not creature-scale filler, so they sit well above the '1' floor but still comfortably under that documented '11' ceiling - the range used here is 3.0 (cylinder_spar, whose own description calls it the cheapest primitive to manufacture in bulk) to 7.0 (torus_ring, the largest and most geometrically expensive primitive, which also carries the highest base_cost). ADR 0005 retired the cone_nose (2.5) and capsule_tank (3.5) families: a cone and a capsule are now cylinder_spar with end_radius and end_round set, so their cost is carried by cylinder_spar's 3.0 base plus the param_complexity multiplier those two params feed, which lands a fully-shaped cone or capsule between 4.5 and 6.0 - the band the two retired families occupied, reached through the cost model instead of through a second catalogue entry. Averaging the four remaining values gives roughly 5.0 complexity per part before symmetry doubling. A modest 15-part ship (a handful of root bodies plus mostly-mirrored accessories, so well under half the parts pay the doubling) lands in the 70-100 range; a fuller 30-part ship built the same way lands in the 130-148 range - meaningfully inside ShipConfig.max_complexity (data/tuning.json, 148.0) without brushing the ceiling on a minimal 3-part boat and without leaving no headroom on a large one, exactly as the brief asks. Once weaponry/effects/details families exist their complexity should stay near the '1' end of Spore's real range, matching 'most detail parts cost 1'.",
+  "box_hull": {
+    "label": "Box Hull",
+    "description": "The rectangular pressure box that most hulls are built around: six flat faces, sharp or softly broken edges, and enough flat real estate to bolt on anything. Cheap to loft, cheap to panel, endlessly extensible - cargo holds, habitat blocks, and gun decks all start life as a box_hull. Round the corners for a passenger liner, leave them square for a freighter, or rib the flanks for a working hull that has clearly been somewhere.",
+    "base": "BOX",
+    "base_size": [
+      1.0,
+      1.0,
+      1.0
+    ],
+    "origin_inside": true,
+    "base_cost": 120.0,
+    "complexity": 6.0,
+    "can_be_root": true,
+    "max_children": 8,
+    "scale_min": 0.2,
+    "scale_max": 2.0,
+    "paint_regions": [
+      "base",
+      "coat",
+      "detail"
+    ],
+    "snap_kinds": [
+      "face",
+      "center"
+    ],
+    "ops": [
+      "round",
+      "taper",
+      "twist",
+      "skew",
+      "ribs",
+      "scallop"
+    ],
+    "params": {
+      "round": {
+        "min": 0.0,
+        "max": 0.25,
+        "default": 0.02,
+        "step": 0.01
+      },
+      "taper": {
+        "min": 0.0,
+        "max": 0.6,
+        "default": 0.0,
+        "step": 0.01
+      },
+      "twist_deg": {
+        "min": -30.0,
+        "max": 30.0,
+        "default": 0.0,
+        "step": 0.5
+      },
+      "skew_x": {
+        "min": -0.8,
+        "max": 0.8,
+        "default": 0.0,
+        "step": 0.01
+      },
+      "skew_z": {
+        "min": -0.8,
+        "max": 0.8,
+        "default": 0.0,
+        "step": 0.01
+      },
+      "rib_count": {
+        "min": 0,
+        "max": 8,
+        "default": 0,
+        "step": 1
+      },
+      "rib_amp": {
+        "min": 0.0,
+        "max": 0.2,
+        "default": 0.0,
+        "step": 0.01
+      },
+      "scallop_amp": {
+        "min": 0.0,
+        "max": 0.15,
+        "default": 0.0,
+        "step": 0.01
+      },
+      "scallop_freq": {
+        "min": 0.5,
+        "max": 8.0,
+        "default": 2.0,
+        "step": 0.1
+      }
+    }
+  },
+  "sphere_pod": {
+    "label": "Sphere Pod",
+    "description": "A pressure-optimal sphere: the strongest shape per kilogram of shell, favoured for crew pods, escape capsules, and single-occupant observation blisters. Its curvature is unbroken by any edge, so ribs read as surface tooling rather than structure, and a deep taper stretches it toward a teardrop lifepod without ever losing the pressure-hull logic that put it there.",
+    "base": "SPHERE",
+    "base_size": [
+      1.0
+    ],
+    "origin_inside": true,
+    "base_cost": 160.0,
+    "complexity": 4.0,
+    "can_be_root": true,
+    "max_children": 6,
+    "scale_min": 0.3,
+    "scale_max": 1.8,
+    "paint_regions": [
+      "base",
+      "coat",
+      "detail"
+    ],
+    "snap_kinds": [
+      "pole",
+      "center"
+    ],
+    "ops": [
+      "taper",
+      "twist",
+      "skew",
+      "ribs",
+      "scallop"
+    ],
+    "params": {
+      "taper": {
+        "min": 0.0,
+        "max": 0.5,
+        "default": 0.0,
+        "step": 0.01
+      },
+      "twist_deg": {
+        "min": -45.0,
+        "max": 45.0,
+        "default": 0.0,
+        "step": 0.5
+      },
+      "skew_x": {
+        "min": -0.8,
+        "max": 0.8,
+        "default": 0.0,
+        "step": 0.01
+      },
+      "skew_z": {
+        "min": -0.8,
+        "max": 0.8,
+        "default": 0.0,
+        "step": 0.01
+      },
+      "rib_count": {
+        "min": 0,
+        "max": 12,
+        "default": 0,
+        "step": 1
+      },
+      "rib_amp": {
+        "min": 0.0,
+        "max": 0.15,
+        "default": 0.0,
+        "step": 0.01
+      },
+      "scallop_amp": {
+        "min": 0.0,
+        "max": 0.12,
+        "default": 0.0,
+        "step": 0.01
+      },
+      "scallop_freq": {
+        "min": 0.5,
+        "max": 10.0,
+        "default": 3.0,
+        "step": 0.1
+      }
+    }
+  },
+  "cylinder_spar": {
+    "label": "Cylinder",
+    "description": "The workhorse body of revolution, and the primitive that carries the widest range of shapes on its own. Authored as a slim three-to-one tube - a corridor, a fuel line, a boom - and reshaped entirely from its own parameters: leave both ends the same width for a straight spar, narrow one end for a frustum, take that end to zero for a cone, a bow fairing or a nozzle, then round the end discs to turn any of those into a capsule or a rounded nose WITHOUT the part changing size under you. Cheapest primitive in the catalogue to manufacture in bulk, and the most forgiving under taper - flute it with twist for a drive shaft, or rib it end to end for something that has clearly done structural work.",
+    "base": "CYLINDER",
+    "base_size": [
+      0.5,
+      1.5
+    ],
+    "origin_inside": true,
+    "base_cost": 90.0,
+    "complexity": 3.0,
+    "can_be_root": true,
+    "max_children": 8,
+    "scale_min": 0.2,
+    "scale_max": 3.0,
+    "paint_regions": [
+      "base",
+      "coat",
+      "detail"
+    ],
+    "snap_kinds": [
+      "pole",
+      "rim",
+      "center"
+    ],
+    "ops": [
+      "round",
+      "ends",
+      "taper",
+      "twist",
+      "skew",
+      "ribs",
+      "scallop"
+    ],
+    "params": {
+      "round": {
+        "min": 0.0,
+        "max": 0.2,
+        "default": 0.0,
+        "step": 0.01
+      },
+      "end_radius": {
+        "min": 0.0,
+        "max": 1.5,
+        "default": 1.0,
+        "step": 0.05
+      },
+      "end_round": {
+        "min": 0.0,
+        "max": 1.0,
+        "default": 0.0,
+        "step": 0.05
+      },
+      "taper": {
+        "min": 0.0,
+        "max": 0.8,
+        "default": 0.0,
+        "step": 0.01
+      },
+      "twist_deg": {
+        "min": -60.0,
+        "max": 60.0,
+        "default": 0.0,
+        "step": 0.5
+      },
+      "skew_x": {
+        "min": -0.8,
+        "max": 0.8,
+        "default": 0.0,
+        "step": 0.01
+      },
+      "skew_z": {
+        "min": -0.8,
+        "max": 0.8,
+        "default": 0.0,
+        "step": 0.01
+      },
+      "rib_count": {
+        "min": 0,
+        "max": 10,
+        "default": 0,
+        "step": 1
+      },
+      "rib_amp": {
+        "min": 0.0,
+        "max": 0.2,
+        "default": 0.0,
+        "step": 0.01
+      },
+      "scallop_amp": {
+        "min": 0.0,
+        "max": 0.15,
+        "default": 0.0,
+        "step": 0.01
+      },
+      "scallop_freq": {
+        "min": 0.5,
+        "max": 8.0,
+        "default": 2.0,
+        "step": 0.1
+      }
+    }
+  },
+  "torus_ring": {
+    "label": "Torus Ring",
+    "description": "A doughnut of hull, mounted by its hole rather than its centre - habitation rings, centrifuge sections, and toroidal fuel cells all live here. Its local origin sits in empty space at the centre of the hole, which is why every ray that has to find this shape's surface has to be traced in from outside rather than out from the middle. Rib it for spokes, twist it for a slow corkscrew wrap, and keep taper gentle or the tube reads as pinched rather than swept.",
+    "base": "TORUS",
+    "base_size": [
+      1.5,
+      0.5
+    ],
+    "origin_inside": false,
+    "base_cost": 220.0,
+    "complexity": 7.0,
+    "can_be_root": true,
+    "max_children": 8,
+    "scale_min": 0.5,
+    "scale_max": 2.0,
+    "paint_regions": [
+      "base",
+      "coat",
+      "detail"
+    ],
+    "snap_kinds": [
+      "rim",
+      "center"
+    ],
+    "ops": [
+      "taper",
+      "twist",
+      "skew",
+      "ribs",
+      "scallop"
+    ],
+    "params": {
+      "taper": {
+        "min": 0.0,
+        "max": 0.3,
+        "default": 0.0,
+        "step": 0.01
+      },
+      "twist_deg": {
+        "min": -90.0,
+        "max": 90.0,
+        "default": 0.0,
+        "step": 1.0
+      },
+      "skew_x": {
+        "min": -0.8,
+        "max": 0.8,
+        "default": 0.0,
+        "step": 0.01
+      },
+      "skew_z": {
+        "min": -0.8,
+        "max": 0.8,
+        "default": 0.0,
+        "step": 0.01
+      },
+      "rib_count": {
+        "min": 0,
+        "max": 16,
+        "default": 0,
+        "step": 1
+      },
+      "rib_amp": {
+        "min": 0.0,
+        "max": 0.2,
+        "default": 0.0,
+        "step": 0.01
+      },
+      "scallop_amp": {
+        "min": 0.0,
+        "max": 0.12,
+        "default": 0.0,
+        "step": 0.01
+      },
+      "scallop_freq": {
+        "min": 0.5,
+        "max": 12.0,
+        "default": 2.0,
+        "step": 0.1
+      }
+    }
+  }
+}

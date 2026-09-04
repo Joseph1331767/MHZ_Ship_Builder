@@ -1,0 +1,566 @@
+{
+  "_note": "Stock ship templates, built as ROOMS joined by CYLINDER HALLWAYS with a hatch at every connection, and named after what they model. An 'element' template is one core room with a symmetric ring of rooms branching off it, the branch count and geometry taken from that element's own valence shell - so walking the periodic list really does walk a list of different ways to arrange rooms around a centre, which is what the author asked for. A 'molecule' template is several element cores wired together, so 'water molecule' is a bent core with a pod on each arm. Nothing here fixes a SIZE: room diameter, tunnel bore and tunnel length all come from data/tuning.json (room_span_m, tunnel_bore_m, tunnel_length_m) so the whole catalogue rescales from three levers, and nothing here fixes a SHAPE either - the room family and the hallway family are chosen when the template is built. ShipTemplates.build() reads this pack; adding a template must never require touching core/.",
+  "arrangements": {
+    "single": {
+      "description": "One branch, straight up the spine. The smallest thing that is still two rooms and a tunnel between them.",
+      "dirs": [
+        [
+          0.0,
+          1.0,
+          0.0
+        ]
+      ]
+    },
+    "linear": {
+      "description": "Two branches on one axis, 180 degrees apart - a spine module with a room at each end. VSEPR's linear geometry, and the plan of every corridor ship ever drawn.",
+      "dirs": [
+        [
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          -1.0,
+          0.0
+        ]
+      ]
+    },
+    "bent": {
+      "description": "Two branches at 104.5 degrees, water's own bond angle. Reads as a hab module with two wings that do not quite face each other, which is exactly why it is the shape everybody recognises.",
+      "dirs": [
+        [
+          0.79069,
+          0.612217,
+          0.0
+        ],
+        [
+          -0.79069,
+          0.612217,
+          0.0
+        ]
+      ]
+    },
+    "trigonal": {
+      "description": "Three branches at 120 degrees in one plane. The flattest arrangement that still surrounds the core, and the cheapest to dock at because every tunnel mouth is reachable from the same approach.",
+      "dirs": [
+        [
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          -0.5,
+          0.0,
+          0.866025
+        ],
+        [
+          -0.5,
+          0.0,
+          -0.866025
+        ]
+      ]
+    },
+    "pyramidal": {
+      "description": "Three branches swept below the equator, ammonia's trigonal pyramid. The lopsided one: the core keeps a clear face on top, which is where a bridge or a dorsal mast goes.",
+      "dirs": [
+        [
+          0.942641,
+          -0.333807,
+          0.0
+        ],
+        [
+          -0.471321,
+          -0.333807,
+          0.816351
+        ],
+        [
+          -0.471321,
+          -0.333807,
+          -0.816351
+        ]
+      ]
+    },
+    "tetrahedral": {
+      "description": "Four branches at 109.5 degrees, the carbon plan. The most symmetric way to put four rooms around one without any two tunnels sharing a plane, and the reason a methane-pattern hull looks equally sane from every angle.",
+      "dirs": [
+        [
+          0.57735,
+          0.57735,
+          0.57735
+        ],
+        [
+          0.57735,
+          -0.57735,
+          -0.57735
+        ],
+        [
+          -0.57735,
+          0.57735,
+          -0.57735
+        ],
+        [
+          -0.57735,
+          -0.57735,
+          0.57735
+        ]
+      ]
+    },
+    "square": {
+      "description": "Four branches at 90 degrees in one plane - the same four rooms as tetrahedral, laid flat. Squarer, more industrial, and it stacks: two square modules on a shared spine make a deck.",
+      "dirs": [
+        [
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ],
+        [
+          -1.0,
+          0.0,
+          0.0
+        ],
+        [
+          -0.0,
+          0.0,
+          -1.0
+        ]
+      ]
+    },
+    "bipyramidal": {
+      "description": "Five branches: three around the waist and one at each pole. Phosphorus geometry, and the first arrangement with two genuinely different kinds of berth - equatorial and axial - which is where a ship starts having a bow.",
+      "dirs": [
+        [
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          -0.5,
+          0.0,
+          0.866025
+        ],
+        [
+          -0.5,
+          0.0,
+          -0.866025
+        ],
+        [
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          -1.0,
+          0.0
+        ]
+      ]
+    },
+    "octahedral": {
+      "description": "Six branches on the three axes, sulphur's plan. A room in every direction: no bow, no stern, no up. Cramped, symmetrical and completely disorienting inside, which some crews are said to prefer.",
+      "dirs": [
+        [
+          1,
+          0,
+          0
+        ],
+        [
+          -1,
+          0,
+          0
+        ],
+        [
+          0,
+          1,
+          0
+        ],
+        [
+          0,
+          -1,
+          0
+        ],
+        [
+          0,
+          0,
+          1
+        ],
+        [
+          0,
+          0,
+          -1
+        ]
+      ]
+    },
+    "pentagonal": {
+      "description": "Seven branches: five around the waist plus both poles. Past this the tunnel mouths start crowding each other on the core's surface, which is a real structural limit and not a rendering one.",
+      "dirs": [
+        [
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.309017,
+          0.0,
+          0.951057
+        ],
+        [
+          -0.809017,
+          0.0,
+          0.587785
+        ],
+        [
+          -0.809017,
+          0.0,
+          -0.587785
+        ],
+        [
+          0.309017,
+          0.0,
+          -0.951057
+        ],
+        [
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          -1.0,
+          0.0
+        ]
+      ]
+    },
+    "cubic": {
+      "description": "Eight branches on the corners of a cube - the full shell, every diagonal occupied. The densest arrangement the eight-children-per-part limit allows, and it looks it.",
+      "dirs": [
+        [
+          0.57735,
+          0.57735,
+          0.57735
+        ],
+        [
+          0.57735,
+          0.57735,
+          -0.57735
+        ],
+        [
+          0.57735,
+          -0.57735,
+          0.57735
+        ],
+        [
+          0.57735,
+          -0.57735,
+          -0.57735
+        ],
+        [
+          -0.57735,
+          0.57735,
+          0.57735
+        ],
+        [
+          -0.57735,
+          0.57735,
+          -0.57735
+        ],
+        [
+          -0.57735,
+          -0.57735,
+          0.57735
+        ],
+        [
+          -0.57735,
+          -0.57735,
+          -0.57735
+        ]
+      ]
+    }
+  },
+  "elements": {
+    "hydrogen": {
+      "label": "Hydrogen",
+      "symbol": "H",
+      "z": 1,
+      "arrangement": "single",
+      "description": "One room. The smallest ship that is legally a ship: a single hab module with one stub tunnel and a hatch at the end of it, waiting for whatever gets bolted on next. Every hull in the yard starts as somebody's hydrogen."
+    },
+    "helium": {
+      "label": "Helium",
+      "symbol": "He",
+      "z": 2,
+      "arrangement": "linear",
+      "description": "A core with a room at each end of one spine. Closed-shell and content: the two berths face directly away from each other, so nothing docked at one end can see or reach the other without walking through the middle."
+    },
+    "lithium": {
+      "label": "Lithium",
+      "symbol": "Li",
+      "z": 3,
+      "arrangement": "single",
+      "description": "A filled inner pair with a single lone room hanging off it. Structurally the same plan as hydrogen and about as stable to fly - the outlying module is on one tunnel and one tunnel only, which is exactly how a lithium hull tends to be found: missing it."
+    },
+    "beryllium": {
+      "label": "Beryllium",
+      "symbol": "Be",
+      "z": 4,
+      "arrangement": "linear",
+      "description": "Two outer rooms on opposite sides of a filled core. A working shuttle plan - crew forward, cargo aft, one tunnel each - and the smallest arrangement where the core is genuinely a junction rather than an endpoint."
+    },
+    "boron": {
+      "label": "Boron",
+      "symbol": "B",
+      "z": 5,
+      "arrangement": "trigonal",
+      "description": "Three rooms at 120 degrees around a flat core. The first hull in the list that has a plane, and therefore the first one that has a floor: boron-pattern stations are almost always flown with the ring horizontal."
+    },
+    "carbon": {
+      "label": "Carbon",
+      "symbol": "C",
+      "z": 6,
+      "arrangement": "tetrahedral",
+      "description": "Four rooms around a core at 109.5 degrees, no two tunnels in the same plane. The workhorse: it takes load evenly from every direction, it looks deliberate from any angle, and it is the pattern every yard reaches for when the customer has not said what the ship is for."
+    },
+    "nitrogen": {
+      "label": "Nitrogen",
+      "symbol": "N",
+      "z": 7,
+      "arrangement": "pyramidal",
+      "description": "Three rooms swept below the core, leaving the dorsal face clear. The lone pair is real estate: nitrogen hulls put a bridge, a mast or a gun on the empty top face, which is why the pattern shows up on so many ships that had to look like they meant it."
+    },
+    "oxygen": {
+      "label": "Oxygen",
+      "symbol": "O",
+      "z": 8,
+      "arrangement": "bent",
+      "description": "Two rooms at 104.5 degrees off one core. Asymmetric, awkward to dock and impossible to mistake for anything else - the bent pair is the silhouette that makes a water-pattern hull recognisable across a hangar."
+    },
+    "fluorine": {
+      "label": "Fluorine",
+      "symbol": "F",
+      "z": 9,
+      "arrangement": "single",
+      "description": "A crowded core with one free berth. Fluorine hulls are built to be joined to something else and are close to useless alone: the single outward tunnel is the whole point of the design."
+    },
+    "neon": {
+      "label": "Neon",
+      "symbol": "Ne",
+      "z": 10,
+      "arrangement": "octahedral",
+      "description": "A room on all six axes. Closed shell, no free face, nothing left to bolt on - a neon hull is a finished object, and the yards sell it as one. Inside there is no up, which crews either love or leave."
+    },
+    "sodium": {
+      "label": "Sodium",
+      "symbol": "Na",
+      "z": 11,
+      "arrangement": "single",
+      "description": "Two filled shells and one outlying room, the lithium plan a size up. The outer module sits much further out than the core's own diameter, and the long tunnel to it flexes: sodium hulls are known for the noise."
+    },
+    "silicon": {
+      "label": "Silicon",
+      "symbol": "Si",
+      "z": 14,
+      "arrangement": "tetrahedral",
+      "description": "Carbon's plan in a heavier frame - four rooms at 109.5 degrees around a larger core. Slower, stiffer, and cheap: silicon-pattern hulls are what a yard builds when the customer wants a carbon ship and cannot pay for one."
+    },
+    "phosphorus": {
+      "label": "Phosphorus",
+      "symbol": "P",
+      "z": 15,
+      "arrangement": "bipyramidal",
+      "description": "Three rooms around the waist and one at each pole. The first pattern with two different kinds of berth, equatorial and axial, and therefore the first one where a hull acquires a bow by convention rather than by accident."
+    },
+    "sulphur": {
+      "label": "Sulphur",
+      "symbol": "S",
+      "z": 16,
+      "arrangement": "octahedral",
+      "description": "Six rooms on the three axes around a heavy core. The same closed geometry as neon at a working scale - packed, symmetric, and the standard plan for a refinery tender that never needs to point anywhere in particular."
+    },
+    "chlorine": {
+      "label": "Chlorine",
+      "symbol": "Cl",
+      "z": 17,
+      "arrangement": "single",
+      "description": "One free berth on a crowded core, the fluorine plan grown out. Sold as a docking tender: the single tunnel is oversized on purpose, because the whole ship exists to be the thing on the other end of somebody else's hatch."
+    },
+    "argon": {
+      "label": "Argon",
+      "symbol": "Ar",
+      "z": 18,
+      "arrangement": "cubic",
+      "description": "Eight rooms on the corners of a cube. The densest closed shell the eight-tunnel structural limit allows, and it is a genuinely difficult thing to fly - but nothing in the catalogue looks less like it was assembled by accident."
+    }
+  },
+  "molecules": {
+    "water": {
+      "label": "Water Molecule",
+      "formula": "H2O",
+      "description": "An oxygen-pattern core with a hydrogen module on each of its two bent berths - the ship everybody draws when they are asked to draw a small ship. Two hab pods at 104.5 degrees off a central utility core, one tunnel each, one hatch at every end. Cramped, obvious, and completely serviceable.",
+      "nodes": [
+        {
+          "element": "oxygen"
+        },
+        {
+          "element": "hydrogen",
+          "parent": 0,
+          "slot": 0
+        },
+        {
+          "element": "hydrogen",
+          "parent": 0,
+          "slot": 1
+        }
+      ]
+    },
+    "methane": {
+      "label": "Methane Module",
+      "formula": "CH4",
+      "description": "A carbon core with all four tetrahedral berths filled. The stock four-pod hull: no two pods share a plane, so it takes thrust from any direction without twisting, and every pod is the same distance from the galley. The yards sell more of these than everything else combined.",
+      "nodes": [
+        {
+          "element": "carbon"
+        },
+        {
+          "element": "hydrogen",
+          "parent": 0,
+          "slot": 0
+        },
+        {
+          "element": "hydrogen",
+          "parent": 0,
+          "slot": 1
+        },
+        {
+          "element": "hydrogen",
+          "parent": 0,
+          "slot": 2
+        },
+        {
+          "element": "hydrogen",
+          "parent": 0,
+          "slot": 3
+        }
+      ]
+    },
+    "ammonia": {
+      "label": "Ammonia Tender",
+      "formula": "NH3",
+      "description": "A nitrogen core with three pods swept below it and the dorsal face left bare for a mast. The classic working tender: everything crew-related hangs underneath where it is easy to reach from a dock, and everything that has to see out goes on top.",
+      "nodes": [
+        {
+          "element": "nitrogen"
+        },
+        {
+          "element": "hydrogen",
+          "parent": 0,
+          "slot": 0
+        },
+        {
+          "element": "hydrogen",
+          "parent": 0,
+          "slot": 1
+        },
+        {
+          "element": "hydrogen",
+          "parent": 0,
+          "slot": 2
+        }
+      ]
+    },
+    "carbon_dioxide": {
+      "label": "Carbon Dioxide Spine",
+      "formula": "CO2",
+      "description": "A carbon core with an oxygen module on each end of one axis - a long, straight, three-module spine. The cheapest way to make a ship that is genuinely bigger than one room, and the plan of most short-haul freight in service.",
+      "nodes": [
+        {
+          "element": "carbon"
+        },
+        {
+          "element": "oxygen",
+          "parent": 0,
+          "slot": 0
+        },
+        {
+          "element": "oxygen",
+          "parent": 0,
+          "slot": 1
+        }
+      ]
+    },
+    "ethane": {
+      "label": "Ethane Barge",
+      "formula": "C2H6",
+      "description": "Two carbon cores joined by a single tunnel, each carrying three pods. The first pattern in the catalogue with two junctions instead of one, which means it has a middle - and a middle is where a barge puts its cargo.",
+      "nodes": [
+        {
+          "element": "carbon"
+        },
+        {
+          "element": "carbon",
+          "parent": 0,
+          "slot": 0
+        },
+        {
+          "element": "hydrogen",
+          "parent": 0,
+          "slot": 1
+        },
+        {
+          "element": "hydrogen",
+          "parent": 0,
+          "slot": 2
+        },
+        {
+          "element": "hydrogen",
+          "parent": 0,
+          "slot": 3
+        },
+        {
+          "element": "hydrogen",
+          "parent": 1,
+          "slot": 1
+        },
+        {
+          "element": "hydrogen",
+          "parent": 1,
+          "slot": 2
+        },
+        {
+          "element": "hydrogen",
+          "parent": 1,
+          "slot": 3
+        }
+      ]
+    },
+    "hydrogen_peroxide": {
+      "label": "Peroxide Chain",
+      "formula": "H2O2",
+      "description": "Two oxygen cores joined end to end with a pod on the far side of each - a four-module chain with a kink in the middle. Long, thin and slightly twisted, which is what happens when you build a ship out of two bent cores instead of one straight one.",
+      "nodes": [
+        {
+          "element": "oxygen"
+        },
+        {
+          "element": "oxygen",
+          "parent": 0,
+          "slot": 0
+        },
+        {
+          "element": "hydrogen",
+          "parent": 0,
+          "slot": 1
+        },
+        {
+          "element": "hydrogen",
+          "parent": 1,
+          "slot": 1
+        }
+      ]
+    }
+  }
+}

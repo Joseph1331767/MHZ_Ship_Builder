@@ -1,0 +1,41 @@
+# --- Godot ---
+.godot/
+.import/
+export.cfg
+export_presets.cfg
+*.translation
+override.cfg
+# Exported builds
+build/
+export/
+
+# --- Agent scratch & clutter (see AGENTS.md rule 4) ---
+scratch/*
+!scratch/.gitkeep
+# Tool output. AGENTS rule 4 says to gitignore this "the same way" as scratch/; it was
+# created by the screenshot and visual-check tools before the rule was applied to it.
+reports/*
+!reports/.gitkeep
+*.log
+check*.txt
+check*.log
+test*.txt
+output*.txt
+patch_*.py
+*.tmp
+
+# --- Secrets ---
+.env
+.env.*
+*.pem
+*.key
+secrets/
+
+# --- Tool-local (personal, not shared) ---
+.claude/settings.local.json
+.vscode/
+.idea/
+
+# --- OS ---
+Thumbs.db
+.DS_Store

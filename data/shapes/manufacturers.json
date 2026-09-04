@@ -1,0 +1,342 @@
+{
+  "kessler": {
+    "label": "Kessler Yards",
+    "description": "The biggest name in unglamorous hulls. Kessler has been stamping out boxy, lightly ribbed modules since before anyone thought to make a ship look interesting, and half the tramp freighters and orbital warehouses in service still wear a Kessler dataplate. Their machinists do not do twist - if you want a spiral, buy from someone else - but they will rib a flank to spec without asking why, and their corners stay close to square because that is what their jigs are built for.",
+    "cost_multiplier": 1.0,
+    "families": {
+      "box_hull": {
+        "ops_disabled": [
+          "twist"
+        ],
+        "params": {
+          "round": {
+            "min": 0.0,
+            "max": 0.05,
+            "default": 0.02
+          },
+          "rib_count": {
+            "min": 2,
+            "max": 6,
+            "default": 4
+          }
+        }
+      },
+      "cylinder_spar": {
+        "ops_disabled": [
+          "twist"
+        ],
+        "params": {
+          "round": {
+            "min": 0.0,
+            "max": 0.08,
+            "default": 0.03
+          },
+          "taper": {
+            "min": 0.0,
+            "max": 0.35,
+            "default": 0.0
+          },
+          "rib_count": {
+            "min": 1,
+            "max": 6,
+            "default": 2
+          },
+          "end_radius": {
+            "min": 0.4,
+            "max": 1.0,
+            "default": 1.0
+          },
+          "end_round": {
+            "min": 0.0,
+            "max": 0.4,
+            "default": 0.0
+          }
+        }
+      }
+    }
+  },
+  "voss": {
+    "label": "Voss Dynamics",
+    "description": "Voss made its name reinforcing hulls that other yards had already built, and grew into a full manufacturer without ever losing the instinct: everything gets ribbed. Structural engineers love them, decorators find them a little relentless. A Voss hull is recognisable across a hangar bay by its corrugation alone - heavy, close-set, load-bearing-looking ribs on everything from cargo boxes to habitation rings - and they have never bothered with a scallop tool, because in their view a rib does the job better.",
+    "cost_multiplier": 1.15,
+    "families": {
+      "box_hull": {
+        "ops_disabled": [
+          "scallop"
+        ],
+        "params": {
+          "round": {
+            "min": 0.0,
+            "max": 0.1,
+            "default": 0.01
+          },
+          "rib_count": {
+            "min": 4,
+            "max": 8,
+            "default": 6
+          },
+          "rib_amp": {
+            "min": 0.05,
+            "max": 0.2,
+            "default": 0.1
+          }
+        }
+      },
+      "cylinder_spar": {
+        "ops_disabled": [
+          "scallop"
+        ],
+        "params": {
+          "rib_count": {
+            "min": 3,
+            "max": 10,
+            "default": 6
+          },
+          "rib_amp": {
+            "min": 0.05,
+            "max": 0.2,
+            "default": 0.12
+          }
+        }
+      },
+      "torus_ring": {
+        "params": {
+          "rib_count": {
+            "min": 4,
+            "max": 16,
+            "default": 8
+          },
+          "rib_amp": {
+            "min": 0.05,
+            "max": 0.2,
+            "default": 0.1
+          }
+        }
+      }
+    }
+  },
+  "halcyon": {
+    "label": "Halcyon Aerospace",
+    "description": "Halcyon builds for owners who will never personally weld anything: passenger liners, executive shuttles, and the occasional flagship someone wants photographed. Their signature is the absence of visible tooling - no ribs, no scallops, just long unbroken curves and a generous, confident round on every edge that can take one. It costs what it looks like it costs.",
+    "cost_multiplier": 1.35,
+    "families": {
+      "sphere_pod": {
+        "ops_disabled": [
+          "ribs",
+          "scallop"
+        ],
+        "params": {
+          "taper": {
+            "min": 0.0,
+            "max": 0.35,
+            "default": 0.05
+          }
+        }
+      },
+      "cylinder_spar": {
+        "ops_disabled": [
+          "ribs",
+          "scallop"
+        ],
+        "params": {
+          "round": {
+            "min": 0.05,
+            "max": 0.2,
+            "default": 0.1
+          },
+          "end_round": {
+            "min": 0.4,
+            "max": 1.0,
+            "default": 0.7
+          }
+        }
+      }
+    }
+  },
+  "thresher": {
+    "label": "Thresher Salvage & Fab",
+    "description": "Thresher does not build from stock plate so much as from whatever plate turned up this week, and it shows: sharp, barely-rounded corners because the cutting jig is older than most of the crew, and a scattering of scallop-dimpled patch panels wherever a hull section had to be pieced back together. No twist tooling on the lot - everything Thresher makes is cut straight or not at all - but nothing on their price list will bankrupt a small operator either.",
+    "cost_multiplier": 0.75,
+    "families": {
+      "box_hull": {
+        "ops_disabled": [
+          "twist"
+        ],
+        "params": {
+          "round": {
+            "min": 0.0,
+            "max": 0.03,
+            "default": 0.0
+          },
+          "scallop_amp": {
+            "min": 0.05,
+            "max": 0.15,
+            "default": 0.08
+          },
+          "scallop_freq": {
+            "min": 2.0,
+            "max": 8.0,
+            "default": 4.0
+          }
+        }
+      },
+      "cylinder_spar": {
+        "ops_disabled": [
+          "twist"
+        ],
+        "params": {
+          "round": {
+            "min": 0.0,
+            "max": 0.05,
+            "default": 0.0
+          },
+          "scallop_amp": {
+            "min": 0.03,
+            "max": 0.15,
+            "default": 0.06
+          },
+          "end_round": {
+            "min": 0.0,
+            "max": 0.35,
+            "default": 0.0
+          }
+        }
+      }
+    }
+  },
+  "obelisk": {
+    "label": "Obelisk Pressure Systems",
+    "description": "Obelisk builds the vessels that are not allowed to fail quietly: tanks, pressure pods, and ring habitats certified for crewed atmosphere. Every hull leaves the yard close to its nominal geometry - taper is kept shallow so wall thickness stays predictable under load - and what ribbing there is exists as inspection-stamped baffle rings, never decoration. Their tooling has no twist axis on principle: a pressure boundary that spirals is a pressure boundary somebody has to explain later.",
+    "cost_multiplier": 1.2,
+    "families": {
+      "sphere_pod": {
+        "ops_disabled": [
+          "twist"
+        ],
+        "params": {
+          "taper": {
+            "min": 0.0,
+            "max": 0.1,
+            "default": 0.0
+          },
+          "rib_count": {
+            "min": 2,
+            "max": 8,
+            "default": 4
+          },
+          "rib_amp": {
+            "min": 0.0,
+            "max": 0.08,
+            "default": 0.03
+          }
+        }
+      },
+      "torus_ring": {
+        "ops_disabled": [
+          "twist"
+        ],
+        "params": {
+          "taper": {
+            "min": 0.0,
+            "max": 0.08,
+            "default": 0.0
+          },
+          "rib_count": {
+            "min": 4,
+            "max": 12,
+            "default": 6
+          },
+          "rib_amp": {
+            "min": 0.0,
+            "max": 0.1,
+            "default": 0.04
+          }
+        }
+      },
+      "cylinder_spar": {
+        "ops_disabled": [
+          "twist"
+        ],
+        "params": {
+          "end_radius": {
+            "min": 0.85,
+            "max": 1.0,
+            "default": 1.0
+          },
+          "end_round": {
+            "min": 0.6,
+            "max": 1.0,
+            "default": 1.0
+          },
+          "taper": {
+            "min": 0.0,
+            "max": 0.15,
+            "default": 0.0
+          }
+        }
+      }
+    }
+  },
+  "meridian": {
+    "label": "Meridian Composite",
+    "description": "Meridian wound its first hull on a filament-winding rig repurposed from a planetside bridge-cable plant, and the lineage still shows: deep, confident twist and taper on almost everything they touch, and no interest at all in discrete ribs, which their process cannot produce cleanly anyway. The result reads as grown rather than assembled - spiralled spars, coiled ring habitats, nose cones with a barber-pole taper - and it commands a composite-yard price to match.",
+    "cost_multiplier": 1.25,
+    "families": {
+      "sphere_pod": {
+        "params": {
+          "twist_deg": {
+            "min": -45.0,
+            "max": 45.0,
+            "default": 10.0
+          },
+          "taper": {
+            "min": 0.0,
+            "max": 0.4,
+            "default": 0.1
+          }
+        }
+      },
+      "cylinder_spar": {
+        "ops_disabled": [
+          "ribs"
+        ],
+        "params": {
+          "twist_deg": {
+            "min": -60.0,
+            "max": 60.0,
+            "default": 15.0
+          },
+          "taper": {
+            "min": 0.0,
+            "max": 0.6,
+            "default": 0.1
+          },
+          "end_radius": {
+            "min": 0.0,
+            "max": 1.0,
+            "default": 0.45
+          },
+          "end_round": {
+            "min": 0.0,
+            "max": 0.5,
+            "default": 0.1
+          }
+        }
+      },
+      "torus_ring": {
+        "params": {
+          "twist_deg": {
+            "min": -90.0,
+            "max": 90.0,
+            "default": 20.0
+          },
+          "taper": {
+            "min": 0.0,
+            "max": 0.25,
+            "default": 0.05
+          }
+        }
+      }
+    }
+  }
+}

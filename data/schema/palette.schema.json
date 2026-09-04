@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "mhz://ship-builder/schema/palette.schema.json",
+  "title": "MHZ Ship Builder - palette pack",
+  "description": "Schema for data/palette.json (SPEC section 11). A fixed 16-entry base LUT plus one full 16-entry alert palette per budget, and a role -> index map. Index position IS the LUT index the palette-quantizer shader maps to, so array order is load-bearing.",
+  "type": "object",
+  "required": ["base", "alerts", "roles", "ramps"],
+  "additionalProperties": false,
+  "properties": {
+    "_description": {
+      "type": "string"
+    },
+    "base": {
+      "$ref": "#/$defs/color16"
+    },
+    "alerts": {
+      "type": "object",
+      "required": ["bbox", "volume", "weight", "cost"],
+      "additionalProperties": false,
+      "properties": {
+        "bbox": { "$ref": "#/$defs/color16" },
+        "volume": { "$ref": "#/$defs/color16" },
+        "weight": { "$ref": "#/$defs/color16" },
+        "cost": { "$ref": "#/$defs/color16" }
+      }
+    },
+    "roles": {
+      "type": "object",
+      "required": [
+        "background", "grid", "text", "text_dim", "line",
+        "accent", "selection", "warning", "ghost"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "background": { "$ref": "#/$defs/lut_index" },
+        "grid": { "$ref": "#/$defs/lut_index" },
+        "text": { "$ref": "#/$defs/lut_index" },
+        "text_dim": { "$ref": "#/$defs/lut_index" },
+        "line": { "$ref": "#/$defs/lut_index" },
+        "accent": { "$ref": "#/$defs/lut_index" },
+        "selection": { "$ref": "#/$defs/lut_index" },
+        "warning": { "$ref": "#/$defs/lut_index" },
+        "ghost": { "$ref": "#/$defs/lut_index" }
+      }
+    },
+    "ramps": {
+      "description": "Named multi-step shading ramps, each an ORDERED list of LUT indices from darkest band to brightest. A 3D part picks one entry per shading band, so every shaded face is already an exact palette colour and the quantizer cannot move it. Ramps must be listed dark -> light; nothing enforces that but the shading reads inverted if it is broken.",
+      "type": "object",
+      "required": ["part", "part_selected", "ghost"],
+      "additionalProperties": false,
+      "properties": {
+        "part": { "$ref": "#/$defs/ramp" },
+        "part_selected": { "$ref": "#/$defs/ramp" },
+        "ghost": { "$ref": "#/$defs/ramp" }
+      }
+    }
+  },
+  "$defs": {
+    "hex_color": {
+      "type": "string",
+      "pattern": "^#[0-9a-f]{6}$"
+    },
+    "color16": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/hex_color" },
+      "minItems": 16,
+      "maxItems": 16
+    },
+    "ramp": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/lut_index" },
+      "minItems": 2,
+      "maxItems": 8
+    },
+    "lut_index": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 15
+    }
+  }
+}

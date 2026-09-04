@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "mhz://ship-builder/schema/paint_styles.schema.json",
+  "title": "MHZ Ship Builder - paint styles pack",
+  "description": "Schema for data/paint_styles.json (API_CONTRACT_SPORE.md sections 10 and 11). Three sibling blocks, one per paint method the vehicle/ship editor offers: 'complete' styles carry one ordered colour per paint region plus a single texture and leave no region untouched; 'partial' styles name only the regions they care about and leave the rest as the player left them; 'textures' is the shared finish vocabulary both style blocks reference by id, and the only place a texture id is defined. Every colour is an INDEX into the 16-entry active palette from data/palette.json, never a hex value, so a budget alert that swaps the whole LUT recolours every painted ship with it. THREE RULES THIS SCHEMA CANNOT EXPRESS, all enforced elsewhere: (1) a 'texture' id must resolve to a key in the 'textures' block - a standalone JSON Schema cannot cross-reference a sibling object; (2) a region id named by a partial style must exist in the target family's 'paint_regions' (data/shapes/families.json) - ShipPaint.plan_partial_style skips any that does not, rather than inventing the region; (3) a complete style's 'colors' array should carry one entry per paint region, which is family-dependent - ShipPaint repeats the last colour when the array is short and drops the extras when it is long. Enforced by tools/ship_validate_data.gd.",
+  "type": "object",
+  "required": ["_description", "complete", "partial", "textures"],
+  "additionalProperties": false,
+  "properties": {
+    "_description": {
+      "type": "string",
+      "minLength": 20,
+      "description": "Must explain what the three blocks are for, that colours are palette INDICES rather than hex values, and what the reserved palette slots mean."
+    },
+    "complete": {
+      "type": "object",
+      "minProperties": 1,
+      "patternProperties": {
+        "^[a-z][a-z0-9_]*$": { "$ref": "#/$defs/complete_style" }
+      },
+      "additionalProperties": false,
+      "description": "Whole-part liveries, keyed by snake_case style id. Applying one leaves NO paint region untouched."
+    },
+    "partial": {
+      "type": "object",
+      "minProperties": 1,
+      "patternProperties": {
+        "^[a-z][a-z0-9_]*$": { "$ref": "#/$defs/partial_style" }
+      },
+      "additionalProperties": false,
+      "description": "Trim and accent packs, keyed by snake_case style id. Applying one touches only the regions it names, so it layers over a complete style instead of replacing it."
+    },
+    "textures": {
+      "type": "object",
+      "minProperties": 1,
+      "patternProperties": {
+        "^[a-z][a-z0-9_]*$": { "$ref": "#/$defs/texture" }
+      },
+      "additionalProperties": false,
+      "description": "The shared finish vocabulary, keyed by snake_case texture id. This block is the ONLY place a texture id is defined; both style blocks and ShipPart.paint reference these keys."
+    }
+  },
+  "$defs": {
+    "lut_index": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 15,
+      "description": "An index into the 16-entry active palette (data/palette.json). Never a hex colour - the indirection is what lets ShipTheme swap the whole LUT for a budget alert and recolour every painted ship with it. AUTHOR THESE AS BARE INTEGERS: JSON Schema 2020-12 accepts 4.0 as an integer and no keyword can refuse it, but Godot's parser reads 4.0 as a float and ShipCanonical emits \"4.000000\" for a float against \"4\" for an int, so a hand-edited 4.0 would hash differently from the same ship painted in the editor. ShipPaint rounds such a value back to an int on read; the schema cannot stop it being written."
+    },
+    "label": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Short player-facing name, shown in the paint panel's style and texture lists."
+    },
+    "description": {
+      "type": "string",
+      "minLength": 20,
+      "description": "Real catalogue copy written for a human reader (AGENTS.md section 10b: data/ is documentation). Placeholder strings like 'TODO' fail minLength and are additionally rejected by tools/ship_validate_data.gd's banned-phrase check."
+    },
+    "texture_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "description": "A key in the 'textures' block. Required, so a complete style always states its finish."
+    },
+    "texture_ref": {
+      "type": "string",
+      "pattern": "^$|^[a-z][a-z0-9_]*$",
+      "description": "A key in the 'textures' block, or the empty string. Inside a PARTIAL style the empty string means 'no texture change' and the part keeps whatever finish it already carries - see teal_wash, which states that in its own prose - so a two-region tint cannot silently strip the finish it was layered over."
+    },
+    "region_paint": {
+      "type": "object",
+      "required": ["color", "texture"],
+      "additionalProperties": false,
+      "properties": {
+        "color": { "$ref": "#/$defs/lut_index" },
+        "texture": { "$ref": "#/$defs/texture_ref" }
+      },
+      "description": "One region's finish, in the same value shape ShipPart.paint stores per region: {\"color\": int, \"texture\": String}. Both keys are required so the shape API_CONTRACT_SPORE.md section 2 pins can never be half-written."
+    },
+    "complete_style": {
+      "type": "object",
+      "required": ["label", "description", "colors", "texture"],
+      "additionalProperties": false,
+      "properties": {
+        "label": { "$ref": "#/$defs/label" },
+        "description": { "$ref": "#/$defs/description" },
+        "colors": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/lut_index" },
+          "description": "One palette index per paint region, IN THE FAMILY'S OWN paint_regions ORDER: colors[0] goes to the first region (conventionally 'base', the keel end), colors[1] to the second, and so on. Order is load-bearing and duplicates are legal - a livery that repeats a colour across two regions is a real design, so uniqueItems is deliberately NOT set."
+        },
+        "texture": { "$ref": "#/$defs/texture_id" }
+      }
+    },
+    "partial_style": {
+      "type": "object",
+      "required": ["label", "description", "regions"],
+      "additionalProperties": false,
+      "properties": {
+        "label": { "$ref": "#/$defs/label" },
+        "description": { "$ref": "#/$defs/description" },
+        "regions": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": { "pattern": "^[a-z][a-z0-9_]*$" },
+          "additionalProperties": { "$ref": "#/$defs/region_paint" },
+          "description": "The regions this style touches, keyed by region id from a family's 'paint_regions' (data/shapes/families.json). A region the target family does not declare is skipped at apply time rather than invented; every region NOT named here is left exactly as the player left it, which is what makes a partial style layerable."
+        }
+      }
+    },
+    "texture": {
+      "type": "object",
+      "required": ["label", "description"],
+      "additionalProperties": false,
+      "properties": {
+        "label": { "$ref": "#/$defs/label" },
+        "description": { "$ref": "#/$defs/description" }
+      },
+      "description": "One finish in the shared vocabulary. Phase 1 stores the id on the part and shows the label; the surface treatment itself is not rendered yet (ShipSceneBuilder still colours parts by palette role), so an entry carries no numeric parameters."
+    }
+  }
+}

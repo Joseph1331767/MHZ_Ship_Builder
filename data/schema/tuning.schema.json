@@ -1,0 +1,133 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "mhz://ship-builder/schema/tuning.schema.json",
+  "title": "MHZ Ship Builder - tuning pack",
+  "description": "Schema for data/tuning.json. Every field of ShipConfig (API_CONTRACT section 3 / SPEC section 8), each carrying a default 'value', a 'description', and a min/max where a dev slider makes sense. Enforced by tools/ship_validate_data.gd.",
+  "type": "object",
+  "required": [
+    "max_bbox_m",
+    "max_internal_volume_m3",
+    "max_weight_kg",
+    "max_cost",
+    "areal_density_kg_m2",
+    "hull_thickness_m",
+    "bake_cell_m",
+    "metrics_cell_m",
+    "snap_deg",
+    "snap_m",
+    "snap_scale",
+    "budget_priority",
+    "gradient_eps",
+    "trace_epsilon",
+    "trace_max_steps",
+    "part_scale_min",
+    "part_scale_max",
+    "max_complexity",
+    "min_parts_to_save",
+    "symmetry_plane_epsilon",
+    "snap_tolerance_m",
+    "root_span_m",
+    "room_span_m",
+    "tunnel_bore_m",
+    "tunnel_length_m",
+    "attach_embed_m",
+    "attach_embed_max_fraction",
+    "doorway_width_m",
+    "doorway_height_m",
+    "explode_gap_m",
+    "explode_cells_per_axis"
+  ],
+  "properties": {
+    "_description": { "type": "string" },
+    "max_bbox_m": { "$ref": "#/$defs/lever_vector3" },
+    "max_internal_volume_m3": { "$ref": "#/$defs/lever_number" },
+    "max_weight_kg": { "$ref": "#/$defs/lever_number" },
+    "max_cost": { "$ref": "#/$defs/lever_number" },
+    "areal_density_kg_m2": { "$ref": "#/$defs/lever_number" },
+    "hull_thickness_m": { "$ref": "#/$defs/lever_number" },
+    "bake_cell_m": { "$ref": "#/$defs/lever_number" },
+    "metrics_cell_m": { "$ref": "#/$defs/lever_number" },
+    "snap_deg": { "$ref": "#/$defs/lever_number" },
+    "snap_m": { "$ref": "#/$defs/lever_number" },
+    "snap_scale": { "$ref": "#/$defs/lever_number" },
+    "budget_priority": { "$ref": "#/$defs/lever_budget_priority" },
+    "gradient_eps": { "$ref": "#/$defs/lever_number" },
+    "trace_epsilon": { "$ref": "#/$defs/lever_number" },
+    "trace_max_steps": { "$ref": "#/$defs/lever_int" },
+    "part_scale_min": { "$ref": "#/$defs/lever_number" },
+    "part_scale_max": { "$ref": "#/$defs/lever_number" },
+    "max_complexity": { "$ref": "#/$defs/lever_number" },
+    "min_parts_to_save": { "$ref": "#/$defs/lever_int" },
+    "symmetry_plane_epsilon": { "$ref": "#/$defs/lever_number" },
+    "snap_tolerance_m": { "$ref": "#/$defs/lever_number" },
+    "root_span_m": { "$ref": "#/$defs/lever_number" },
+    "room_span_m": { "$ref": "#/$defs/lever_number" },
+    "tunnel_bore_m": { "$ref": "#/$defs/lever_number" },
+    "tunnel_length_m": { "$ref": "#/$defs/lever_number" },
+    "attach_embed_m": { "$ref": "#/$defs/lever_number" },
+    "attach_embed_max_fraction": { "$ref": "#/$defs/lever_number" },
+    "doorway_width_m": { "$ref": "#/$defs/lever_number" },
+    "doorway_height_m": { "$ref": "#/$defs/lever_number" },
+    "explode_gap_m": { "$ref": "#/$defs/lever_number" },
+    "explode_cells_per_axis": { "$ref": "#/$defs/lever_int" }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "lever_number": {
+      "type": "object",
+      "required": ["value", "description"],
+      "additionalProperties": false,
+      "properties": {
+        "value": { "type": "number" },
+        "description": { "type": "string", "minLength": 10 },
+        "min": { "type": "number" },
+        "max": { "type": "number" }
+      }
+    },
+    "lever_int": {
+      "type": "object",
+      "required": ["value", "description"],
+      "additionalProperties": false,
+      "properties": {
+        "value": { "type": "integer" },
+        "description": { "type": "string", "minLength": 10 },
+        "min": { "type": "integer" },
+        "max": { "type": "integer" }
+      }
+    },
+    "lever_vector3": {
+      "type": "object",
+      "required": ["value", "description"],
+      "additionalProperties": false,
+      "properties": {
+        "value": {
+          "type": "array",
+          "items": { "type": "number" },
+          "minItems": 3,
+          "maxItems": 3
+        },
+        "description": { "type": "string", "minLength": 10 },
+        "min": { "type": "number" },
+        "max": { "type": "number" }
+      }
+    },
+    "lever_budget_priority": {
+      "type": "object",
+      "required": ["value", "description"],
+      "additionalProperties": false,
+      "properties": {
+        "value": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["bbox", "volume", "weight", "cost"]
+          },
+          "minItems": 4,
+          "maxItems": 4,
+          "uniqueItems": true
+        },
+        "description": { "type": "string", "minLength": 10 }
+      }
+    }
+  }
+}

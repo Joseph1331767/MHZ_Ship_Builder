@@ -1,0 +1,209 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "mhz://ship-builder/schema/families.schema.json",
+  "title": "MHZ Ship Builder - shape families pack",
+  "description": "Schema for data/shapes/families.json. Four base-primitive shape families (six before ADR 0005 folded cone and capsule into the cylinder's own params) with op lists and param ranges, keyed by snake_case family id, plus a required top-level '_complexity_note' explaining the 'complexity' scale (API_CONTRACT_SPORE.md section 11). Enforced by tools/ship_validate_data.gd.",
+  "type": "object",
+  "required": ["_complexity_note"],
+  "minProperties": 2,
+  "properties": {
+    "_complexity_note": {
+      "type": "string",
+      "minLength": 20,
+      "description": "Must explain how per-family 'complexity' values were scaled against Spore's real per-part cost reference points (spine segment 1, limb segment 1.5, most detail parts 1, most expensive part in the game 11) and against ShipConfig.max_complexity (data/tuning.json)."
+    }
+  },
+  "patternProperties": {
+    "^[a-z][a-z0-9_]*$": {
+      "$ref": "#/$defs/family"
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "op_name": {
+      "type": "string",
+      "enum": [
+        "round",
+        "ends",
+        "taper",
+        "twist",
+        "skew",
+        "ribs",
+        "scallop"
+      ]
+    },
+    "param_key": {
+      "type": "string",
+      "enum": [
+        "round",
+        "end_radius",
+        "end_round",
+        "taper",
+        "twist_deg",
+        "skew_x",
+        "skew_z",
+        "rib_count",
+        "rib_amp",
+        "scallop_amp",
+        "scallop_freq"
+      ]
+    },
+    "snap_kind": {
+      "type": "string",
+      "enum": [
+        "face",
+        "pole",
+        "rim",
+        "center"
+      ],
+      "description": "Must match SnapTargets kind values (API_CONTRACT_SPORE.md section 1)."
+    },
+    "param_range": {
+      "type": "object",
+      "required": [
+        "min",
+        "max",
+        "default",
+        "step"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "min": {
+          "type": "number"
+        },
+        "max": {
+          "type": "number"
+        },
+        "default": {
+          "type": "number"
+        },
+        "step": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      }
+    },
+    "family": {
+      "type": "object",
+      "required": [
+        "label",
+        "description",
+        "base",
+        "origin_inside",
+        "base_cost",
+        "complexity",
+        "can_be_root",
+        "max_children",
+        "scale_min",
+        "scale_max",
+        "paint_regions",
+        "snap_kinds",
+        "ops",
+        "params",
+        "base_size"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string",
+          "minLength": 20,
+          "description": "Real catalogue copy for a human reader. Placeholder strings like 'TODO' fail minLength and are rejected."
+        },
+        "base": {
+          "type": "string",
+          "enum": [
+            "BOX",
+            "SPHERE",
+            "CYLINDER",
+            "CONE",
+            "CAPSULE",
+            "TORUS"
+          ]
+        },
+        "base_size": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 3,
+          "items": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "description": "The family's UNSCALED reference dimensions, before the part's per-axis scale is applied. Layout depends on 'base': BOX -> [hx,hy,hz] half-extents; SPHERE -> [radius]; CYLINDER -> [radius_at_-Y, half_height] (the +Y end radius and the end rounding are the 'end_radius' and 'end_round' PARAMS, as ratios - ADR 0005); CONE/CAPSULE -> [radius, half_height], both RETIRED(ADR 0005) as families and reachable only by an old document; TORUS -> [major_radius, minor_radius]. A 1- or 2-element array fills the remaining components from the first. For TORUS the major radius MUST exceed the minor radius, or the hole closes and the shape's origin (which sits in that hole, origin_inside=false) lands on the surface, leaving the attach ray-tracer nothing to trace from."
+        },
+        "origin_inside": {
+          "type": "boolean",
+          "description": "False only for TORUS: a torus's local origin sits in the hole, outside the solid."
+        },
+        "base_cost": {
+          "type": "number",
+          "minimum": 0
+        },
+        "complexity": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Per-part complexity cost against ShipConfig.max_complexity (data/tuning.json), doubled for a symmetric part by ShipComplexity.cost_of() (API_CONTRACT_SPORE.md section 5). See the pack's top-level '_complexity_note' for how this scale was derived."
+        },
+        "can_be_root": {
+          "type": "boolean",
+          "description": "True when this family may found a ship on its own - Spore's body/chassis distinction (NOT CannotBeParentless). False for an accessory family that wants a hull to attach to."
+        },
+        "max_children": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8,
+          "description": "Per-family cap on direct children, never above Spore's hard engine limit of 8 per rigblock."
+        },
+        "scale_min": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Lower bound on this family's authored per-part scale factor (Spore's per-part-type mModelMinScale). Should sit within [tuning.part_scale_min, tuning.part_scale_max] and below scale_max."
+        },
+        "scale_max": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Upper bound on this family's authored per-part scale factor (Spore's per-part-type mModelMaxScale). Should sit within [tuning.part_scale_min, tuning.part_scale_max] and above scale_min."
+        },
+        "paint_regions": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*$"
+          },
+          "description": "Region ids painted independently in PAINT mode (API_CONTRACT_SPORE.md section 10); ShipPart.paint is keyed by these."
+        },
+        "snap_kinds": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/snap_kind"
+          },
+          "description": "Which SnapTargets kinds this family's base primitive actually generates (API_CONTRACT_SPORE.md section 1)."
+        },
+        "ops": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/op_name"
+          },
+          "uniqueItems": true,
+          "minItems": 0
+        },
+        "params": {
+          "type": "object",
+          "propertyNames": {
+            "$ref": "#/$defs/param_key"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/param_range"
+          }
+        }
+      }
+    }
+  }
+}

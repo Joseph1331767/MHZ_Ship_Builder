@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "mhz://ship-builder/schema/manufacturers.schema.json",
+  "title": "MHZ Ship Builder - manufacturers pack",
+  "description": "Schema for data/shapes/manufacturers.json. Legible style presets keyed by snake_case manufacturer id; each narrows one or more families from data/shapes/families.json. Enforced by tools/ship_validate_data.gd, which additionally checks that every 'families' key resolves to a real family id and that every narrowed param key and disabled op exists on that family - checks a standalone JSON Schema cannot express.",
+  "type": "object",
+  "minProperties": 1,
+  "propertyNames": {
+    "pattern": "^[a-z][a-z0-9_]*$"
+  },
+  "additionalProperties": {
+    "$ref": "#/$defs/manufacturer"
+  },
+  "$defs": {
+    "op_name": {
+      "type": "string",
+      "enum": ["round", "ends", "taper", "twist", "skew", "ribs", "scallop"]
+    },
+    "param_key": {
+      "type": "string",
+      "enum": ["round", "end_radius", "end_round", "taper", "twist_deg", "skew_x", "skew_z", "rib_count", "rib_amp", "scallop_amp", "scallop_freq"]
+    },
+    "narrow_range": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": false,
+      "description": "A subset of a family's param_range for this param. Any of min/max/default may be given; a validator cross-checks against the family's own range and must reject a wider bound.",
+      "properties": {
+        "min": { "type": "number" },
+        "max": { "type": "number" },
+        "default": { "type": "number" }
+      }
+    },
+    "family_narrow": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": false,
+      "properties": {
+        "ops_disabled": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/op_name" },
+          "uniqueItems": true,
+          "minItems": 1
+        },
+        "params": {
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/param_key" },
+          "additionalProperties": { "$ref": "#/$defs/narrow_range" }
+        }
+      }
+    },
+    "manufacturer": {
+      "type": "object",
+      "required": ["label", "description", "cost_multiplier", "families"],
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": {
+          "type": "string",
+          "minLength": 20,
+          "description": "Who this company is, what their hulls look like, founding era, who buys from them. Not disguised randomness - a legible house style."
+        },
+        "cost_multiplier": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "families": {
+          "type": "object",
+          "propertyNames": { "pattern": "^[a-z][a-z0-9_]*$" },
+          "additionalProperties": { "$ref": "#/$defs/family_narrow" },
+          "description": "family_id -> narrowing. A missing family entry means 'family defaults, unrestricted'. Every key here must resolve to a real families.json id (checked by the validator tool, not by this schema)."
+        }
+      }
+    }
+  }
+}

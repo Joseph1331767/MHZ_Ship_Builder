@@ -1,0 +1,147 @@
+{
+  "_description": "The finishing catalogue for PAINT mode (API_CONTRACT_SPORE section 10 and 11). Three blocks, three ways to finish a hull. 'complete' styles carry one ordered colour per paint region plus a single texture and leave NO region untouched - pick one and the part is finished. 'partial' styles name only the regions they care about and leave every other region exactly as the player left it, so a trim pack layers over a complete style instead of replacing it. 'textures' is the shared finish vocabulary both blocks reference by id, and the only place a texture id is defined. Every colour is an INDEX into the active 16-entry palette from data/palette.json - never a hex value - so a budget alert that swaps the whole LUT recolours every painted ship with it. Index 0 is deep ink, 13 is pale mint, 14 is amber and 15 is signal red.",
+  "complete": {
+    "foundry_default": {
+      "label": "Foundry Default",
+      "description": "How a hull leaves the yard before anyone has spent money on it: a mid-teal structural coat, a lighter working band at the waist, and pale mint on the fittings so the crew can find the handholds. Nothing here is decorative. Specified as the reference finish on every quote we issue, and the one most owners quietly keep.",
+      "colors": [4, 6, 10],
+      "texture": "bare_alloy"
+    },
+    "deep_survey": {
+      "label": "Deep Survey Livery",
+      "description": "Near-black at the keel rising to a cold instrument green at the top surfaces, the standard finish for long-baseline survey craft that need their own hull out of the optics. Low reflectance across the whole ramp, no bright trim, nothing that will bloom into a long exposure. Ugly on a dais, invisible where it works.",
+      "colors": [1, 4, 9],
+      "texture": "matte_enamel"
+    },
+    "harbour_pilot": {
+      "label": "Harbour Pilot",
+      "description": "The high-visibility scheme worn by station pilots and tugs: dark teal below the rubbing strake, bright cyan-green above it, and an amber band on every detail fitting. Built to be read at a glance from a control tower, in a docking bay, through a dirty port. Wearing it off duty is considered poor manners.",
+      "colors": [3, 7, 14],
+      "texture": "gloss_lacquer"
+    },
+    "ore_line_workhorse": {
+      "label": "Ore Line Workhorse",
+      "description": "A freight finish that expects to be hit. Dark, forgiving body colours that hide scarring, a mid-teal working coat over the flanks, and amber on the fittings so a loader crew can still see what not to strike. The grit texture is the point: it takes a gouge without shedding the coat around it.",
+      "colors": [2, 5, 14],
+      "texture": "ablative_grit"
+    },
+    "mint_promenade": {
+      "label": "Mint Promenade",
+      "description": "The passenger finish - three pale steps up the top of the ramp, high gloss, no contrast anywhere it could look industrial. Reads as one continuous cream-green surface from any distance a fare-paying passenger will ever see it from. Requires an interior worth the implication.",
+      "colors": [8, 11, 13],
+      "texture": "gloss_lacquer"
+    },
+    "night_courier": {
+      "label": "Night Courier",
+      "description": "Deep ink at the base, barely lifted through the mid-hull, and a single quiet teal on the detail work. A courier scheme for owners who would rather not be described later, and a favourite of anyone who has to hold station near a bright object without becoming part of the picture.",
+      "colors": [0, 2, 6],
+      "texture": "matte_enamel"
+    },
+    "rescue_beacon": {
+      "label": "Rescue Beacon",
+      "description": "Signal red body, amber working band, pale mint fittings, and a chevron texture across the whole hull. The loudest finish we sell and the only one certified for search-and-recovery hulls in shipping lanes. It is not subtle and it is not supposed to be.",
+      "colors": [15, 14, 13],
+      "texture": "hazard_chevron"
+    },
+    "parade_chrome": {
+      "label": "Parade Chrome",
+      "description": "A ceremonial finish: brushed panels stepping from mid-teal through pale green to near-white mint, so a hull under directional light reads as three bands of polished metal rather than three colours. Shows every fingerprint and every weld. Intended for hulls that are photographed more often than they are flown.",
+      "colors": [6, 12, 13],
+      "texture": "brushed_panel"
+    }
+  },
+  "partial": {
+    "amber_trim": {
+      "label": "Amber Trim",
+      "description": "A single pass of high-gloss amber over the detail region only, leaving the body and coat untouched. The cheapest way to make a plain hull look finished, and the accent most owners add first. Layers cleanly over any complete style because it never touches a structural region.",
+      "regions": {
+        "detail": { "color": 14, "texture": "gloss_lacquer" }
+      }
+    },
+    "hazard_collar": {
+      "label": "Hazard Collar",
+      "description": "Signal red with a chevron texture across the coat region, the band that most often sits at a hull's widest circumference. Marks a section as dangerous to approach under power without repainting anything else on the ship. Required dressing on drive housings in most inhabited systems.",
+      "regions": {
+        "coat": { "color": 15, "texture": "hazard_chevron" }
+      }
+    },
+    "pale_flank": {
+      "label": "Pale Flank",
+      "description": "Lifts the middle band to a pale green matte and leaves the rest of the hull alone, which lightens a dark ship without losing the dark keel that made it look grounded. The usual fix when a complete style has come out uniformly too heavy.",
+      "regions": {
+        "coat": { "color": 12, "texture": "matte_enamel" }
+      }
+    },
+    "ink_underside": {
+      "label": "Ink Underside",
+      "description": "Deep ink and abrasion grit on the base region only: the surface that meets the cradle, the dock, and everything a landing kicks up. Applied as maintenance rather than decoration, and reapplied roughly every second overhaul on a working hull.",
+      "regions": {
+        "base": { "color": 0, "texture": "ablative_grit" }
+      }
+    },
+    "service_stencils": {
+      "label": "Service Stencils",
+      "description": "Pale mint stencil sheet over the detail region: hatch numbers, lift points, purge arrows and mass placards. Purely informational, and the one accent a yard inspector actually looks for. Carries no colour opinion of its own, so it sits over any livery.",
+      "regions": {
+        "detail": { "color": 13, "texture": "stencil_sheet" }
+      }
+    },
+    "teal_wash": {
+      "label": "Teal Wash",
+      "description": "A two-region tint: mid-teal on the body with no texture change, and a slightly brighter anodised coat above it. Unifies a hull assembled from parts finished by different suppliers, which is most hulls, without committing to a full repaint.",
+      "regions": {
+        "base": { "color": 5, "texture": "" },
+        "coat": { "color": 7, "texture": "anodised_wash" }
+      }
+    },
+    "weathered_hem": {
+      "label": "Weathered Hem",
+      "description": "Darkens the base region to a low teal and swaps its finish for abrasion grit, so a new hull reads as one that has been somewhere. Sold honestly as cosmetic weathering; it does provide genuine scuff resistance where it is applied, which is why nobody argues about it.",
+      "regions": {
+        "base": { "color": 2, "texture": "ablative_grit" }
+      }
+    },
+    "pilot_flash": {
+      "label": "Pilot Flash",
+      "description": "Amber across the coat and a gloss signal-red detail line above it: the two-colour recognition mark carried by station pilots and pursuit craft. Deliberately leaves the base region alone so the ship still reads as its owner's from below.",
+      "regions": {
+        "coat": { "color": 14, "texture": "" },
+        "detail": { "color": 15, "texture": "gloss_lacquer" }
+      }
+    }
+  },
+  "textures": {
+    "bare_alloy": {
+      "label": "Bare Rolled Alloy",
+      "description": "No finish at all - the mill surface as rolled, sealed against oxidation and left alone. Flat, slightly directional, and honest about every panel join underneath it. The default on a hull nobody has decided about yet."
+    },
+    "brushed_panel": {
+      "label": "Brushed Panel",
+      "description": "A directional mechanical grain applied panel by panel, so adjacent plates catch light at different angles and the hull reads as assembled rather than moulded. Handsome under a hard key light and merciless about surface flaws."
+    },
+    "matte_enamel": {
+      "label": "Matte Enamel",
+      "description": "A dead-flat baked enamel with effectively no specular return. Chosen wherever a hull must not glint - survey work, night operations, anything holding station near an instrument that is trying to see past it."
+    },
+    "gloss_lacquer": {
+      "label": "Gloss Lacquer",
+      "description": "Deep clear lacquer over a levelled colour coat, polished to a full mirror. The finish that makes a colour look expensive, and the one that shows every scratch it has ever collected. Standard on trim, indulgent on a whole hull."
+    },
+    "hazard_chevron": {
+      "label": "Hazard Chevron",
+      "description": "Diagonal warning chevrons repeated at a fixed pitch, in the colour applied over the region's base tone. Legible at distance and at an angle, which is the entire specification. Reserved by convention for surfaces that will hurt someone."
+    },
+    "ablative_grit": {
+      "label": "Ablative Grit",
+      "description": "A coarse aggregate coat that gives up its own surface rather than the metal under it. Takes a gouge without shedding the coating around the damage, so a scarred hull stays sealed until the next overhaul. Rough to the hand and unmistakable on camera."
+    },
+    "anodised_wash": {
+      "label": "Anodised Wash",
+      "description": "A translucent anodised tint that colours the surface without hiding the metal grain beneath it. Shifts noticeably with viewing angle, which is why it is used to unify mismatched parts rather than to state a single flat colour."
+    },
+    "stencil_sheet": {
+      "label": "Stencil Sheet",
+      "description": "The standard yard stencil set - hatch numbering, lift points, purge arrows, mass and pressure placards - applied over whatever coat is already there. Informational rather than decorative, and the first thing an inspector looks for."
+    }
+  }
+}

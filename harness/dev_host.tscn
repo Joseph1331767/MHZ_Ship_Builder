@@ -1,0 +1,21 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="PackedScene" path="res://harness/builder/ship_builder.tscn" id="1_builder"]
+[ext_resource type="Script" path="res://harness/dev_host.gd" id="2_host"]
+
+[node name="DevHost" type="SubViewportContainer"]
+script = ExtResource("2_host")
+texture_filter = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+stretch = true
+
+[node name="AppViewport" type="SubViewport" parent="."]
+size = Vector2i(1280, 800)
+render_target_update_mode = 4
+gui_embed_subwindows = true
+
+[node name="ShipBuilder" parent="AppViewport" instance=ExtResource("1_builder")]

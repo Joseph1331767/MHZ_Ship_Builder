@@ -1,0 +1,50 @@
+# gdlint configuration. See AGENTS §8 (verification loop) and §10a (a docstring is not evidence).
+#
+# THIS FILE IS A DIFF AGAINST gdtoolkit's DEFAULTS, not a replacement for them.
+# gdlint fills every entry absent here from its own defaults on load
+# (`_update_config_with_missing_entries_inplace`), so omitting a rule leaves it ON at
+# its default value. Adding a key here is therefore a deliberate override and nothing
+# else is weakened by the omission.
+
+# --- max-file-lines: 2000, up from gdtoolkit's default 1000 -------------------------
+#
+# Carried over from MHZ_Materials' `.gdlintrc` with the same reasoning, not re-derived from measurement:
+# no code exists in this repo yet, so there is no line-count evidence of our own to cite. Revisit this
+# number once real files exist here, the way Materials did, rather than trusting it forever on the
+# strength of a sibling project.
+#
+# WHY THE DEFAULT IS LIKELY WRONG FOR THIS REPO ANYWAY. 1000 is a generic gdtoolkit default for all
+# GDScript everywhere — not a Godot limit, not a performance limit, and not a decision anyone here made.
+# `max-file-lines` counts EVERY line, comments included, and AGENTS §10a makes maintained comments an
+# evidence requirement: `core/` classes that carry non-obvious CONTRACT behaviour (the attach model, the
+# SDF op order) are expected to document *why*, not just *what*, the same way `docs/SHIP_BUILDER_SPEC.md`
+# does. The default 1000-line cap taxes exactly the practice the project rules mandate.
+#
+# THE CAP IS A SMOKE ALARM, NOT AN ORDER TO SPLIT. When it fires, the question is whether a real seam
+# exists — not where line 2000 happens to fall. A good extraction is a self-contained, statically
+# testable unit with no reference back to the file it came from (see `ResolvedShape` vs. `ShapeGen` in
+# `docs/API_CONTRACT.md` — already split along exactly that line). Splitting a file at an arbitrary line
+# to satisfy a number yields two halves that reach into each other, which is strictly worse than one long
+# file. If the cap fires and there is no seam, revisit this number rather than inventing one.
+max-file-lines: 2000
+
+# --- max-public-methods: 30, up from gdtoolkit's default 20 --------------------------
+#
+# Raised deliberately, with a named exception rather than a blanket relaxation, because it
+# was actively distorting design. `harness/builder/ship_builder.gd` is the application root:
+# it owns the ShipDoc, ShipData, ShipConfig, ShipHistory, ShipTheme and the 3D view, and it is
+# the ONLY surface the panels in `harness/panels/` are allowed to talk to (they must not reach
+# into each other, AGENTS section 3). A facade for five subsystems plus an edit protocol
+# (begin_edit / commit_edit) does not fit in 20, and the agent that wrote it reported having to
+# treat the cap as a hard budget where "adding one requires removing one".
+#
+# That is the failure mode this override exists to prevent. A lint cap that forces a public
+# accessor to be deleted does not reduce coupling; it pushes callers toward reaching around the
+# facade into `get_doc()` and mutating the document directly, which is strictly worse and is
+# exactly what the edit protocol exists to stop.
+#
+# THIS IS NOT A LICENCE FOR WIDE CLASSES ELSEWHERE. Every other class in this repo should sit far
+# under 20 — `core/` classes are static-only or small records by construction (AGENTS section 3),
+# and a `core/` class approaching this number is a design smell, not a lint problem. If a SECOND
+# class ever needs this headroom, that is the signal to revisit the facade, not the number.
+max-public-methods: 30

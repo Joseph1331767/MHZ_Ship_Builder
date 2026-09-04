@@ -1,0 +1,126 @@
+{
+  "_description": "The fixed 16-colour LUT the whole SubViewport quantizes through (SPEC section 11). The LUT is TWO ramps plus two flags, not one ramp: indices 0,1,2,4,5,6,8,9,10,12,13 are the cool console ramp (deep ink -> teal -> pale mint) and indices 3,7,11,14 are a WARM ramp ending at the selection amber. The warm ramp exists because a 3D part shaded by multiplying one albedo has nowhere to land: with a single amber entry, every lit face of a selected part quantized to the background or to the warning red, and the part rendered as a single flat silhouette with no depth. Parts now pick a LUT ENTRY per shading band ('ramps' below) so every band is already a palette colour and the quantizer is a no-op on them. 'alerts' holds one full 16-entry replacement palette per budget, in the same index order, hue-shifted toward that budget's alarm colour; the warm ramp is deliberately identical in every alert palette so the selected part stays amber while the ship turns the alarm colour. ShipTheme swaps the whole LUT the instant a budget hits 1.0 usage and swaps back when it no longer does. 'roles' names the indices so no panel or shader ever hardcodes a bare integer, and 'ramps' does the same for the multi-step shading ramps.",
+  "base": [
+    "#081216",
+    "#0f1f24",
+    "#153237",
+    "#4d3311",
+    "#216163",
+    "#277c79",
+    "#2c968c",
+    "#8a5f22",
+    "#41c8a9",
+    "#5dd0aa",
+    "#79d8ab",
+    "#bd8734",
+    "#b3e6c4",
+    "#daf1e0",
+    "#e4a944",
+    "#dd493c"
+  ],
+  "alerts": {
+    "bbox": [
+      "#171107",
+      "#261c0d",
+      "#3b2a12",
+      "#4d3311",
+      "#69491c",
+      "#835a21",
+      "#9e6b24",
+      "#8a5f22",
+      "#d29137",
+      "#d8a155",
+      "#dfb172",
+      "#bd8734",
+      "#ead1ae",
+      "#f3e8d8",
+      "#eaab3e",
+      "#e24536"
+    ],
+    "volume": [
+      "#150717",
+      "#220d26",
+      "#34123b",
+      "#4d3311",
+      "#5c1c69",
+      "#722183",
+      "#8a249e",
+      "#8a5f22",
+      "#b837d2",
+      "#c255d8",
+      "#cd72df",
+      "#bd8734",
+      "#e0aeea",
+      "#efd8f3",
+      "#eaab3e",
+      "#e24536"
+    ],
+    "weight": [
+      "#170907",
+      "#26100d",
+      "#3b1712",
+      "#4d3311",
+      "#69261c",
+      "#832e21",
+      "#9e3424",
+      "#8a5f22",
+      "#d24c37",
+      "#d86655",
+      "#df8072",
+      "#bd8734",
+      "#eab6ae",
+      "#f3dcd8",
+      "#eaab3e",
+      "#e24536"
+    ],
+    "cost": [
+      "#171507",
+      "#26220d",
+      "#3b3412",
+      "#4d3311",
+      "#695c1c",
+      "#837221",
+      "#9e8a24",
+      "#8a5f22",
+      "#d2b837",
+      "#d8c255",
+      "#dfcd72",
+      "#bd8734",
+      "#eae0ae",
+      "#f3efd8",
+      "#eaab3e",
+      "#e24536"
+    ]
+  },
+  "roles": {
+    "background": 0,
+    "grid": 2,
+    "text": 13,
+    "text_dim": 8,
+    "line": 5,
+    "accent": 10,
+    "selection": 14,
+    "warning": 15,
+    "ghost": 10
+  },
+  "ramps": {
+    "part": [
+      4,
+      6,
+      9,
+      12
+    ],
+    "part_selected": [
+      3,
+      7,
+      11,
+      14
+    ],
+    "ghost": [
+      2,
+      4,
+      6,
+      8
+    ]
+  }
+}
