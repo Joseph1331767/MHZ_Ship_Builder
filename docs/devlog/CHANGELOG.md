@@ -1831,3 +1831,86 @@ Right-click two parts: the menu now reads as two groups, SMALL INDENTS BIG and B
 each offering FLAT INSERTED / FLAT CUTOFF / NATIVE INSERTED. Nothing should look different from
 yesterday except at a joint where the tree parent is the smaller solid, where it should now look
 BETTER.
+
+
+## [2026-09-04b] Seam styling over any selection, and templates that are actually atoms
+
+Two things, and the second turned up a rule the first half of the week should have had.
+
+### Any number of parts, one sweep
+
+> "add ability to select as many modules as desired, right click and change the connection surfaces
+> for all at same time even if they differed before."
+
+The menu took exactly two parts. It now takes any number and offers every connection with BOTH ends
+inside the selection - which generalises the old behaviour exactly rather than replacing it: two
+parts still means their one seam, a chain means every seam along it. Where the chosen connections
+do not already agree, nothing is marked as current, because none of them is. It is ONE edit, so a
+dozen seams is one undo.
+
+The windowed check drives it for real: two seams deliberately set to different styles, swept
+together in one press, and one undo putting both back. That check found the first bug too - the
+VIEW was gating the right-click on `selection().size() == 2` before the builder ever saw it.
+
+### The templates are atoms now
+
+> "hydrogen class ships should be a single central shape, and large like 8000 m^3 ... as you moive
+> vertically down the table it seeds nuclous count (1-8 for practicality all linked directly
+> together with no tunnels) and a set of valence electron pods (the external pods linked by
+> tunnels)."
+
+Every class is a NUCLEUS - one body per proton, capped at eight, fused directly with no tunnels and
+no hatches - plus one EXTREMITY per valence electron, each on its own tunnel. Period 1 has no
+extremities at all, which is what makes hydrogen one module and helium a fused pair. The PERIOD
+picks the geometry the extremities take and steps up when a class has more of them than that row's
+arrangement has berths.
+
+The measurement that matters, all sixteen classes:
+
+```
+hydrogen   1 nucleus,  0 ext,  1 part  -> 8000 m3 in one module
+helium     2 nucleus,  0 ext,  2 parts -> 4000 each
+carbon     6 nucleus,  4 ext, 14 parts ->  800 each
+argon      8 nucleus,  8 ext, 24 parts ->  500 each
+```
+
+Every one of them totals **8000 m3**. That was the point - "keep default total volume constant
+acrost all class ships" - so the classes differ in SHAPE rather than in size.
+
+The span is solved rather than assumed. A box and a sphere of the same span are nowhere near the
+same volume and these classes are defined BY volume, so `_span_for_volume()` tessellates the family
+once with `ShapeMesh` and scales from there, volume going as the cube of the span. The exact mesher
+earning its keep somewhere other than the bake.
+
+Asked which rule governed helium - the author had described it as two pods and a tunnel, and also
+said nucleus bodies link directly with no tunnels - they chose the general rule. Helium is the only
+class with two bodies and no corridor.
+
+### The rule that should already have existed
+
+A carbon nucleus is host to NINE seams, and each is resolved against the result of the last. So one
+broken boolean does not stay put: it feeds the next one. Measured, `small_native` left the nucleus
+centre open after its four tunnels each subtracted from it in turn, and `big_flat_cutoff` did the
+same nine plane-cuts deep.
+
+`MeshFlange.resolve()` and `ShipMeshBake._cut()` now both refuse any result that opens a solid which
+arrived closed - the same guard `_add_stub()` has carried since ADR 0012, generalised to every seam
+operation instead of the one where it first bit. The cost is a joint left overlapping instead of
+flush, which is a gap the author allowed for weeks ago, and it is a far better answer than an open
+hull.
+
+### Verified
+
+`--import` clean; **gdUnit4 260/260**; selfcheck PASSED with the hash unchanged at
+`5536787c6c35d236`; data validator PASSED, 0 warnings - schema, `periods`, and sixteen rewritten
+element descriptions all clean; gdformat and gdlint clean; windowed visual check PASSED, five modes,
+exit 0.
+
+Also committed: the repository had no commits at all, so `fd2579a` is the initial one - the whole
+builder through M6. There is no git remote configured, so nothing was pushed.
+
+### Still the human's to check
+
+Open the START dialog and build a few classes. Hydrogen should be one big room you can cross
+without a hatch; helium two fused halves with no corridor; carbon a six-body core with four arms;
+argon the full sixteen. They should all feel like the same amount of ship.

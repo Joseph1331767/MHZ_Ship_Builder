@@ -135,6 +135,17 @@ static func resolve(
 		else:
 			large_cut = MeshMerge.merge(MeshCsg.subtract(large_cut, cutter))
 
+	# NEVER HAND BACK A SOLID WORSE THAN THE ONE THAT CAME IN. A part can be the host of many
+	# seams - a carbon nucleus carries nine - and each is resolved against the result of the last,
+	# so one broken result feeds the next operation and the damage compounds rather than staying
+	# put. Measured before this: `big_flat_cutoff` on a carbon class left the nucleus centre open,
+	# nine plane cuts and stub unions deep. Refusing costs a joint that stays overlapped, which is
+	# a gap the author allowed for and is a far better answer than an open hull.
+	if large_cut.open_edges() != 0 and large.mesh.open_edges() == 0:
+		large_cut = large.mesh
+	if small_cut.open_edges() != 0 and small.mesh.open_edges() == 0:
+		small_cut = small.mesh
+
 	return {
 		"a": large_cut if a_big else small_cut,
 		"b": small_cut if a_big else large_cut,

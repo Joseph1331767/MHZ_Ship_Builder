@@ -50,6 +50,24 @@ extends RefCounted
 const SECTION_ARRANGEMENTS: String = "arrangements"
 const SECTION_ELEMENTS: String = "elements"
 const SECTION_MOLECULES: String = "molecules"
+const SECTION_PERIODS: String = "periods"
+
+## How a node hangs off its parent (ADR 0014). A NUCLEUS body is fused straight into the one
+## before it - no tunnel, no hatch, sunk far enough in that the two read as one mass - because a
+## nucleus is one body with internal structure, not a cluster of modules on stalks. An EXTREMITY
+## gets the tunnel and the hatch.
+const LINK_ROOT: String = "root"
+const LINK_FUSE: String = "fuse"
+const LINK_TUNNEL: String = "tunnel"
+
+## Nucleus bodies, capped. "1-8 for practicality": past eight the fused mass stops reading as a
+## core and starts reading as gravel, and the eight-children-per-parent rule runs out of berths.
+const MAX_NUCLEUS: int = 8
+
+## How far a fused nucleus body is sunk into the one before it, as a fraction of its own span.
+## Deep enough that the pair is visibly one solid rather than two touching; shallow enough that
+## each body still shows.
+const FUSE_OVERLAP: float = 0.34
 
 ## Template id prefixes, so one flat id space covers both sections.
 const KIND_ELEMENT: String = "element"
@@ -166,7 +184,14 @@ static func build(
 	var hall_mfr: String = _opt_text(
 		options, OPT_HALL_MANUFACTURER, _first_manufacturer(data, hall_family)
 	)
+	# EVERY CLASS ENCLOSES THE SAME VOLUME (ADR 0014): the budget is divided by however many
+	# bodies this class has, and the module span follows from that. A caller who names a span
+	# explicitly still gets it - the budget is the default, not a cage.
 	var room_span: float = _opt_num(options, OPT_ROOM_SPAN, conf.room_span_m)
+	if not options.has(OPT_ROOM_SPAN):
+		room_span = _span_for_volume(
+			data, room_family, room_mfr, conf.template_volume_m3 / float(maxi(nodes.size(), 1))
+		)
 	var tunnel_len: float = _opt_num(options, OPT_TUNNEL_LENGTH, conf.tunnel_length_m)
 	var bore: float = _opt_num(options, OPT_TUNNEL_BORE, conf.tunnel_bore_m)
 	var hatch: String = _opt_text(options, OPT_HATCH_FAMILY, _pick_hatch(data))
@@ -202,6 +227,31 @@ static func build(
 		var parent_id: String = part_of_node[parent_index]
 		var dir: Vector3 = node.get("dir", Vector3.UP)
 		var angles: Vector2 = ShipAttach.angles_from_direction(dir)
+
+		# A NUCLEUS body is fused straight into its neighbour: no tunnel, no hatch, and sunk far
+		# enough in that the two read as one mass rather than as two modules touching.
+		if _text(node.get("link"), LINK_TUNNEL) == LINK_FUSE:
+			var fused: ShipPart = ShipPart.new()
+			fused.parent = parent_id
+			fused.kind = ShipPart.KIND_PRIMITIVE
+			fused.family = room_family
+			fused.manufacturer = room_mfr
+			fused.params = ShapeGen.default_params(data, room_family, room_mfr)
+			fused.yaw = angles.x
+			fused.pitch = angles.y
+			var seat: ShipPart = ShipPart.new()
+			seat.yaw = angles.x
+			seat.pitch = angles.y
+			fused.offset = (
+				ShipAttach.default_offset(room_shape, room_shape, seat, conf)
+				- room_span * FUSE_OVERLAP
+			)
+			fused.scale = room_scale
+			fused.role = ROLE_ROOM
+			fused.display_name = _room_name(node, i)
+			fused.asymmetric = true
+			part_of_node[i] = doc.add_part(fused)
+			continue
 
 		var tunnel: ShipPart = ShipPart.new()
 		tunnel.parent = parent_id
@@ -260,11 +310,18 @@ static func _nodes_for(data: ShipData, template_id: String) -> Array[Dictionary]
 	if e.is_empty():
 		return out
 	if kind_of(template_id) == KIND_ELEMENT:
-		out.append(_node(0, Vector3.UP, _bare_id(template_id), _text(e.get("symbol"), "")))
-		for dir: Vector3 in _dirs_of(data, _text(e.get("arrangement"), "")):
+		var id: String = _bare_id(template_id)
+		var symbol: String = _text(e.get("symbol"), "")
+		# The core, then the rest of the nucleus fused around it, then the extremities.
+		out.append(_node(0, Vector3.UP, id, symbol, LINK_ROOT))
+		for dir: Vector3 in nucleus_dirs(data, nucleus_count(e)):
 			if out.size() >= MAX_NODES:
 				break
-			out.append(_node(0, dir, _bare_id(template_id), _text(e.get("symbol"), "")))
+			out.append(_node(0, dir, id, symbol, LINK_FUSE))
+		for dir: Vector3 in extremity_dirs(data, e):
+			if out.size() >= MAX_NODES:
+				break
+			out.append(_node(0, dir, id, symbol, LINK_TUNNEL))
 		return out
 
 	var raw: Array = e.get("nodes", []) as Array
@@ -288,7 +345,7 @@ static func _nodes_for(data: ShipData, template_id: String) -> Array[Dictionary]
 				_text(_dict_of(raw[parent_index]).get("element"), "")
 			)
 		)
-		var dirs: Array[Vector3] = _dirs_of(data, _text(parent_element.get("arrangement"), ""))
+		var dirs: Array[Vector3] = extremity_dirs(data, parent_element)
 		var slot: int = int(spec.get("slot", 0))
 		var dir: Vector3 = Vector3.UP
 		if not dirs.is_empty():
@@ -297,8 +354,104 @@ static func _nodes_for(data: ShipData, template_id: String) -> Array[Dictionary]
 	return out
 
 
-static func _node(parent: int, dir: Vector3, element_id: String, symbol: String) -> Dictionary:
-	return {"parent": parent, "dir": dir, "element": element_id, "symbol": symbol}
+static func _node(
+	parent: int, dir: Vector3, element_id: String, symbol: String, link: String = LINK_TUNNEL
+) -> Dictionary:
+	return {"parent": parent, "dir": dir, "element": element_id, "symbol": symbol, "link": link}
+
+
+## Nucleus body count of an element entry: one per proton, capped at [constant MAX_NUCLEUS].
+static func nucleus_count(element: Dictionary) -> int:
+	return clampi(int(_num(element.get("z"), 1.0)), 1, MAX_NUCLEUS)
+
+
+## Extremity count: one per valence electron, and NONE in period 1 - a closed first shell has
+## nothing outside it, which is what makes hydrogen a single module and helium a fused pair.
+static func extremity_count(element: Dictionary) -> int:
+	if int(_num(element.get("period"), 1.0)) <= 1:
+		return 0
+	return clampi(int(_num(element.get("valence"), 0.0)), 0, MAX_NUCLEUS)
+
+
+## Every body of a class, nucleus and extremities together. What the volume budget is divided by.
+static func body_count(element: Dictionary) -> int:
+	return maxi(nucleus_count(element) + extremity_count(element), 1)
+
+
+## Directions the fused nucleus bodies sit in - one fewer than the count, because the first body
+## IS the centre they are fused around.
+static func nucleus_dirs(data: ShipData, count: int) -> Array[Vector3]:
+	var out: Array[Vector3] = []
+	if count <= 1:
+		return out
+	var dirs: Array[Vector3] = _dirs_of(data, _arrangement_holding(data, count - 1))
+	for i: int in mini(count - 1, dirs.size()):
+		out.append(dirs[i])
+	return out
+
+
+## Directions the extremities reach in: the PERIOD's own arrangement, stepped up to a larger one
+## when the class has more extremities than that arrangement has berths.
+static func extremity_dirs(data: ShipData, element: Dictionary) -> Array[Vector3]:
+	var out: Array[Vector3] = []
+	var wanted: int = extremity_count(element)
+	if wanted <= 0:
+		return out
+	var period: int = int(_num(element.get("period"), 1.0))
+	var name: String = _text(
+		_dict_of(_dict_of(_pack(data).get(SECTION_PERIODS)).get(str(period))).get("arrangement"), ""
+	)
+	var dirs: Array[Vector3] = _dirs_of(data, name)
+	if dirs.size() < wanted:
+		dirs = _dirs_of(data, _arrangement_holding(data, wanted))
+	for i: int in mini(wanted, dirs.size()):
+		out.append(dirs[i])
+	return out
+
+
+## The name of the smallest arrangement in the pack with at least [param wanted] directions.
+##
+## Sorted by (direction count, name) rather than trusting the pack's own key order, because
+## determinism is a gate (AGENTS section 8b) and two arrangements of the same size - linear and
+## bent, trigonal and pyramidal - would otherwise be picked between by whichever the parser
+## happened to hand back first.
+static func _arrangement_holding(data: ShipData, wanted: int) -> String:
+	var names: Array[String] = []
+	for key: Variant in _dict_of(_pack(data).get(SECTION_ARRANGEMENTS)):
+		names.append(str(key))
+	names.sort()
+	var best: String = ""
+	var best_size: int = 0
+	for name: String in names:
+		var size: int = _dirs_of(data, name).size()
+		if size < wanted:
+			continue
+		if best.is_empty() or size < best_size:
+			best = name
+			best_size = size
+	return (
+		best if not best.is_empty() else (names[names.size() - 1] if not names.is_empty() else "")
+	)
+
+
+## The span a module of [param family] needs to enclose [param target] cubic metres.
+##
+## Solved rather than assumed, because a box and a sphere of the same span are nowhere near the
+## same volume and the classes are defined by VOLUME. Volume goes as the cube of the span, so one
+## measurement at a reference span fixes the curve: the shape is tessellated once by [ShapeMesh]
+## and scaled from there. Exact for the flat-faced families and correct to the tessellation for
+## the round ones, which is the same standard the bake itself is held to.
+static func _span_for_volume(
+	data: ShipData, family: String, manufacturer: String, target: float
+) -> float:
+	var reference: float = 1.0
+	var shape: ResolvedShape = _resolved(
+		data, family, manufacturer, _uniform_span(data, family, manufacturer, reference)
+	)
+	var volume: float = ShapeMesh.build(shape).volume()
+	if volume <= 0.0 or target <= 0.0:
+		return reference
+	return reference * pow(target / volume, 1.0 / 3.0)
 
 
 ## Branch directions of one named arrangement, normalised. An unknown name yields a single

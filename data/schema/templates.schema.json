@@ -1,125 +1,213 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "mhz://ship-builder/schema/templates.schema.json",
-  "title": "MHZ Ship Builder - stock ship templates pack",
-  "description": "Schema for data/templates.json. Three sections: 'arrangements' (named sets of branch directions, one per VSEPR geometry), 'elements' (one core room plus one branch per arrangement direction, named after the atom it models) and 'molecules' (several element cores wired together, each child hanging off a named slot of its parent's arrangement). Read by core/templates/ship_templates.gd; enforced by tools/ship_validate_data.gd. Sizes live in data/tuning.json (room_span_m, tunnel_bore_m, tunnel_length_m), never here, so the whole catalogue rescales from three levers.",
-  "type": "object",
-  "required": ["_note", "arrangements", "elements", "molecules"],
-  "additionalProperties": false,
-  "properties": {
-    "_note": {
-      "type": "string",
-      "minLength": 20,
-      "description": "What a template is and where its sizes come from."
-    },
-    "arrangements": {
-      "type": "object",
-      "minProperties": 1,
-      "propertyNames": { "$ref": "#/$defs/pack_id" },
-      "additionalProperties": { "$ref": "#/$defs/arrangement" }
-    },
-    "elements": {
-      "type": "object",
-      "minProperties": 1,
-      "propertyNames": { "$ref": "#/$defs/pack_id" },
-      "additionalProperties": { "$ref": "#/$defs/element" }
-    },
-    "molecules": {
-      "type": "object",
-      "minProperties": 1,
-      "propertyNames": { "$ref": "#/$defs/pack_id" },
-      "additionalProperties": { "$ref": "#/$defs/molecule" }
-    }
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "$id": "mhz://ship-builder/schema/templates.schema.json",
+ "title": "MHZ Ship Builder - stock ship templates pack",
+ "description": "Schema for data/templates.json. Three sections: 'arrangements' (named sets of branch directions, one per VSEPR geometry), 'elements' (one core room plus one branch per arrangement direction, named after the atom it models) and 'molecules' (several element cores wired together, each child hanging off a named slot of its parent's arrangement). Read by core/templates/ship_templates.gd; enforced by tools/ship_validate_data.gd. Sizes live in data/tuning.json (room_span_m, tunnel_bore_m, tunnel_length_m), never here, so the whole catalogue rescales from three levers.",
+ "type": "object",
+ "required": [
+  "_note",
+  "arrangements",
+  "elements",
+  "molecules",
+  "periods"
+ ],
+ "additionalProperties": false,
+ "properties": {
+  "_note": {
+   "type": "string",
+   "minLength": 20,
+   "description": "What a template is and where its sizes come from."
   },
-  "$defs": {
-    "pack_id": {
-      "type": "string",
-      "pattern": "^[a-z][a-z0-9_]*$"
-    },
-    "arrangement": {
-      "type": "object",
-      "required": ["description", "dirs"],
-      "additionalProperties": false,
-      "properties": {
-        "description": {
-          "type": "string",
-          "minLength": 20,
-          "description": "What this geometry reads as when it is a ship, not just what it is when it is a molecule."
-        },
-        "dirs": {
-          "type": "array",
-          "minItems": 1,
-          "maxItems": 8,
-          "description": "Unit branch directions in the core room's own local frame. Capped at 8 because no family's max_children exceeds Spore's hard limit of 8 per part, and every branch costs the core exactly one child.",
-          "items": {
-            "type": "array",
-            "minItems": 3,
-            "maxItems": 3,
-            "items": { "type": "number" }
-          }
-        }
-      }
-    },
-    "element": {
-      "type": "object",
-      "required": ["label", "symbol", "z", "arrangement", "description"],
-      "additionalProperties": false,
-      "properties": {
-        "label": { "type": "string", "minLength": 1 },
-        "symbol": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 3,
-          "description": "The chemical symbol. Shown in front of the label in the palette, because it is what a player scanning the list reads."
-        },
-        "z": {
-          "type": "integer",
-          "minimum": 1,
-          "description": "Atomic number. Orders the element list, so the palette really does read down the periodic table."
-        },
-        "arrangement": {
-          "$ref": "#/$defs/pack_id",
-          "description": "Key into 'arrangements'. One branch room per direction."
-        },
-        "description": { "type": "string", "minLength": 20 }
-      }
-    },
-    "molecule": {
-      "type": "object",
-      "required": ["label", "formula", "description", "nodes"],
-      "additionalProperties": false,
-      "properties": {
-        "label": { "type": "string", "minLength": 1 },
-        "formula": { "type": "string", "minLength": 1 },
-        "description": { "type": "string", "minLength": 20 },
-        "nodes": {
-          "type": "array",
-          "minItems": 1,
-          "maxItems": 64,
-          "items": { "$ref": "#/$defs/molecule_node" }
-        }
-      }
-    },
-    "molecule_node": {
-      "type": "object",
-      "required": ["element"],
-      "additionalProperties": false,
-      "properties": {
-        "element": {
-          "$ref": "#/$defs/pack_id",
-          "description": "Key into 'elements'. Supplies this room's name and, for its own children, its branch directions."
-        },
-        "parent": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "Index of an EARLIER node in this array. Absent on the first node, which is the ship's root."
-        },
-        "slot": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "Which of the parent element's arrangement directions this room hangs off."
-        }
-      }
-    }
+  "arrangements": {
+   "type": "object",
+   "minProperties": 1,
+   "propertyNames": {
+    "$ref": "#/$defs/pack_id"
+   },
+   "additionalProperties": {
+    "$ref": "#/$defs/arrangement"
+   }
+  },
+  "elements": {
+   "type": "object",
+   "minProperties": 1,
+   "propertyNames": {
+    "$ref": "#/$defs/pack_id"
+   },
+   "additionalProperties": {
+    "$ref": "#/$defs/element"
+   }
+  },
+  "molecules": {
+   "type": "object",
+   "minProperties": 1,
+   "propertyNames": {
+    "$ref": "#/$defs/pack_id"
+   },
+   "additionalProperties": {
+    "$ref": "#/$defs/molecule"
+   }
+  },
+  "periods": {
+   "type": "object",
+   "minProperties": 1,
+   "description": "Row of the periodic table -> the arrangement its extremities take. Stepped up automatically when a class has more extremities than that arrangement has berths.",
+   "additionalProperties": {
+    "$ref": "#/$defs/period"
+   }
   }
+ },
+ "$defs": {
+  "pack_id": {
+   "type": "string",
+   "pattern": "^[a-z][a-z0-9_]*$"
+  },
+  "arrangement": {
+   "type": "object",
+   "required": [
+    "description",
+    "dirs"
+   ],
+   "additionalProperties": false,
+   "properties": {
+    "description": {
+     "type": "string",
+     "minLength": 20,
+     "description": "What this geometry reads as when it is a ship, not just what it is when it is a molecule."
+    },
+    "dirs": {
+     "type": "array",
+     "minItems": 1,
+     "maxItems": 8,
+     "description": "Unit branch directions in the core room's own local frame. Capped at 8 because no family's max_children exceeds Spore's hard limit of 8 per part, and every branch costs the core exactly one child.",
+     "items": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+       "type": "number"
+      }
+     }
+    }
+   }
+  },
+  "element": {
+   "type": "object",
+   "required": [
+    "label",
+    "symbol",
+    "z",
+    "period",
+    "valence",
+    "description"
+   ],
+   "additionalProperties": false,
+   "properties": {
+    "label": {
+     "type": "string",
+     "minLength": 1
+    },
+    "symbol": {
+     "type": "string",
+     "minLength": 1,
+     "maxLength": 3,
+     "description": "The chemical symbol. Shown in front of the label in the palette, because it is what a player scanning the list reads."
+    },
+    "z": {
+     "type": "integer",
+     "minimum": 1,
+     "description": "Atomic number, and the NUCLEUS body count - one fused body per proton, capped at eight for practicality. Also orders the palette."
+    },
+    "description": {
+     "type": "string",
+     "minLength": 20
+    },
+    "period": {
+     "type": "integer",
+     "minimum": 1,
+     "maximum": 7,
+     "description": "Row of the periodic table. Picks the geometry the extremities are arranged in - more shells, a richer arrangement - and is stepped up automatically when a class has more extremities than that geometry has berths."
+    },
+    "valence": {
+     "type": "integer",
+     "minimum": 0,
+     "maximum": 8,
+     "description": "Outer-shell electron count. One EXTREMITY is built per valence electron, each on its own tunnel. Period-1 classes get none: a closed first shell has nothing outside it."
+    }
+   }
+  },
+  "molecule": {
+   "type": "object",
+   "required": [
+    "label",
+    "formula",
+    "description",
+    "nodes"
+   ],
+   "additionalProperties": false,
+   "properties": {
+    "label": {
+     "type": "string",
+     "minLength": 1
+    },
+    "formula": {
+     "type": "string",
+     "minLength": 1
+    },
+    "description": {
+     "type": "string",
+     "minLength": 20
+    },
+    "nodes": {
+     "type": "array",
+     "minItems": 1,
+     "maxItems": 64,
+     "items": {
+      "$ref": "#/$defs/molecule_node"
+     }
+    }
+   }
+  },
+  "molecule_node": {
+   "type": "object",
+   "required": [
+    "element"
+   ],
+   "additionalProperties": false,
+   "properties": {
+    "element": {
+     "$ref": "#/$defs/pack_id",
+     "description": "Key into 'elements'. Supplies this room's name and, for its own children, its branch directions."
+    },
+    "parent": {
+     "type": "integer",
+     "minimum": 0,
+     "description": "Index of an EARLIER node in this array. Absent on the first node, which is the ship's root."
+    },
+    "slot": {
+     "type": "integer",
+     "minimum": 0,
+     "description": "Which of the parent element's arrangement directions this room hangs off."
+    }
+   }
+  },
+  "period": {
+   "type": "object",
+   "required": [
+    "arrangement",
+    "description"
+   ],
+   "additionalProperties": false,
+   "properties": {
+    "arrangement": {
+     "$ref": "#/$defs/pack_id",
+     "description": "Key into 'arrangements'. The geometry this row's extremities are arranged in, before any step up."
+    },
+    "description": {
+     "type": "string",
+     "minLength": 20
+    }
+   }
+  }
+ }
 }

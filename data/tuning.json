@@ -192,5 +192,11 @@
     "description": "EXPLODE view bake resolution, as Surface Nets cells across each module's longest axis (never finer than bake_cell_m). 32 is a preview - a 5 m module resolves at about 0.16 m - chosen so a ten-module ship explodes in seconds rather than the minutes a full-grid bake costs (FOLLOWUPS F5).",
     "min": 8,
     "max": 96
+  },
+  "template_volume_m3": {
+    "value": 8000.0,
+    "description": "Total enclosed volume in cubic metres that a TEMPLATE ship is built to, shared out across every body it has. Constant across every class on purpose: a hydrogen ship spends all of it on one module, a helium ship halves it between two, an argon ship splits it sixteen ways - so the classes differ in SHAPE rather than in size. Tunnels are structure between the bodies and are not counted against it.",
+    "min": 100.0,
+    "max": 500000.0
   }
 }

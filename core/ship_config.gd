@@ -135,6 +135,16 @@ var doorway_height_m: float = 1.9
 var explode_gap_m: float = 1.5
 ## Grid resolution the exploded modules are baked at, as cells across the module's longest axis.
 ## A preview, not the bake: coarse enough that a ten-module ship explodes in seconds.
+## Total enclosed volume a TEMPLATE ship is built to, in cubic metres, shared out across every
+## body it has (ADR 0014). The same for every class: a hydrogen ship spends all of it on one
+## module, a helium ship halves it between two, an argon ship splits it sixteen ways. That is what
+## makes the classes read as different SHAPES rather than as different sizes - "keep default total
+## volume constant acrost all class ships".
+##
+## Tunnels are not counted against it. They are structure between the bodies rather than volume a
+## crew lives in, and their size comes from tunnel_bore_m and tunnel_length_m.
+var template_volume_m3: float = 8000.0
+
 var explode_cells_per_axis: int = 32
 
 
@@ -188,6 +198,7 @@ static func from_dict(d: Dictionary) -> ShipConfig:
 	c.doorway_width_m = _as_float(_lookup(d, "doorway_width_m"), c.doorway_width_m)
 	c.doorway_height_m = _as_float(_lookup(d, "doorway_height_m"), c.doorway_height_m)
 	c.explode_gap_m = _as_float(_lookup(d, "explode_gap_m"), c.explode_gap_m)
+	c.template_volume_m3 = _as_float(_lookup(d, "template_volume_m3"), c.template_volume_m3)
 	c.explode_cells_per_axis = _as_int(
 		_lookup(d, "explode_cells_per_axis"), c.explode_cells_per_axis
 	)
@@ -231,6 +242,7 @@ func snapshot() -> Dictionary:
 		"doorway_width_m": doorway_width_m,
 		"doorway_height_m": doorway_height_m,
 		"explode_gap_m": explode_gap_m,
+		"template_volume_m3": template_volume_m3,
 		"explode_cells_per_axis": explode_cells_per_axis,
 	}
 

@@ -13,6 +13,13 @@ extends GdUnitTestSuite
 ## geometry on both sides, so anything beyond float noise means a warp was inverted wrongly.
 const ON_SURFACE_M: float = 1.0e-5
 
+## The class these tests build. Carbon has BOTH a fused nucleus and tunnelled extremities
+## (ADR 0014), which is what makes it able to exercise every seam style; helium, which these tests
+## used before, is now two fused bodies with no tunnel and no extremity anywhere on it.
+const TEMPLATE: String = "carbon"
+
+## Positional weld quantum for the watertightness check
+
 var _data: ShipData
 var _cfg: ShipConfig
 
@@ -155,7 +162,7 @@ func test_a_box_volume_survives_non_uniform_scale() -> void:
 
 
 func test_a_template_ship_bakes_every_part_closed() -> void:
-	var doc: ShipDoc = ShipTemplates.build(_data, _cfg, "helium", {})
+	var doc: ShipDoc = ShipTemplates.build(_data, _cfg, TEMPLATE, {})
 	assert_object(doc).is_not_null()
 	var report: Dictionary = ShipMeshBake.bake(doc, _data, _cfg)
 	var order: PackedStringArray = report["order"]
@@ -174,7 +181,7 @@ func test_a_template_ship_bakes_every_part_closed() -> void:
 func test_the_bake_agrees_with_the_ship_field() -> void:
 	# End to end: the placement transform is applied to the mesh here and inverted inside the
 	# field, so this checks the whole chain rather than the tessellator alone.
-	var doc: ShipDoc = ShipTemplates.build(_data, _cfg, "helium", {})
+	var doc: ShipDoc = ShipTemplates.build(_data, _cfg, TEMPLATE, {})
 	var report: Dictionary = ShipMeshBake.bake(doc, _data, _cfg)
 	var sdf: ShipSdf = ShipSdf.build(doc, _data, _cfg)
 	var index_of: Dictionary = {}
@@ -208,7 +215,7 @@ func test_the_bake_agrees_with_the_ship_field() -> void:
 
 func test_the_bake_is_deterministic() -> void:
 	# Determinism is a gate (AGENTS 8b), and this walks a Dictionary to find its part order.
-	var doc: ShipDoc = ShipTemplates.build(_data, _cfg, "helium", {})
+	var doc: ShipDoc = ShipTemplates.build(_data, _cfg, TEMPLATE, {})
 	var first: Dictionary = ShipMeshBake.bake(doc, _data, _cfg)
 	var second: Dictionary = ShipMeshBake.bake(doc, _data, _cfg)
 	assert_array(Array(first["order"] as PackedStringArray)).is_equal(
@@ -281,7 +288,7 @@ func test_each_seam_style_deforms_the_meshes_differently() -> void:
 	# Asked by VOLUME, because that is what tells the three styles apart without caring how the
 	# mesh is triangulated: FLAT splits the overlap and hands the host a collar, PARENT dents the
 	# child, CHILD sockets the host.
-	var base: ShipDoc = ShipTemplates.build(_data, _cfg, "helium", {})
+	var base: ShipDoc = ShipTemplates.build(_data, _cfg, TEMPLATE, {})
 	assert_object(base).is_not_null()
 	var child_volume: Dictionary = {}
 	var host_volume: Dictionary = {}
@@ -300,8 +307,8 @@ func test_each_seam_style_deforms_the_meshes_differently() -> void:
 			)
 			. is_equal(0)
 		)
-		child_volume[style] = (solids["p_0002"] as PolyMesh).volume()
-		host_volume[style] = (solids["p_0001"] as PolyMesh).volume()
+		child_volume[style] = (solids[_a_tunnel(doc)] as PolyMesh).volume()
+		host_volume[style] = (solids[doc.root] as PolyMesh).volume()
 
 	# CHILD is the only style that takes anything out of the HOST.
 	(
@@ -340,7 +347,7 @@ func test_each_seam_style_deforms_the_meshes_differently() -> void:
 func test_the_seam_style_is_read_not_baked_in() -> void:
 	# Non-destructive by construction: the style lives on the joint and the mesh is derived, so
 	# switching away and back has to land exactly where it started.
-	var base: ShipDoc = ShipTemplates.build(_data, _cfg, "helium", {})
+	var base: ShipDoc = ShipTemplates.build(_data, _cfg, TEMPLATE, {})
 	var before: float = _host_volume(base, ShipJoint.SEAM_FLAT)
 	var detour: float = _host_volume(base, ShipJoint.SEAM_SMALL_NATIVE)
 	var after: float = _host_volume(base, ShipJoint.SEAM_FLAT)
@@ -357,7 +364,7 @@ func _host_volume(base: ShipDoc, style: String) -> float:
 	for jid: String in doc.joints:
 		(doc.joints[jid] as ShipJoint).seam_style = style
 	var solids: Dictionary = ShipMeshBake.bake(doc, _data, _cfg)["solids"]
-	return (solids["p_0001"] as PolyMesh).volume()
+	return (solids[doc.root] as PolyMesh).volume()
 
 
 # --- the four flat styles (ADR 0012) --------------------------------------------------------------
@@ -366,7 +373,7 @@ func _host_volume(base: ShipDoc, style: String) -> float:
 func test_every_seam_style_bakes_closed_solids() -> void:
 	# Six styles now, and the only universal promise is the one that matters: whatever the author
 	# picks, every part comes out a closed solid.
-	var base: ShipDoc = ShipTemplates.build(_data, _cfg, "helium", {})
+	var base: ShipDoc = ShipTemplates.build(_data, _cfg, TEMPLATE, {})
 	for style: String in ShipJoint.VALID_SEAM_STYLES:
 		var doc: ShipDoc = base.duplicate_doc()
 		for jid: String in doc.joints:
@@ -387,24 +394,42 @@ func test_every_seam_style_bakes_closed_solids() -> void:
 
 
 func test_in_and_out_bump_put_the_plane_in_different_places() -> void:
-	# IN takes the deepest point where the two surfaces cross, OUT the outermost. On a flat host
-	# face they coincide - the face IS both - so the difference is asked of the host, which OUT
-	# gives a raised pad and IN does not.
-	var flat_host: float = _host_volume_for("helium", ShipJoint.SEAM_SMALL_FLAT_INSERT)
-	var raised: float = _host_volume_for("helium", ShipJoint.SEAM_BIG_FLAT_INSERT)
+	# IN takes the deepest point where the two surfaces cross, OUT the outermost, so the two must
+	# not produce the same ship. Asked of the WHOLE bake rather than of the host alone: out-bump
+	# raises a pad by unioning a stub on, and a union that would open a solid is refused (ADR
+	# 0014), so on a class whose nucleus carries many seams the host can legitimately come out
+	# unchanged while the extremities still differ.
+	var inward: Dictionary = _bake_with_style(ShipJoint.SEAM_SMALL_FLAT_INSERT)
+	var outward: Dictionary = _bake_with_style(ShipJoint.SEAM_BIG_FLAT_INSERT)
+	var moved: float = absf(float(inward["parts_volume_m3"]) - float(outward["parts_volume_m3"]))
 	(
-		assert_float(raised)
-		. append_failure_message("out-bump did not raise a pad on the host")
-		. is_greater(flat_host)
+		assert_float(moved)
+		. append_failure_message(
+			(
+				"in-bump and out-bump baked the same ship (%.4f m3) - the plane did not move"
+				% [float(inward["parts_volume_m3"])]
+			)
+		)
+		. is_greater(1.0e-3)
 	)
+	# ...and both must still be solid.
+	for report: Dictionary in [inward, outward]:
+		assert_int((report["open_parts"] as PackedStringArray).size()).is_equal(0)
+
+
+func _bake_with_style(style: String) -> Dictionary:
+	var doc: ShipDoc = ShipTemplates.build(_data, _cfg, TEMPLATE, {})
+	for jid: String in doc.joints:
+		(doc.joints[jid] as ShipJoint).seam_style = style
+	return ShipMeshBake.bake(doc, _data, _cfg)
 
 
 func test_a_flange_leaves_the_host_alone_where_a_slice_cuts_it() -> void:
 	# A tube landing on a flat box face: the deepest crossing IS that face, so neither style has
 	# anything of the host to remove and the two must agree. The distinction only bites on a
 	# curved host, which is exactly why both exist.
-	var flange: float = _host_volume_for("helium", ShipJoint.SEAM_SMALL_FLAT_INSERT)
-	var slice: float = _host_volume_for("helium", ShipJoint.SEAM_SMALL_FLAT_CUTOFF)
+	var flange: float = _host_volume_for(TEMPLATE, ShipJoint.SEAM_SMALL_FLAT_INSERT)
+	var slice: float = _host_volume_for(TEMPLATE, ShipJoint.SEAM_SMALL_FLAT_CUTOFF)
 	(
 		assert_float(flange)
 		. append_failure_message("on a flat host face a flange and a slice must agree")
@@ -415,13 +440,13 @@ func test_a_flange_leaves_the_host_alone_where_a_slice_cuts_it() -> void:
 func test_the_child_is_cut_flush_at_the_host_surface() -> void:
 	# The whole point of the rework. A tube seated into a box should come out ENDING at the box's
 	# face - not short of it, and not through it.
-	var doc: ShipDoc = ShipTemplates.build(_data, _cfg, "helium", {})
+	var doc: ShipDoc = ShipTemplates.build(_data, _cfg, TEMPLATE, {})
 	for jid: String in doc.joints:
 		(doc.joints[jid] as ShipJoint).seam_style = ShipJoint.SEAM_SMALL_FLAT_INSERT
 	var report: Dictionary = ShipMeshBake.bake(doc, _data, _cfg)
 	var solids: Dictionary = report["solids"]
-	var hull: PolyMesh = solids["p_0001"]
-	var tube: PolyMesh = solids["p_0002"]
+	var hull: PolyMesh = solids[doc.root]
+	var tube: PolyMesh = solids[_a_tunnel(doc)]
 	# No tube vertex may sit meaningfully inside the hull's box.
 	var half: Vector3 = hull.aabb().size * 0.5
 	var centre: Vector3 = hull.aabb().get_center()
@@ -481,4 +506,14 @@ func _host_volume_for(template: String, style: String) -> float:
 	for jid: String in doc.joints:
 		(doc.joints[jid] as ShipJoint).seam_style = style
 	var solids: Dictionary = ShipMeshBake.bake(doc, _data, _cfg)["solids"]
-	return (solids["p_0001"] as PolyMesh).volume()
+	return (solids[doc.root] as PolyMesh).volume()
+
+
+## The first TUNNEL in a template ship - an extremity's hallway, which is a child seated flush on
+## the nucleus. Looked up rather than assumed: which part id that is depends on how many nucleus
+## bodies the class fused first.
+func _a_tunnel(doc: ShipDoc) -> String:
+	for pid: String in doc.part_order():
+		if (doc.parts[pid] as ShipPart).role == ShipPart.ROLE_HALLWAY:
+			return pid
+	return doc.root

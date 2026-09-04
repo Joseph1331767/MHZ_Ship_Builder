@@ -268,3 +268,82 @@ func check_seam_menu() -> void:
 		view.call("_track_right_button", ev)
 	menu.call("close")
 	print("  seam menu: opened on a right click, applied %s" % str(applied))
+	_check_multi_seam(view, menu, doc)
+
+
+## Selecting MORE than two parts and restyling every connection between them at once (ADR 0013).
+##
+## The point of the feature is that it works when the seams DISAGREE, so the two are deliberately
+## set to different styles first and then swept together.
+func _check_multi_seam(view: Object, menu: Object, doc: ShipDoc) -> void:
+	# A chain of three: the root, a child of it, and a child of that.
+	var first: String = ""
+	var second: String = ""
+	for pid: String in doc.part_order():
+		var part: ShipPart = doc.parts[pid]
+		if part.parent == doc.root and first.is_empty():
+			first = pid
+		elif not first.is_empty() and part.parent == first:
+			second = pid
+			break
+	if first.is_empty() or second.is_empty():
+		print("  multi seam: no three-part chain in this doc, skipped")
+		return
+
+	var builder: Object = _builder
+	builder.call("set_selection", PackedStringArray([doc.root, first]))
+	_press_seam(view, menu, ShipJoint.SEAM_BIG_NATIVE)
+	builder.call("set_selection", PackedStringArray([first, second]))
+	_press_seam(view, menu, ShipJoint.SEAM_SMALL_FLAT_CUTOFF)
+	var before_a: String = ShipSeams.style_for(builder.call("get_doc"), first, doc.root)
+	var before_b: String = ShipSeams.style_for(builder.call("get_doc"), second, first)
+	if before_a == before_b:
+		_failures.append("multi seam: could not make the two seams differ to begin with")
+		return
+
+	# All three selected at once, so both connections are in the selection.
+	builder.call("set_selection", PackedStringArray([doc.root, first, second]))
+	if not _press_seam(view, menu, ShipJoint.SEAM_SMALL_NATIVE):
+		_failures.append("multi seam: the menu did not open over a three-part selection")
+		return
+	var after_a: String = ShipSeams.style_for(builder.call("get_doc"), first, doc.root)
+	var after_b: String = ShipSeams.style_for(builder.call("get_doc"), second, first)
+	if after_a != ShipJoint.SEAM_SMALL_NATIVE or after_b != ShipJoint.SEAM_SMALL_NATIVE:
+		_failures.append(
+			"multi seam: one press left the two seams '%s' and '%s'" % [after_a, after_b]
+		)
+		return
+	# And it must be ONE edit, so a single undo puts both back.
+	builder.call("undo")
+	var undone_a: String = ShipSeams.style_for(builder.call("get_doc"), first, doc.root)
+	var undone_b: String = ShipSeams.style_for(builder.call("get_doc"), second, first)
+	if undone_a != before_a or undone_b != before_b:
+		_failures.append(
+			(
+				"multi seam: one undo left '%s'/'%s', not '%s'/'%s'"
+				% [undone_a, undone_b, before_a, before_b]
+			)
+		)
+		return
+	print(
+		(
+			"  multi seam: two differing seams (%s, %s) swept to %s in one press, one undo restored both"
+			% [before_a, before_b, ShipJoint.SEAM_SMALL_NATIVE]
+		)
+	)
+
+
+## Right-clicks the current selection and presses `style`. False when the menu did not open.
+func _press_seam(view: Object, menu: Object, style: String) -> bool:
+	var ev: InputEventMouseButton = InputEventMouseButton.new()
+	ev.button_index = MOUSE_BUTTON_RIGHT
+	ev.position = Vector2(120.0, 120.0)
+	ev.pressed = true
+	view.call("_track_right_button", ev)
+	ev.pressed = false
+	view.call("_track_right_button", ev)
+	if not bool(menu.call("is_open")):
+		return false
+	var pressed: bool = bool(menu.call("press", style))
+	menu.call("close")
+	return pressed

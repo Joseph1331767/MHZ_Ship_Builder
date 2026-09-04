@@ -696,7 +696,11 @@ func _track_right_button(mb: InputEventMouseButton) -> void:
 	_rmb_active = false
 	if _rmb_pos.distance_to(mb.position) > CLICK_SLOP_PX:
 		return
-	if _scene != null and _scene.selection().size() == 2:
+	# ANY multi-part selection, not exactly two (ADR 0013). Which of its connections the menu
+	# actually offers is ShipBuilder's decision - it takes the seams with both ends selected - and
+	# the view's job is only to notice that there is more than one part under the pointer's
+	# selection at all.
+	if _scene != null and _scene.selection().size() >= 2:
 		seam_menu_requested.emit(mb.position)
 
 

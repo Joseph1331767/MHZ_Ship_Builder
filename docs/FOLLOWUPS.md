@@ -773,3 +773,44 @@ ADR 0013. A pure rename of six existing behaviours onto one scheme, plus the two
 3. **The SDF still knows only its own three codes.** `ShipSdf.style_code()` maps the natives onto
    `STYLE_PARENT` / `STYLE_CHILD` and everything else onto flat, so `module_view` sees the ADR 0009
    model. Nothing renders from that path now.
+
+
+## F26 — Additive contract extensions of 2026-09-04b: multi-seam styling and the atomic templates — OPEN, DELIBERATE
+
+ADR 0014, plus the multi-select seam change.
+
+- **`ShipConfig.template_volume_m3`** (new lever, default 8000.0), in `data/tuning.json` and its
+  schema. Section 14's list of ShipConfig levers grows again, as F14 records it may.
+- **`ShipTemplates.nucleus_count()` / `extremity_count()` / `body_count()` / `nucleus_dirs()` /
+  `extremity_dirs()`** (new, static, public so a palette can describe a class without building it);
+  `LINK_ROOT` / `LINK_FUSE` / `LINK_TUNNEL`, `MAX_NUCLEUS`, `FUSE_OVERLAP`, `SECTION_PERIODS`.
+  `_node()` gained a trailing optional `link` argument.
+- **`data/templates.json`**: a new `periods` section; elements carry `period` and `valence` and no
+  longer carry `arrangement`, which is derived. Schema updated to match.
+- **`ShipMeshBake._cut()`** (new, private) and the closure guard in `MeshFlange.resolve()`.
+- **Harness**: `ShipBuilder._seam_pairs` replaces `_seam_pair`, `_common_seam_style()` and
+  `_apply_seam_style()` are new (private), and `ShipView3D.set_exploded`'s right-click gate widened
+  from exactly two selected parts to two or more.
+
+**No hash moves.** Templates build documents; they are not part of one. Measured:
+`5536787c6c35d236` either side.
+
+**Known limits, recorded rather than hidden.**
+
+1. **A seam operation that would open a closed solid is REFUSED**, and refusing leaves the two
+   parts overlapping where they would have met flush. On a class whose nucleus hosts many seams -
+   carbon has nine - some joints will not be cut. Closed and slightly overlapping beats flush and
+   open, but the real fix is booleans that do not break, which F22 limit 5 and F24 limit 1 already
+   record.
+2. **Out-bump styles on a high-nucleus class do little.** Their stub unions are the operation most
+   likely to be refused, so `big_flat_insert` on a carbon or argon class can come out looking much
+   like `small_flat_insert`. Visible in the tests: the in/out difference is asserted over the WHOLE
+   bake rather than over the host alone, because the host can legitimately come out unchanged.
+3. **Molecule templates are unchanged in structure** - one room per node, joined by tunnels - and
+   are NOT built on the nucleus-and-extremities model. They share the volume budget, so they are
+   the right size, but a water-class ship is still three rooms on tunnels rather than three atoms.
+4. **`MAX_NUCLEUS` is 8 and `valence` is capped at 8**, so classes past argon would repeat the
+   argon silhouette. The pack stops at argon for that reason rather than by accident.
+5. **Seam styling covers connections with BOTH ends selected.** A part selected on its own offers
+   nothing, which is the reading that generalises the old two-part behaviour exactly - but it does
+   mean there is no way to say "restyle everything attached to this one part" in a single gesture.

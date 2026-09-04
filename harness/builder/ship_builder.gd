@@ -141,7 +141,10 @@ var _explode_button: Button = null
 var _exploded: bool = false
 ## The right-click seam menu (ADR 0009), and the pair it was opened on.
 var _context_menu: ShipContextMenu = null
-var _seam_pair: PackedStringArray = PackedStringArray()
+## Every connection the open seam menu will restyle, as `[child, host]` pairs. Captured when the
+## menu opens rather than read back when an item is pressed, so a selection that changes under an
+## open menu cannot retarget it.
+var _seam_pairs: Array[PackedStringArray] = []
 
 var _start_dialog: ShipStartDialog = null
 var _tutorial: ShipTutorial = null
@@ -1434,21 +1437,39 @@ func _build_context_menu() -> void:
 	add_child(_context_menu)
 
 
-## Right-clicking a two-part selection offers the seam styles for that pair. The pair is captured
-## here rather than read back when an item is pressed, so a selection that changes under the open
-## menu cannot retarget it.
+## Right-clicking a selection offers the seam styles for every connection INSIDE it.
+##
+## ANY NUMBER OF PARTS, not two: "add ability to select as many modules as desired, right click and
+## change the connection surfaces for all at same time even if they differed before." A connection
+## counts when BOTH of its ends are selected, which is the reading that generalises the old
+## two-part behaviour exactly - select a pair and you get their one seam, select a chain and you
+## get every seam along it, and a part selected on its own has no connection to anything else in
+## the selection and so offers nothing.
+##
+## Where the chosen ones do not already agree, nothing is marked as current, because none of them
+## is.
 func _on_seam_menu_requested(position: Vector2) -> void:
 	if _doc == null or _context_menu == null or _exploded:
 		return
-	var pair: PackedStringArray = PackedStringArray()
+	var chosen: Dictionary = {}
 	for raw: String in _selection:
 		var pid: String = ShipSymmetry.source_of_twin(raw)
-		if _doc.parts.has(pid) and not pair.has(pid):
-			pair.append(pid)
-	if pair.size() != 2:
+		if _doc.parts.has(pid):
+			chosen[pid] = true
+	_seam_pairs = []
+	# The doc's own order, so the same selection always yields the same list.
+	for pid: String in _doc.part_order():
+		if not chosen.has(pid):
+			continue
+		var host: String = (_doc.parts[pid] as ShipPart).parent
+		if host.is_empty() or not chosen.has(host):
+			continue
+		_seam_pairs.append(PackedStringArray([pid, host]))
+	if _seam_pairs.is_empty():
+		if chosen.size() > 1:
+			set_status("NONE OF THOSE PARTS ARE CONNECTED TO EACH OTHER")
 		return
-	_seam_pair = pair
-	var names: Array = [_part_label(pair[0]).to_upper(), _part_label(pair[1]).to_upper()]
+
 	var items: Array[Dictionary] = []
 	for item: Dictionary in SEAM_STYLE_ITEMS:
 		items.append(item)
@@ -1457,26 +1478,74 @@ func _on_seam_menu_requested(position: Vector2) -> void:
 	var offset: Vector2 = (
 		_view.get_global_transform_with_canvas().origin - get_global_transform_with_canvas().origin
 	)
-	var title: String = "SEAM: %s <-> %s" % names
-	_context_menu.open(position + offset, title, items, _seam_style_of(pair[0], pair[1]))
+	var title: String = (
+		"SEAM: %s <-> %s"
+		% [_part_label(_seam_pairs[0][0]).to_upper(), _part_label(_seam_pairs[0][1]).to_upper()]
+	)
+	if _seam_pairs.size() > 1:
+		title = "%d SEAMS" % _seam_pairs.size()
+	_context_menu.open(position + offset, title, items, _common_seam_style())
+
+
+## The style every chosen connection already carries, or "" when they differ - which is what the
+## menu shows as "no current choice" rather than picking one of them to look current.
+func _common_seam_style() -> String:
+	var common: String = ""
+	for pair: PackedStringArray in _seam_pairs:
+		var style: String = _seam_style_of(pair[0], pair[1])
+		if common.is_empty():
+			common = style
+		elif common != style:
+			return ""
+	return common
 
 
 func _seam_style_of(a: String, b: String) -> String:
 	return ShipSeams.style_for(_doc, a, b)
 
 
+## Applies one style to every connection the menu was opened over, as a SINGLE edit - so a
+## selection of a dozen seams is one undo, not a dozen.
 func _on_seam_style_chosen(style: String) -> void:
-	if _doc == null or _seam_pair.size() != 2:
+	if _doc == null or _seam_pairs.is_empty():
 		return
-	var a: String = _seam_pair[0]
-	var b: String = _seam_pair[1]
-	if not _doc.parts.has(a) or not _doc.parts.has(b):
+	var live: Array[PackedStringArray] = []
+	for pair: PackedStringArray in _seam_pairs:
+		if _doc.parts.has(pair[0]) and _doc.parts.has(pair[1]):
+			live.append(pair)
+	if live.is_empty():
 		set_status("THOSE PARTS ARE GONE")
 		return
-	if _seam_style_of(a, b) == style:
+	if live.size() == 1 and _seam_style_of(live[0][0], live[0][1]) == style:
 		set_status("SEAM ALREADY %s" % _seam_style_label(style))
 		return
+
 	begin_edit("seam style")
+	var changed: int = 0
+	for pair: PackedStringArray in live:
+		if _apply_seam_style(pair[0], pair[1], style):
+			changed += 1
+	commit_edit(PackedStringArray())
+	if live.size() == 1:
+		set_status(
+			(
+				"SEAM %s <-> %s: %s"
+				% [
+					_part_label(live[0][0]).to_upper(),
+					_part_label(live[0][1]).to_upper(),
+					_seam_style_label(style)
+				]
+			)
+		)
+	else:
+		set_status("%d OF %d SEAMS -> %s" % [changed, live.size(), _seam_style_label(style)])
+
+
+## Sets one connection's style, creating the joint record if the pair never had one. Returns
+## whether anything actually moved.
+func _apply_seam_style(a: String, b: String, style: String) -> bool:
+	if _seam_style_of(a, b) == style:
+		return false
 	var existing: String = _joint_id_for(a, b)
 	var joint: ShipJoint = null
 	if existing.is_empty():
@@ -1491,13 +1560,7 @@ func _on_seam_style_chosen(style: String) -> void:
 	else:
 		joint = _doc.joints[existing]
 	joint.seam_style = style
-	commit_edit(PackedStringArray())
-	set_status(
-		(
-			"SEAM %s <-> %s: %s"
-			% [_part_label(a).to_upper(), _part_label(b).to_upper(), _seam_style_label(style)]
-		)
-	)
+	return true
 
 
 ## The menu label for a style, qualified by the group it sits under.

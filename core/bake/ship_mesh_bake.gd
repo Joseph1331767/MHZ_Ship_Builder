@@ -209,7 +209,7 @@ static func _apply_seams(
 			var small_id: String = host_id if child_is_big else child_id
 			var loser: String = small_id if big_indents else big_id
 			var cutter: String = big_id if big_indents else small_id
-			out[loser] = _tidy(MeshCsg.subtract(out[loser], solids[cutter]))
+			out[loser] = _cut(out[loser], solids[cutter])
 			touched[loser] = true
 		else:
 			# A FLAT linkage surface (ADR 0012). The plane comes from where the two surfaces
@@ -240,6 +240,29 @@ static func _apply_seams(
 
 	assert(touched.size() >= 0)
 	return out
+
+
+## [param target] with [param cutter] taken out of it, or [param target] UNCHANGED when that
+## cannot be done without opening it.
+##
+## THE SAME RULE AS THE OUT-BUMP UNION, and for the same reason: a part can be the host of many
+## seams - a carbon nucleus carries nine children - and each cut is taken against the result of the
+## last. One failure that is kept feeds the next boolean a broken mesh, and the damage compounds
+## instead of staying put. Measured before this guard: `small_native` on a carbon class left the
+## nucleus centre open, because its four tunnels each subtract from the same root in turn.
+##
+## Refusing costs a cut that does not happen - two parts overlap where they would have met flush -
+## which is a gap the author has allowed for, and is a far better answer than an open hull.
+static func _cut(target: PolyMesh, cutter: PolyMesh) -> PolyMesh:
+	var carved: PolyMesh = MeshCsg.subtract(target, cutter)
+	if carved.truncated:
+		return target
+	var tidied: PolyMesh = MeshMerge.merge(carved)
+	if tidied.open_edges() == 0:
+		return tidied
+	if carved.open_edges() == 0:
+		return carved
+	return target
 
 
 ## One boolean result, tidied back into n-gons before anything else is done to it.

@@ -1,5 +1,5 @@
 {
-  "_note": "Stock ship templates, built as ROOMS joined by CYLINDER HALLWAYS with a hatch at every connection, and named after what they model. An 'element' template is one core room with a symmetric ring of rooms branching off it, the branch count and geometry taken from that element's own valence shell - so walking the periodic list really does walk a list of different ways to arrange rooms around a centre, which is what the author asked for. A 'molecule' template is several element cores wired together, so 'water molecule' is a bent core with a pod on each arm. Nothing here fixes a SIZE: room diameter, tunnel bore and tunnel length all come from data/tuning.json (room_span_m, tunnel_bore_m, tunnel_length_m) so the whole catalogue rescales from three levers, and nothing here fixes a SHAPE either - the room family and the hallway family are chosen when the template is built. ShipTemplates.build() reads this pack; adding a template must never require touching core/.",
+  "_note": "Stock ship templates on the ATOMIC model (ADR 0014). Every class is a NUCLEUS of bodies fused directly together - one per proton, capped at eight for practicality - plus a set of EXTREMITIES, one per valence electron, each on its own tunnel with a hatch. Period-1 classes have no extremities at all: a closed first shell has nothing outside it. The whole ship is built to ShipConfig.template_volume_m3 however many bodies that is, so every class encloses the same volume and the classes differ in SHAPE rather than in size - hydrogen spends it all on one module, argon splits it sixteen ways. The extremity geometry comes from the PERIOD (more shells, richer arrangement) and steps up to a larger arrangement when a class has more extremities than the period's own geometry has berths. Nothing here fixes a SIZE or a SHAPE: the volume comes from tuning.json and the room and hallway families are chosen when the template is built. ShipTemplates.build() reads this pack; adding a template must never require touching core/.",
   "arrangements": {
     "single": {
       "description": "One branch, straight up the spine. The smallest thing that is still two rooms and a tunnel between them.",
@@ -282,118 +282,164 @@
       ]
     }
   },
+  "periods": {
+    "1": {
+      "arrangement": "single",
+      "description": "One shell and nothing outside it. Period-1 classes have no extremities at all, so this is the geometry they never use."
+    },
+    "2": {
+      "arrangement": "trigonal",
+      "description": "Two shells: the extremities spread in one plane. The flattest arrangement that still surrounds the core, and the cheapest to bring a hull alongside."
+    },
+    "3": {
+      "arrangement": "tetrahedral",
+      "description": "Three shells: the extremities leave the plane. No two tunnels share a face, which is what stops a third-row hull reading as a stack of discs."
+    },
+    "4": {
+      "arrangement": "square",
+      "description": "Four shells: the extremities square up. Flat again, but at four berths rather than three, and it stacks with its own kind."
+    },
+    "5": {
+      "arrangement": "bipyramidal",
+      "description": "Five shells: a waist and two poles, the first geometry with two genuinely different kinds of berth on one hull."
+    },
+    "6": {
+      "arrangement": "octahedral",
+      "description": "Six shells: a berth on every axis. No bow, no stern, no up."
+    },
+    "7": {
+      "arrangement": "cubic",
+      "description": "Seven shells: the corners of a cube, every diagonal occupied. The densest the eight-children rule allows."
+    }
+  },
   "elements": {
     "hydrogen": {
       "label": "Hydrogen",
       "symbol": "H",
       "z": 1,
-      "arrangement": "single",
-      "description": "One room. The smallest ship that is legally a ship: a single hab module with one stub tunnel and a hatch at the end of it, waiting for whatever gets bolted on next. Every hull in the yard starts as somebody's hydrogen."
+      "period": 1,
+      "valence": 1,
+      "description": "One module, and the whole volume budget spent on it. The largest single room any class gets: no nucleus to share with, no extremities to feed, just a hull you can cross without passing a hatch. Every other class is this ship cut up and rearranged."
     },
     "helium": {
       "label": "Helium",
       "symbol": "He",
       "z": 2,
-      "arrangement": "linear",
-      "description": "A core with a room at each end of one spine. Closed-shell and content: the two berths face directly away from each other, so nothing docked at one end can see or reach the other without walking through the middle."
+      "period": 1,
+      "valence": 2,
+      "description": "Two nucleus bodies fused into one mass, half the budget each. A closed shell needs nothing outside it, so there are no extremities and no tunnels at all - the shortest possible ship that is still two rooms, and the only one where both of them are core."
     },
     "lithium": {
       "label": "Lithium",
       "symbol": "Li",
       "z": 3,
-      "arrangement": "single",
-      "description": "A filled inner pair with a single lone room hanging off it. Structurally the same plan as hydrogen and about as stable to fly - the outlying module is on one tunnel and one tunnel only, which is exactly how a lithium hull tends to be found: missing it."
+      "period": 2,
+      "valence": 1,
+      "description": "A three-body nucleus with a single arm off it. The first class with an outside: one extremity, one tunnel, one hatch, and a core that is already big enough to have a middle. Light, lopsided and cheap to dock."
     },
     "beryllium": {
       "label": "Beryllium",
       "symbol": "Be",
       "z": 4,
-      "arrangement": "linear",
-      "description": "Two outer rooms on opposite sides of a filled core. A working shuttle plan - crew forward, cargo aft, one tunnel each - and the smallest arrangement where the core is genuinely a junction rather than an endpoint."
+      "period": 2,
+      "valence": 2,
+      "description": "Four fused into the core and two arms reaching off it. The first class with a THROUGH line - a crew can cross it end to end without turning around - which is why yards keep reaching for it when the customer wants a shuttle rather than a station."
     },
     "boron": {
       "label": "Boron",
       "symbol": "B",
       "z": 5,
-      "arrangement": "trigonal",
-      "description": "Three rooms at 120 degrees around a flat core. The first hull in the list that has a plane, and therefore the first one that has a floor: boron-pattern stations are almost always flown with the ring horizontal."
+      "period": 2,
+      "valence": 3,
+      "description": "Five in the nucleus, three extremities spread around it. The first class that surrounds its own core: no matter where you approach from, an arm is pointing somewhere near you. Awkward to berth, hard to lose."
     },
     "carbon": {
       "label": "Carbon",
       "symbol": "C",
       "z": 6,
-      "arrangement": "tetrahedral",
-      "description": "Four rooms around a core at 109.5 degrees, no two tunnels in the same plane. The workhorse: it takes load evenly from every direction, it looks deliberate from any angle, and it is the pattern every yard reaches for when the customer has not said what the ship is for."
+      "period": 2,
+      "valence": 4,
+      "description": "Six fused into the core, four arms off it, no two tunnels sharing a plane. The workhorse: it takes load evenly from every direction, it reads as deliberate from any angle, and it is what every yard builds when nobody has said what the ship is for."
     },
     "nitrogen": {
       "label": "Nitrogen",
       "symbol": "N",
       "z": 7,
-      "arrangement": "pyramidal",
-      "description": "Three rooms swept below the core, leaving the dorsal face clear. The lone pair is real estate: nitrogen hulls put a bridge, a mast or a gun on the empty top face, which is why the pattern shows up on so many ships that had to look like they meant it."
+      "period": 2,
+      "valence": 5,
+      "description": "A seven-body nucleus carrying five arms. The core is now most of the ship by mass and the extremities are genuinely small - the first class that reads as a station with tenders docked rather than as a vessel with wings."
     },
     "oxygen": {
       "label": "Oxygen",
       "symbol": "O",
       "z": 8,
-      "arrangement": "bent",
-      "description": "Two rooms at 104.5 degrees off one core. Asymmetric, awkward to dock and impossible to mistake for anything else - the bent pair is the silhouette that makes a water-pattern hull recognisable across a hangar."
+      "period": 2,
+      "valence": 6,
+      "description": "The nucleus at its full eight, six arms around it on the three axes. There is no bow and no stern left: every direction has a room in it, and the core is a solid block of hull with the whole crew arranged on its surface."
     },
     "fluorine": {
       "label": "Fluorine",
       "symbol": "F",
       "z": 9,
-      "arrangement": "single",
-      "description": "A crowded core with one free berth. Fluorine hulls are built to be joined to something else and are close to useless alone: the single outward tunnel is the whole point of the design."
+      "period": 2,
+      "valence": 7,
+      "description": "Eight fused, seven arms - one shy of a full shell, and the gap is the point. Every fluorine hull has exactly one clear face, which is where the yards put the dock, the drive, or whatever the customer would rather not run a corridor past."
     },
     "neon": {
       "label": "Neon",
       "symbol": "Ne",
       "z": 10,
-      "arrangement": "octahedral",
-      "description": "A room on all six axes. Closed shell, no free face, nothing left to bolt on - a neon hull is a finished object, and the yards sell it as one. Inside there is no up, which crews either love or leave."
+      "period": 2,
+      "valence": 8,
+      "description": "Eight in the core and eight arms on the corners of a cube. The full shell: the densest arrangement the eight-children rule allows, sixteen rooms of five hundred cubic metres each, and not one face of the core left unused."
     },
     "sodium": {
       "label": "Sodium",
       "symbol": "Na",
       "z": 11,
-      "arrangement": "single",
-      "description": "Two filled shells and one outlying room, the lithium plan a size up. The outer module sits much further out than the core's own diameter, and the long tunnel to it flexes: sodium hulls are known for the noise."
+      "period": 3,
+      "valence": 1,
+      "description": "A full eight-body nucleus and a single long arm. The third-row classes push their extremities further out, so this reads as a heavy core towing one distant pod - a tug, a tender, or a station with one thing it needs to keep at arm's length."
     },
     "silicon": {
       "label": "Silicon",
       "symbol": "Si",
       "z": 14,
-      "arrangement": "tetrahedral",
-      "description": "Carbon's plan in a heavier frame - four rooms at 109.5 degrees around a larger core. Slower, stiffer, and cheap: silicon-pattern hulls are what a yard builds when the customer wants a carbon ship and cannot pay for one."
+      "period": 3,
+      "valence": 4,
+      "description": "Carbon's four arms on a third-row frame: the same berth count, the same tetrahedral spread, a heavier core and longer tunnels. Where carbon is compact, this is roomy - the difference a yard sells as 'the same plan, but you can get a loader down the corridor'."
     },
     "phosphorus": {
       "label": "Phosphorus",
       "symbol": "P",
       "z": 15,
-      "arrangement": "bipyramidal",
-      "description": "Three rooms around the waist and one at each pole. The first pattern with two different kinds of berth, equatorial and axial, and therefore the first one where a hull acquires a bow by convention rather than by accident."
+      "period": 3,
+      "valence": 5,
+      "description": "Five arms off a full nucleus: three around the waist and one at each pole. The first class with two genuinely different KINDS of berth, which is why it turns up wherever a ship needs to treat its poles differently from its flanks."
     },
     "sulphur": {
       "label": "Sulphur",
       "symbol": "S",
       "z": 16,
-      "arrangement": "octahedral",
-      "description": "Six rooms on the three axes around a heavy core. The same closed geometry as neon at a working scale - packed, symmetric, and the standard plan for a refinery tender that never needs to point anywhere in particular."
+      "period": 3,
+      "valence": 6,
+      "description": "Six arms on the three axes off a heavy third-row core. Symmetrical, cramped and complete - the same plan as oxygen with more room between the extremities, which is the whole reason anyone picks it over oxygen."
     },
     "chlorine": {
       "label": "Chlorine",
       "symbol": "Cl",
       "z": 17,
-      "arrangement": "single",
-      "description": "One free berth on a crowded core, the fluorine plan grown out. Sold as a docking tender: the single tunnel is oversized on purpose, because the whole ship exists to be the thing on the other end of somebody else's hatch."
+      "period": 3,
+      "valence": 7,
+      "description": "Seven arms and one clear face, on a third-row frame. Fluorine's plan with the reach to use it: the gap is big enough to bring something large alongside without threading it between two tunnels."
     },
     "argon": {
       "label": "Argon",
       "symbol": "Ar",
       "z": 18,
-      "arrangement": "cubic",
-      "description": "Eight rooms on the corners of a cube. The densest closed shell the eight-tunnel structural limit allows, and it is a genuinely difficult thing to fly - but nothing in the catalogue looks less like it was assembled by accident."
+      "period": 3,
+      "valence": 8,
+      "description": "The full shell at third-row spacing: eight fused in the core, eight arms on the cube's corners, sixteen bodies of five hundred cubic metres. The largest part count any class reaches, and the plainest statement of what the volume budget buys."
     }
   },
   "molecules": {
