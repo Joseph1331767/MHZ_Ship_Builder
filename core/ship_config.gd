@@ -34,7 +34,7 @@ var max_cost: float = INF
 var areal_density_kg_m2: float = 120.0
 
 ## Hull shell thickness. The interior isosurface is the -hull_thickness_m level set.
-var hull_thickness_m: float = 0.4
+var hull_thickness_m: float = 0.2
 
 ## Voxel edge for the surface-nets bake grid.
 var bake_cell_m: float = 0.25
@@ -108,7 +108,12 @@ var room_span_m: float = 3.0
 
 ## Default outside diameter, in metres, of a template hallway. 1 m is a crawl-through: shoulders
 ## touching, which is the point.
-var tunnel_bore_m: float = 1.0
+## RETIRED(ADR 0015, 2026-09-04): 1.0. A tunnel cannot be seated into more deeply than its own
+## radius - measured, a room on a 1.0 m bore tube reaches 0.503 however deep it is asked to go - and
+## the 0.20 m wall needs an embed of 0.60 before two cavities meet with any margin. So the bore
+## followed: 1.4 m takes the 0.60, and with 0.20 m of wall either side it leaves a 1.0 m clear
+## corridor, which is a corridor rather than a crawlway.
+var tunnel_bore_m: float = 1.4
 
 ## Default length, in metres, of a template hallway between two room modules, measured centre to
 ## centre of the rooms it joins minus their radii - i.e. the open run a crew member crawls.
@@ -120,7 +125,14 @@ var tunnel_length_m: float = 2.0
 ## parent touches it at a single point, "theres no real connection". Keep it above twice
 ## hull_thickness_m so the two interiors meet through the join. See
 ## [method ShipAttach.default_offset].
-var attach_embed_m: float = 0.45
+## RETIRED(ADR 0015, 2026-09-04): 0.45, which held the invariant below at the 0.15 m wall the pack
+## used to ship. It does not at 0.20 m - measured, a sphere seated on a sphere stops merging - so
+## the embed followed the wall. 0.60 rather than the 0.50 that merely scrapes past: two 0.20 m
+## walls need more than 0.40 m of overlap before the cavities meet at all, so 0.50 leaves a
+## connection one tenth of a metre deep, which is real but so thin that the validator sampled
+## straight through it on a neon class tunnel. 0.60 leaves 0.20 m, which is a margin rather than a
+## coincidence.
+var attach_embed_m: float = 0.60
 ## Cap on that depth as a fraction of the part's own height, so a thin plate is not buried.
 var attach_embed_max_fraction: float = 0.5
 

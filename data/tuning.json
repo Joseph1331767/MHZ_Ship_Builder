@@ -47,8 +47,8 @@
     "max": 500.0
   },
   "hull_thickness_m": {
-    "value": 0.15,
-    "description": "Shell thickness in metres used to define the interior isosurface (sdf(p) < -hull_thickness_m) and, in Phase 2, the partition plate at a hatched joint. Purely geometric in Phase 1 - the bake still produces the all-open studio hull.",
+    "value": 0.2,
+    "description": "Hull wall thickness in metres. Every module is built as a solid and then hollowed: an interior surface is derived analytically from the same parametric primitive, inset by this much, and subtracted from the outer shape (ADR 0015). Seam and hatch faces stay SOLID - the interior retreats from them too - so a module is a closed shell with no opening until a hatch is cut. Also the level the Surface Nets bake extracts its interior isosurface at.",
     "min": 0.01,
     "max": 2.0
   },
@@ -146,8 +146,8 @@
     "max": 20.0
   },
   "tunnel_bore_m": {
-    "value": 1.0,
-    "description": "Outside diameter, in metres, of a template hallway cylinder. 1 m is a crawl-through with shoulders touching - deliberately uncomfortable, and deliberately much narrower than room_span_m so a template ship reads as modules joined by ducts rather than as one blob.",
+    "value": 1.4,
+    "description": "Outside diameter, in metres, of a template hallway cylinder. 1 m is a crawl-through with shoulders touching - deliberately uncomfortable, and deliberately much narrower than room_span_m so a template ship reads as modules joined by ducts rather than as one blob. COUPLED TO attach_embed_m and hull_thickness_m: a tunnel cannot be seated into more deeply than its own radius, and a 0.20 m wall needs a 0.60 m embed before two cavities meet with any margin - so the bore has to be at least 1.2 m. 1.4 m leaves a 1.0 m clear corridor inside the walls (ADR 0015).",
     "min": 0.4,
     "max": 6.0
   },
@@ -158,8 +158,8 @@
     "max": 30.0
   },
   "attach_embed_m": {
-    "value": 0.45,
-    "description": "How deep a newly placed part is sunk into its parent by default, in metres: the part's lowest point ends up this far below the parent's surface, measured on the actual surfaces, so a ring seated on a sphere is sunk at its rim and not at the empty axis. A part seated flush touches a curved parent at a single point and reads as resting on it rather than joined to it. Keep this above twice hull_thickness_m: the interiors then meet through the join, and a hatch there opens onto air instead of solid hull. This only sets the offset a new part STARTS at - 0 still means flush, and the offset stays editable.",
+    "value": 0.6,
+    "description": "How deep a newly placed part is sunk into its parent by default, in metres: the part's lowest point ends up this far below the parent's surface, measured on the actual surfaces, so a ring seated on a sphere is sunk at its rim and not at the empty axis. A part seated flush touches a curved parent at a single point and reads as resting on it rather than joined to it. Keep this above twice hull_thickness_m: the interiors then meet through the join, and a hatch there opens onto air instead of solid hull. This only sets the offset a new part STARTS at - 0 still means flush, and the offset stays editable. COUPLED TO hull_thickness_m: this has to be deep enough that the two interiors meet through the join, and how deep that is depends on the wall. Measured at the 0.20 m wall, 0.45 leaves a sphere seated on a sphere unmerged and 0.50 is the first value where every compact pair merges, and 0.60 is used so the connection is a margin rather than a coincidence - two 0.20 m walls need more than 0.40 m of overlap before the cavities touch at all (ADR 0015). Retune both together or neither.",
     "min": 0.0,
     "max": 5.0
   },

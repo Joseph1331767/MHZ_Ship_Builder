@@ -16,9 +16,13 @@ var _cfg: ShipConfig
 
 func before() -> void:
 	_data = ShipData.new()
-	assert_bool(_data.load_all()).append_failure_message(
-		"ShipData.load_all() failed, load_errors=%s" % [str(_data.load_errors)]
-	).is_true()
+	(
+		assert_bool(_data.load_all())
+		. append_failure_message(
+			"ShipData.load_all() failed, load_errors=%s" % [str(_data.load_errors)]
+		)
+		. is_true()
+	)
 	_cfg = _data.config
 
 
@@ -71,12 +75,21 @@ func _place(
 func test_flush_on_a_sphere_is_a_tangent_point() -> void:
 	# The complaint, reproduced: offset 0 on a curved parent touches and nothing more.
 	var flush: Dictionary = _place("sphere_pod", "box_hull", 0.0, 0.0, 0.0)
-	assert_bool(flush["merges"]).append_failure_message(
-		"flush box on a sphere should not merge - depth %.3f" % [float(flush["depth"])]
-	).is_false()
+	(
+		assert_bool(flush["merges"])
+		. append_failure_message(
+			"flush box on a sphere should not merge - depth %.3f" % [float(flush["depth"])]
+		)
+		. is_false()
+	)
 
 
 func test_default_embed_joins_every_compact_pair_in_every_direction() -> void:
+	# READS THE SHIPPED DEFAULTS ON PURPOSE. `attach_embed_m` and `hull_thickness_m` are coupled -
+	# ShipConfig says of the embed "keep it above twice hull_thickness_m so the two interiors meet
+	# through the join" - and this is the test that holds them to it. When the wall moved to 0.20 m
+	# for the mesh shell (ADR 0015) this failed on the two curved pairs, and the answer was to move
+	# the embed with it rather than to pin the test to the wall it used to like.
 	var target: float = _cfg.attach_embed_m
 	for parent_family: String in COMPACT:
 		for child_family: String in COMPACT:
@@ -88,12 +101,20 @@ func test_default_embed_joins_every_compact_pair_in_every_direction() -> void:
 					"%s on %s yaw=%.0f pitch=%.0f: offset %.3f depth %.3f"
 					% [child_family, parent_family, d[0], d[1], placed["offset"], placed["depth"]]
 				)
-				assert_float(float(placed["depth"])).append_failure_message(
-					label + " - sole depth is off the target %.3f" % target
-				).is_equal_approx(target, 0.01)
-				assert_bool(placed["merges"]).append_failure_message(
-					label + " - interiors do not meet at the hull thickness"
-				).is_true()
+				(
+					assert_float(float(placed["depth"]))
+					. append_failure_message(
+						label + " - sole depth is off the target %.3f" % target
+					)
+					. is_equal_approx(target, 0.01)
+				)
+				(
+					assert_bool(placed["merges"])
+					. append_failure_message(
+						label + " - interiors do not meet at the hull thickness"
+					)
+					. is_true()
+				)
 
 
 func test_embed_is_capped_at_a_fraction_of_the_part_height() -> void:
@@ -111,9 +132,13 @@ func test_embed_is_capped_at_a_fraction_of_the_part_height() -> void:
 	)
 	var cap: float = 0.05 * child.local_aabb().size.y
 	var height: float = child.local_aabb().size.y
-	assert_float(-offset).append_failure_message(
-		"a 5%% cap on a %.2f m part should sink it %.3f, got %.3f" % [height, cap, -offset]
-	).is_equal_approx(cap, 0.01)
+	(
+		assert_float(-offset)
+		. append_failure_message(
+			"a 5%% cap on a %.2f m part should sink it %.3f, got %.3f" % [height, cap, -offset]
+		)
+		. is_equal_approx(cap, 0.01)
+	)
 
 
 func test_a_part_that_never_touches_stays_flush() -> void:
@@ -130,10 +155,16 @@ func test_room_on_a_template_tube_reaches_the_target() -> void:
 	var open_scale: Vector3 = ShipTemplates._tube_scale(
 		_data, hall, _first_mfr(hall), _cfg.tunnel_bore_m, _cfg.tunnel_length_m
 	)
-	var hall_shape: ResolvedShape = ShipTemplates._resolved(_data, hall, _first_mfr(hall), open_scale)
-	assert_bool(hall_shape.scale.x != hall_shape.scale.y).append_failure_message(
-		"the open tube should be scaled unevenly, got %s" % hall_shape.scale
-	).is_true()
+	var hall_shape: ResolvedShape = ShipTemplates._resolved(
+		_data, hall, _first_mfr(hall), open_scale
+	)
+	(
+		assert_bool(hall_shape.scale.x != hall_shape.scale.y)
+		. append_failure_message(
+			"the open tube should be scaled unevenly, got %s" % hall_shape.scale
+		)
+		. is_true()
+	)
 	var room_scale: Vector3 = ShipTemplates._uniform_span(
 		_data, "box_hull", _first_mfr("box_hull"), _cfg.room_span_m
 	)
@@ -145,9 +176,13 @@ func test_room_on_a_template_tube_reaches_the_target() -> void:
 	probe.yaw = straight.x
 	probe.pitch = straight.y
 	var offset: float = ShipAttach.default_offset(hall_shape, room_shape, probe, _cfg)
-	assert_float(-offset).append_failure_message(
-		"room on the tube's cap should sink %.3f, got %.3f" % [_cfg.attach_embed_m, -offset]
-	).is_equal_approx(_cfg.attach_embed_m, 0.01)
+	(
+		assert_float(-offset)
+		. append_failure_message(
+			"room on the tube's cap should sink %.3f, got %.3f" % [_cfg.attach_embed_m, -offset]
+		)
+		. is_equal_approx(_cfg.attach_embed_m, 0.01)
+	)
 
 
 func test_every_template_joint_merges() -> void:
@@ -157,6 +192,8 @@ func test_every_template_joint_merges() -> void:
 		if doc == null:
 			continue
 		for issue: Dictionary in ShipValidate.validate(doc, _data, _cfg):
-			assert_str(str(issue["code"])).append_failure_message(
-				"template %s: %s" % [tid, issue["message"]]
-			).is_not_equal(ShipValidate.CODE_JOINT_NOT_OVERLAPPING)
+			(
+				assert_str(str(issue["code"]))
+				. append_failure_message("template %s: %s" % [tid, issue["message"]])
+				. is_not_equal(ShipValidate.CODE_JOINT_NOT_OVERLAPPING)
+			)

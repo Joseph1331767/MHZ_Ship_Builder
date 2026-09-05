@@ -83,7 +83,13 @@ class Piece:
 ## EMPTY dictionary when the two do not cross — in which case the caller should leave both alone,
 ## because there is no joint to flatten.
 static func resolve(
-	a: Piece, b: Piece, axis: Vector3, origin: Vector3, outward: bool, slice: bool
+	a: Piece,
+	b: Piece,
+	axis: Vector3,
+	origin: Vector3,
+	outward: bool,
+	slice: bool,
+	inset: float = 0.0
 ) -> Dictionary:
 	if a == null or b == null or a.mesh == null or b.mesh == null:
 		return {}
@@ -108,9 +114,13 @@ static func resolve(
 
 	# The smaller solid keeps its outward side and comes out flat on the plane. clip_to_plane keeps
 	# the side its normal points AWAY from, so the normal is reversed to keep the +up side.
-	var small_cut: PolyMesh = MeshCsg.clip_to_plane(
-		small.mesh, Plane(-up, (-up).dot(plane.normal * plane.d))
-	)
+	# BOTH SIDES RETREAT BY THE INSET, in opposite directions (ADR 0015). The plane itself is
+	# where the two outer surfaces meet; an INTERIOR surface has to stop short of it on whichever
+	# side it is on, or the cavity would open onto the seam face - and "the hatch and seam
+	# surfaces remain solid".
+	var small_plane: Plane = Plane(-up, -(plane.d + inset))
+	var large_plane: Plane = Plane(up, plane.d - inset)
+	var small_cut: PolyMesh = MeshCsg.clip_to_plane(small.mesh, small_plane)
 	if small_cut.is_empty():
 		return {}
 
@@ -120,18 +130,18 @@ static func resolve(
 		# closes flush at a raised pad. Slicing additionally takes the larger one back to the
 		# plane, which is what turns the pad into a facet across the whole solid.
 		if slice:
-			large_cut = MeshCsg.clip_to_plane(large_cut, plane)
-		var stub: PolyMesh = MeshCsg.clip_to_plane(small.mesh, plane)
+			large_cut = MeshCsg.clip_to_plane(large_cut, large_plane)
+		var stub: PolyMesh = MeshCsg.clip_to_plane(small.mesh, large_plane)
 		if not stub.is_empty():
 			large_cut = _add_stub(large_cut, stub)
 	elif slice:
-		large_cut = MeshCsg.clip_to_plane(large_cut, plane)
+		large_cut = MeshCsg.clip_to_plane(large_cut, large_plane)
 	else:
 		# IN, flanged: only the smaller solid's own cross-section is let into the larger one, so
 		# the host keeps its shape everywhere the joint does not reach.
-		var cutter: PolyMesh = _footprint_cutter(small_cut, plane, up)
+		var cutter: PolyMesh = _footprint_cutter(small_cut, small_plane_face(plane, inset), up)
 		if cutter.is_empty():
-			large_cut = MeshCsg.clip_to_plane(large_cut, plane)
+			large_cut = MeshCsg.clip_to_plane(large_cut, large_plane)
 		else:
 			large_cut = MeshMerge.merge(MeshCsg.subtract(large_cut, cutter))
 
@@ -244,6 +254,13 @@ static func _footprint_cutter(cut: PolyMesh, plane: Plane, up: Vector3) -> PolyM
 			PackedVector3Array([base[i], base[j], base[j] + up * reach, base[i] + up * reach])
 		)
 	return PolyMesh.from_polygons(polys)
+
+
+## The plane the smaller solid's flat face actually lands on, which is the seam plane pushed out
+## by the inset. [method _footprint_cutter] looks the face up by its plane, so it has to be told
+## the same one the cut used rather than the seam's own.
+static func small_plane_face(plane: Plane, inset: float) -> Plane:
+	return Plane(plane.normal, plane.d + inset)
 
 
 ## Twice the area of a loop, by Newell — used only to pick the largest cap.

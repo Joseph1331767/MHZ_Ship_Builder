@@ -1914,3 +1914,68 @@ builder through M6. There is no git remote configured, so nothing was pushed.
 Open the START dialog and build a few classes. Hydrogen should be one big room you can cross
 without a hatch; helium two fused halves with no corridor; carbon a six-body core with four arms;
 argon the full sixteen. They should all feel like the same amount of ship.
+
+
+## [2026-09-04c] The interior shell, and three levers that turned out to be one lever
+
+> "now we need the inner shell surfaces made .. the hatch and seam surfaces remain solid seems ..
+> about 20 cm thick hull by default. after each inner shape is created we need to subtract it from
+> the outer shape to get our approx 20cm thick hull."
+
+ADR 0011 named this as the one thing polygons were bad at, and used it as the reason to keep the
+SDF bake around: offsetting a mesh inward by a constant is genuinely hard, and offsetting a field is
+one subtraction. That is true of a mesh with no provenance, and this one has plenty. Every part
+comes from a PARAMETRIC primitive, so the interior surface is the same primitive with smaller
+numbers, carried through the same warps and the same transform. Exact for a box; correct to the
+tessellation for everything round.
+
+Both surfaces are seam-cut, and the interior's cuts are INSET - every plane pushed inward by the
+wall, every neighbouring cutter fattened by it. That is what keeps the cavity off the seam faces, so
+a module comes out a sealed shell rather than a tube with the ends open.
+
+Measured on a hydrogen class: outer half-width 10.0000 m, inner 9.8000 m, **a wall of 0.2000 m**,
+twelve faces - six outer and six inner - and zero open edges. Its 8000 m3 becomes 470 m3 of hull
+around a 7530 m3 cavity. Carbon hollows all fourteen parts; argon twenty of twenty-four, the other
+four being tunnels too narrow to have an interior at all, which is the honest answer.
+
+### The part that took the time
+
+The shipped wall was **0.15 m**, not the 0.4 the code default said - `data/tuning.json` had been
+overriding it, which is why the tests had been passing against a number nobody had read lately.
+Moving it to 0.20 m broke the invariant that two joined modules' interiors meet, and pulling that
+thread turned up a chain of three:
+
+- `attach_embed_m` 0.45 -> **0.60**. Two 0.20 m walls need more than 0.40 m of overlap before the
+  cavities touch; 0.50 is the first value where every compact pair merges, and it leaves a
+  connection a tenth of a metre deep that the validator sampled straight through.
+- `tunnel_bore_m` 1.0 -> **1.4**. A tunnel cannot be seated into more deeply than its own radius -
+  measured, a room on a 1.0 m bore reaches 0.503 however deep it is asked to go - so a 0.60 embed
+  needs a 1.2 m bore at least. 1.4 leaves a 1.0 m clear corridor inside the walls.
+- `SOLID_SAMPLE_STEPS` 10 -> **16**. What that probe looks for is a CAVITY, and a cavity shrinks
+  with the wall. The giveaway that it was sampling rather than geometry: the answer was NOT
+  MONOTONIC in the embed depth, flipping from eight unmerged joints to none and back as the overlap
+  slid between grid lines.
+
+Two wrong turns are worth recording because both were reasoned and both were wrong. The first was
+pinning the embed test to a 0.4 m wall "because that is what it was tuned at" - it was tuned at
+0.15, and a probe sweep showed thinner walls merge MORE easily, the opposite of what I had assumed.
+The second was lengthening the tunnel to let it take a deeper embed, when the limit was the BORE:
+0.503 was not half a length, it was a radius. Measuring first would have been faster than either.
+
+### Verified
+
+`--import` clean; **gdUnit4 264/264**; selfcheck PASSED with the hash unchanged at
+`5536787c6c35d236`; data validator PASSED, 0 warnings; gdformat and gdlint clean; windowed visual
+check PASSED, five modes, exit 0.
+
+Two tests now NAME the thickness they assert against rather than reading whatever the default is. A
+seam plate's field lift is proportional to the wall, so a 0.05 threshold is the wrong question at
+0.20 m. And every test about tessellation or seams builds with no wall at all, because a shell
+changes every volume in the ship - a test asking "did this style cut differently" would otherwise be
+reading the wall and the cut added together. Six times faster, too.
+
+### Still the human's to check
+
+Build a class and EXPLODE it. Each module should be a closed shell about 20 cm thick, with its seam
+faces solid - no cavity showing through where two modules meet. Nothing has a way in yet; hatch
+cutting and the frame between linked modules are next.

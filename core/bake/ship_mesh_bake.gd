@@ -51,6 +51,12 @@ class_name ShipMeshBake
 ## allowed for the gap this leaves on a curved host: "if a thin unseen buffer of space is needed
 ## between modules thats fine".
 ##
+## EVERY MODULE IS A SHELL (ADR 0015). Each part is built solid, an interior surface is derived
+## from the same parametric primitive inset by [member ShipConfig.hull_thickness_m], and the one is
+## subtracted from the other. The interior is cut by the SAME seams with every plane pushed inward
+## and every neighbour fattened, so it stops short of each seam face rather than opening onto it -
+## "the hatch and seam surfaces remain solid". A module is therefore a closed shell with no way in.
+##
 ## Hatch and doorway OPENINGS are not bored here yet; that is the next piece of work.
 ##
 ## THE SDF IS STILL THE TRUTH LAYER. Attach, snapping, joints, metrics and the budget gates all
@@ -77,6 +83,10 @@ class_name ShipMeshBake
 ## two of them overlap, which is at every joint. It is a per-part figure reported honestly rather
 ## than a hull volume; [ShipMetrics] remains the answer for what the ship encloses.
 ##
+## [code]hollowed_parts[/code] is how many came out as SHELLS rather than solids, at
+## [code]hull_thickness_m[/code] metres of wall. A part thinner than twice that has no interior to
+## give it and stays solid, which is the honest answer rather than a wall turned inside out.
+##
 ## [code]open_parts[/code] lists any part that did not come out a closed solid. It should always
 ## be empty; if it is not, the tessellator met a shape it could not close and the caller is being
 ## told rather than shown a hull with a hole in it.
@@ -93,16 +103,49 @@ static func bake(
 	var shapes: Dictionary = ShipAttach.resolve_shapes(doc, data, cfg)
 	var xforms: Dictionary = ShipAttach.resolve_all_from_shapes(doc, shapes, cfg)
 
-	var solids: Dictionary = {}
+	# THREE SURFACES PER PART (ADR 0015): the outer one, an interior one inset by the wall
+	# thickness, and a set of GROWN copies that the interior's seams are cut against.
+	var thickness: float = maxf(cfg.hull_thickness_m, 0.0)
+	var outer: Dictionary = {}
+	var inner: Dictionary = {}
+	var grown: Dictionary = {}
 	for id: Variant in xforms.keys():
 		var shape_v: Variant = shapes.get(id)
 		var xform_v: Variant = xforms.get(id)
 		if not (shape_v is ResolvedShape) or not (xform_v is Transform3D):
 			continue
-		var local: PolyMesh = ShapeMesh.build(shape_v as ResolvedShape, segments)
-		if not local.is_empty():
-			solids[id] = local.transformed(xform_v as Transform3D)
-	solids = _apply_seams(solids, ShipSeams.seams(doc, shapes, xforms, cfg, data), shapes, xforms)
+		var shape: ResolvedShape = shape_v
+		var xform: Transform3D = xform_v
+		var local: PolyMesh = ShapeMesh.build(shape, segments)
+		if local.is_empty():
+			continue
+		outer[id] = local.transformed(xform)
+		if thickness <= 0.0:
+			continue
+		var hollow: PolyMesh = ShapeMesh.build(ShapeMesh.inset(shape, thickness), segments)
+		if not hollow.is_empty():
+			inner[id] = hollow.transformed(xform)
+		var fat: PolyMesh = ShapeMesh.build(ShapeMesh.inset(shape, -thickness), segments)
+		grown[id] = fat.transformed(xform) if not fat.is_empty() else outer[id]
+
+	var seams: Array[Dictionary] = ShipSeams.seams(doc, shapes, xforms, cfg, data)
+	outer = _apply_seams(outer, outer, seams, shapes, xforms, 0.0)
+	if not inner.is_empty():
+		# The interior is cut by the SAME seams, every plane pushed in by the wall thickness and
+		# every neighbour fattened by it, so the cavity stops short of each seam face instead of
+		# opening onto it.
+		inner = _apply_seams(inner, grown, seams, shapes, xforms, thickness)
+
+	var solids: Dictionary = {}
+	var hollowed: int = 0
+	for id: Variant in outer:
+		var shell: PolyMesh = outer[id]
+		if inner.has(id):
+			var carved: PolyMesh = _cut(shell, inner[id])
+			if carved != shell:
+				hollowed += 1
+			shell = carved
+		solids[id] = shell
 
 	var order: PackedStringArray = PackedStringArray()
 	for id: Variant in solids.keys():
@@ -159,6 +202,8 @@ static func bake(
 	out["verts"] = verts
 	out["area_m2"] = area
 	out["parts_volume_m3"] = volume
+	out["hull_thickness_m"] = thickness
+	out["hollowed_parts"] = hollowed
 	out["aabb"] = bounds
 	out["open_parts"] = open_parts
 	out["ms"] = Time.get_ticks_msec() - t0
@@ -172,7 +217,12 @@ static func bake(
 ## while the results accumulate separately. A part that is the child of one seam and the host of
 ## another therefore gets both cuts, and gets the same two whichever seam is visited first.
 static func _apply_seams(
-	solids: Dictionary, seams: Array[Dictionary], shapes: Dictionary, xforms: Dictionary
+	solids: Dictionary,
+	cutters: Dictionary,
+	seams: Array[Dictionary],
+	shapes: Dictionary,
+	xforms: Dictionary,
+	inset: float
 ) -> Dictionary:
 	if solids.is_empty() or seams.is_empty():
 		return solids
@@ -209,8 +259,9 @@ static func _apply_seams(
 			var small_id: String = host_id if child_is_big else child_id
 			var loser: String = small_id if big_indents else big_id
 			var cutter: String = big_id if big_indents else small_id
-			out[loser] = _cut(out[loser], solids[cutter])
-			touched[loser] = true
+			if cutters.has(cutter):
+				out[loser] = _cut(out[loser], cutters[cutter])
+				touched[loser] = true
 		else:
 			# A FLAT linkage surface (ADR 0012). The plane comes from where the two surfaces
 			# actually cross, so the anchor frame is used only for the DIRECTION to measure along.
@@ -227,7 +278,8 @@ static func _apply_seams(
 				normal,
 				frame.origin,
 				big_indents,
-				surface == ShipJoint.SURFACE_FLAT_CUTOFF
+				surface == ShipJoint.SURFACE_FLAT_CUTOFF,
+				inset
 			)
 			# An empty result means the two never cross, so there is no joint to flatten and
 			# both keep the shape they had.

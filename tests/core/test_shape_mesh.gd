@@ -24,6 +24,16 @@ var _data: ShipData
 var _cfg: ShipConfig
 
 
+## A config with NO hull wall, for the tests that are about tessellation and seams rather than
+## shells. A shell changes every volume in the ship, so a test asking "did this style cut
+## differently" would otherwise be reading the wall and the cut added together - and hollowing a
+## carbon class six times over took 35 seconds on its own. The shell has its own tests below.
+func _seam_cfg() -> ShipConfig:
+	var out: ShipConfig = ShipConfig.from_dict(_cfg.snapshot())
+	out.hull_thickness_m = 0.0
+	return out
+
+
 func before() -> void:
 	_data = ShipData.new()
 	(
@@ -164,7 +174,7 @@ func test_a_box_volume_survives_non_uniform_scale() -> void:
 func test_a_template_ship_bakes_every_part_closed() -> void:
 	var doc: ShipDoc = ShipTemplates.build(_data, _cfg, TEMPLATE, {})
 	assert_object(doc).is_not_null()
-	var report: Dictionary = ShipMeshBake.bake(doc, _data, _cfg)
+	var report: Dictionary = ShipMeshBake.bake(doc, _data, _seam_cfg())
 	var order: PackedStringArray = report["order"]
 	assert_int(order.size()).append_failure_message("nothing was baked").is_greater(0)
 	(
@@ -182,7 +192,7 @@ func test_the_bake_agrees_with_the_ship_field() -> void:
 	# End to end: the placement transform is applied to the mesh here and inverted inside the
 	# field, so this checks the whole chain rather than the tessellator alone.
 	var doc: ShipDoc = ShipTemplates.build(_data, _cfg, TEMPLATE, {})
-	var report: Dictionary = ShipMeshBake.bake(doc, _data, _cfg)
+	var report: Dictionary = ShipMeshBake.bake(doc, _data, _seam_cfg())
 	var sdf: ShipSdf = ShipSdf.build(doc, _data, _cfg)
 	var index_of: Dictionary = {}
 	for i: int in sdf.part_count():
@@ -216,8 +226,8 @@ func test_the_bake_agrees_with_the_ship_field() -> void:
 func test_the_bake_is_deterministic() -> void:
 	# Determinism is a gate (AGENTS 8b), and this walks a Dictionary to find its part order.
 	var doc: ShipDoc = ShipTemplates.build(_data, _cfg, TEMPLATE, {})
-	var first: Dictionary = ShipMeshBake.bake(doc, _data, _cfg)
-	var second: Dictionary = ShipMeshBake.bake(doc, _data, _cfg)
+	var first: Dictionary = ShipMeshBake.bake(doc, _data, _seam_cfg())
+	var second: Dictionary = ShipMeshBake.bake(doc, _data, _seam_cfg())
 	assert_array(Array(first["order"] as PackedStringArray)).is_equal(
 		Array(second["order"] as PackedStringArray)
 	)
@@ -298,7 +308,7 @@ func test_each_seam_style_deforms_the_meshes_differently() -> void:
 		var doc: ShipDoc = base.duplicate_doc()
 		for jid: String in doc.joints:
 			(doc.joints[jid] as ShipJoint).seam_style = style
-		var report: Dictionary = ShipMeshBake.bake(doc, _data, _cfg)
+		var report: Dictionary = ShipMeshBake.bake(doc, _data, _seam_cfg())
 		var solids: Dictionary = report["solids"]
 		(
 			assert_int((report["open_parts"] as PackedStringArray).size())
@@ -363,7 +373,7 @@ func _host_volume(base: ShipDoc, style: String) -> float:
 	var doc: ShipDoc = base.duplicate_doc()
 	for jid: String in doc.joints:
 		(doc.joints[jid] as ShipJoint).seam_style = style
-	var solids: Dictionary = ShipMeshBake.bake(doc, _data, _cfg)["solids"]
+	var solids: Dictionary = ShipMeshBake.bake(doc, _data, _seam_cfg())["solids"]
 	return (solids[doc.root] as PolyMesh).volume()
 
 
@@ -378,7 +388,7 @@ func test_every_seam_style_bakes_closed_solids() -> void:
 		var doc: ShipDoc = base.duplicate_doc()
 		for jid: String in doc.joints:
 			(doc.joints[jid] as ShipJoint).seam_style = style
-		var report: Dictionary = ShipMeshBake.bake(doc, _data, _cfg)
+		var report: Dictionary = ShipMeshBake.bake(doc, _data, _seam_cfg())
 		(
 			assert_int((report["open_parts"] as PackedStringArray).size())
 			. append_failure_message(
@@ -421,7 +431,7 @@ func _bake_with_style(style: String) -> Dictionary:
 	var doc: ShipDoc = ShipTemplates.build(_data, _cfg, TEMPLATE, {})
 	for jid: String in doc.joints:
 		(doc.joints[jid] as ShipJoint).seam_style = style
-	return ShipMeshBake.bake(doc, _data, _cfg)
+	return ShipMeshBake.bake(doc, _data, _seam_cfg())
 
 
 func test_a_flange_leaves_the_host_alone_where_a_slice_cuts_it() -> void:
@@ -443,7 +453,7 @@ func test_the_child_is_cut_flush_at_the_host_surface() -> void:
 	var doc: ShipDoc = ShipTemplates.build(_data, _cfg, TEMPLATE, {})
 	for jid: String in doc.joints:
 		(doc.joints[jid] as ShipJoint).seam_style = ShipJoint.SEAM_SMALL_FLAT_INSERT
-	var report: Dictionary = ShipMeshBake.bake(doc, _data, _cfg)
+	var report: Dictionary = ShipMeshBake.bake(doc, _data, _seam_cfg())
 	var solids: Dictionary = report["solids"]
 	var hull: PolyMesh = solids[doc.root]
 	var tube: PolyMesh = solids[_a_tunnel(doc)]
@@ -505,7 +515,7 @@ func _host_volume_for(template: String, style: String) -> float:
 	var doc: ShipDoc = ShipTemplates.build(_data, _cfg, template, {})
 	for jid: String in doc.joints:
 		(doc.joints[jid] as ShipJoint).seam_style = style
-	var solids: Dictionary = ShipMeshBake.bake(doc, _data, _cfg)["solids"]
+	var solids: Dictionary = ShipMeshBake.bake(doc, _data, _seam_cfg())["solids"]
 	return (solids[doc.root] as PolyMesh).volume()
 
 
@@ -517,3 +527,82 @@ func _a_tunnel(doc: ShipDoc) -> String:
 		if (doc.parts[pid] as ShipPart).role == ShipPart.ROLE_HALLWAY:
 			return pid
 	return doc.root
+
+
+# --- the interior shell (ADR 0015) ----------------------------------------------------------------
+
+
+func test_every_module_is_hollowed_to_the_wall_thickness() -> void:
+	# A box module is the case where the answer is exact and checkable: its interior is the same
+	# box with the wall taken off every face, so the gap between the outer and inner surfaces IS
+	# the wall. Measured off the mesh rather than assumed from the config.
+	var doc: ShipDoc = ShipTemplates.build(_data, _cfg, "hydrogen", {})
+	var report: Dictionary = ShipMeshBake.bake(doc, _data, _cfg)
+	var hull: PolyMesh = (report["solids"] as Dictionary)[doc.root]
+	(
+		assert_int(int(report["hollowed_parts"]))
+		. append_failure_message("a hydrogen class is one module and it should be hollow")
+		. is_equal(1)
+	)
+	assert_int(hull.open_edges()).append_failure_message("hollowing opened the hull").is_equal(0)
+	# Six outer faces and six inner ones.
+	assert_int(hull.face_count()).is_equal(12)
+
+	var box: AABB = hull.aabb()
+	var centre: Vector3 = box.get_center()
+	var outer_half: float = box.size.x * 0.5
+	var inner_half: float = 0.0
+	for v: Vector3 in hull.vertices:
+		var d: float = absf(v.x - centre.x)
+		if d < outer_half - 0.001:
+			inner_half = maxf(inner_half, d)
+	(
+		assert_float(outer_half - inner_half)
+		. append_failure_message(
+			(
+				"wall measured %.4f m, asked for %.4f"
+				% [outer_half - inner_half, _cfg.hull_thickness_m]
+			)
+		)
+		. is_equal_approx(_cfg.hull_thickness_m, 1.0e-4)
+	)
+
+
+func test_a_hollow_module_encloses_less_than_a_solid_one() -> void:
+	# The cavity is real volume, not a surface trick: the same ship with no wall weighs the whole
+	# budget, and with one it weighs only what the walls are made of.
+	var doc: ShipDoc = ShipTemplates.build(_data, _cfg, "hydrogen", {})
+	var solid: float = ShipMeshBake.bake(doc, _data, _seam_cfg())["parts_volume_m3"]
+	var shell: float = float(ShipMeshBake.bake(doc, _data, _cfg)["parts_volume_m3"])
+	assert_float(shell).append_failure_message("hollowing removed nothing").is_less(solid * 0.5)
+	assert_float(shell).append_failure_message("hollowing removed everything").is_greater(0.0)
+
+
+func test_a_part_thinner_than_two_walls_stays_solid() -> void:
+	# The honest answer for a part with no room for an interior. ShapeMesh.inset() collapses its
+	# primitive and build() hands back nothing, so the subtraction has nothing to take out.
+	var shape: ResolvedShape = _shape("box_hull", _bare("box_hull"), Vector3.ONE)
+	var wall: float = shape.size.x * 2.0
+	(
+		assert_bool(ShapeMesh.build(ShapeMesh.inset(shape, wall)).is_empty())
+		. append_failure_message("a part thinner than two walls should have no interior at all")
+		. is_true()
+	)
+
+
+func test_the_interior_does_not_open_onto_a_seam_face() -> void:
+	# "the hatch and seam surfaces remain solid". The interior is cut by the same seams with every
+	# plane pushed inward, so a module cut at a seam is still a CLOSED shell - if the cavity broke
+	# out through the cut face the solid would not close.
+	var doc: ShipDoc = ShipTemplates.build(_data, _cfg, TEMPLATE, {})
+	var report: Dictionary = ShipMeshBake.bake(doc, _data, _cfg)
+	(
+		assert_int((report["open_parts"] as PackedStringArray).size())
+		. append_failure_message("seam-cut modules came out open: %s" % [str(report["open_parts"])])
+		. is_equal(0)
+	)
+	(
+		assert_int(int(report["hollowed_parts"]))
+		. append_failure_message("nothing was hollowed on a seam-cut ship")
+		. is_greater(0)
+	)

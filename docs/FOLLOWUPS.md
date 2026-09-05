@@ -814,3 +814,39 @@ ADR 0014, plus the multi-select seam change.
 5. **Seam styling covers connections with BOTH ends selected.** A part selected on its own offers
    nothing, which is the reading that generalises the old two-part behaviour exactly - but it does
    mean there is no way to say "restyle everything attached to this one part" in a single gesture.
+
+
+## F27 — Additive contract extensions of 2026-09-04c: the interior shell — OPEN, DELIBERATE
+
+ADR 0015.
+
+- **`ShapeMesh.inset(shape, thickness)`** (new, static, public) and `_collapsed()` (private).
+- **`MeshFlange.resolve()`** gained a trailing optional `inset`; `small_plane_face()` is new.
+- **`ShipMeshBake._apply_seams()`** gained `cutters` and `inset` arguments (private). The report
+  gains `hull_thickness_m` and `hollowed_parts`.
+- **Retuned levers**: `hull_thickness_m` 0.15 -> 0.20, `attach_embed_m` 0.45 -> 0.60,
+  `tunnel_bore_m` 1.0 -> 1.4, `ShipJoints.SOLID_SAMPLE_STEPS` 10 -> 16. Each is the smallest value
+  that satisfies a stated invariant at the new wall; each carries the reasoning at its declaration.
+
+**No hash moves.** Measured: `5536787c6c35d236` either side.
+
+**Known limits, recorded rather than hidden.**
+
+1. **Hollowing roughly doubles the bake.** Every part is now two tessellations, two seam passes and
+   a subtraction: an argon class goes from about 0.6 s to 7.6 s.
+2. **The interior is derived from the PRIMITIVE, not offset from the mesh**, so it is exact only
+   where the primitive is. A sphere under non-uniform scale is an ellipsoid, and an ellipsoid inset
+   by a constant is not another ellipsoid - the wall is made uniform by shrinking against the
+   SMALLEST scale component, which is too thick on the long axes rather than too thin anywhere.
+   Same for `round_r`, which is still not built at all (F22 limit 1), so a part with an authored
+   fillet has a slightly larger wall than asked for at its corners.
+3. **A part thinner than twice the wall stays solid.** Correct, and worth knowing: at a 0.20 m wall
+   four of argon's twenty-four parts have no interior, all of them tunnels.
+4. **`hull_thickness_m`, `attach_embed_m` and `tunnel_bore_m` are a coupled set.** Retuning one
+   without the others breaks the "two interiors meet" invariant, and the failure is quiet - the
+   validator reports a joint that only touches. The couplings are written at each declaration; the
+   test that holds them to it is
+   `test_attach_embed :: test_default_embed_joins_every_compact_pair_in_every_direction`, which
+   reads the shipped defaults on purpose.
+5. **Hatch and doorway openings are still not cut**, so a module is a sealed shell. That is the
+   next piece of work, and it is what the interior was built for.

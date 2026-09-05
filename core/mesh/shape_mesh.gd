@@ -51,7 +51,7 @@ const MIN_EXTENT_M: float = 0.0001
 ## convention of [PolyMesh] and [MeshCsg]; the flip to Godot's clockwise front face happens once,
 ## in [method PolyMesh.to_array_mesh].
 static func build(shape: ResolvedShape, segments: int = RADIAL_SEGMENTS) -> PolyMesh:
-	if shape == null:
+	if shape == null or _collapsed(shape):
 		return PolyMesh.new()
 	var cols: int = maxi(segments, 3)
 	var twisted: bool = not is_zero_approx(shape.twist_deg)
@@ -59,6 +59,84 @@ static func build(shape: ResolvedShape, segments: int = RADIAL_SEGMENTS) -> Poly
 	if base.is_empty():
 		return base
 	return _warped(base, shape, twisted)
+
+
+## [param shape] with its primitive moved inward by [param thickness] WORLD metres, for building
+## an interior surface. A negative thickness grows it instead, which is how a cutter is fattened.
+##
+## ANALYTIC, NOT A MESH OFFSET. Insetting a polygon mesh by a constant distance is genuinely hard -
+## miters, self-intersections, vanishing features - and it is the one thing ADR 0011 named as the
+## reason polygons could not carry an interior shell. They do not have to: every part comes from a
+## PARAMETRIC primitive, so the inner surface is the same primitive with smaller numbers, carried
+## through the same domain warps and the same transform. Exact for a box, and correct to the
+## tessellation for everything round.
+##
+## THE SHRINK IS PER AXIS, DIVIDED BY THE SCALE. `scale` is applied after the primitive, so a local
+## shrink of `d` becomes a wall of `d * scale` in the world; dividing by the scale first is what
+## keeps the wall the thickness that was asked for. Where one number has to serve a whole
+## primitive - a sphere's single radius, a cylinder's round section - the SMALLEST scale component
+## is used, which errs toward walls that are too thick rather than too thin.
+##
+## Returns a shape whose primitive has collapsed (a zero or negative dimension) when the part is
+## thinner than twice the thickness. [method build] hands that back as an empty mesh, and a part
+## with no interior is correctly left solid.
+static func inset(shape: ResolvedShape, thickness: float) -> ResolvedShape:
+	var out: ResolvedShape = shape.smooth_copy()
+	out.rib_count = shape.rib_count
+	out.rib_amp = shape.rib_amp
+	out.scallop_amp = shape.scallop_amp
+	if is_zero_approx(thickness):
+		return out
+	var sx: float = maxf(absf(shape.scale.x), MIN_EXTENT_M)
+	var sy: float = maxf(absf(shape.scale.y), MIN_EXTENT_M)
+	var sz: float = maxf(absf(shape.scale.z), MIN_EXTENT_M)
+	var radial: float = thickness / minf(sx, sz)
+	var axial: float = thickness / sy
+	match shape.base:
+		ResolvedShape.Base.BOX:
+			out.size = shape.size - Vector3(thickness / sx, axial, thickness / sz)
+		ResolvedShape.Base.SPHERE:
+			var uniform: float = thickness / minf(sx, minf(sy, sz))
+			out.size = Vector3(shape.size.x - uniform, shape.size.y, shape.size.z)
+		ResolvedShape.Base.CYLINDER:
+			out.size = Vector3(shape.size.x - radial, shape.size.y - axial, shape.size.z)
+			if shape.radius_b >= 0.0:
+				out.radius_b = maxf(shape.radius_b - radial, 0.0)
+			out.end_round = maxf(shape.end_round - radial, 0.0)
+		ResolvedShape.Base.CONE:
+			out.size = Vector3(shape.size.x - radial, shape.size.y - axial, shape.size.z)
+		ResolvedShape.Base.CAPSULE:
+			# The caps shrink with the radius, so only the radius moves: taking the half-height in
+			# as well would pull the two hemispheres past each other on a stubby capsule.
+			out.size = Vector3(shape.size.x - radial, shape.size.y, shape.size.z)
+		ResolvedShape.Base.TORUS:
+			# The ring stays where it is and the tube thins: a torus insetted through its major
+			# radius would turn inside out rather than hollow.
+			out.size = Vector3(shape.size.x, shape.size.y - radial, shape.size.z)
+	out.refresh()
+	return out
+
+
+## True when the primitive has no room left in it - which is what [method inset] hands back for a
+## part thinner than twice the wall. An empty mesh is the right answer: that part has no interior
+## and is correctly left solid, rather than being given one turned inside out.
+static func _collapsed(shape: ResolvedShape) -> bool:
+	match shape.base:
+		ResolvedShape.Base.BOX:
+			return (
+				shape.size.x <= MIN_EXTENT_M
+				or shape.size.y <= MIN_EXTENT_M
+				or shape.size.z <= MIN_EXTENT_M
+			)
+		ResolvedShape.Base.SPHERE:
+			return shape.size.x <= MIN_EXTENT_M
+		ResolvedShape.Base.CYLINDER, ResolvedShape.Base.CONE:
+			return shape.size.x <= MIN_EXTENT_M or shape.size.y <= MIN_EXTENT_M
+		ResolvedShape.Base.CAPSULE:
+			return shape.size.x <= MIN_EXTENT_M
+		ResolvedShape.Base.TORUS:
+			return shape.size.x <= MIN_EXTENT_M or shape.size.y <= MIN_EXTENT_M
+	return false
 
 
 ## The unwarped, unscaled primitive: what [method ResolvedShape.sdf] asks after the domain warps.

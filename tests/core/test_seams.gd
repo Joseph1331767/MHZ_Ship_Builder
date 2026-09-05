@@ -9,6 +9,15 @@
 class_name TestSeams
 extends GdUnitTestSuite
 
+## How thick a hull this test asserts against, and it is NOT the shipped default.
+##
+## A seam plate is a slab of the hull thickness, so how far it can lift the field depends on it: at
+## the 0.20 m wall the lift is about 0.01 and the 0.05 threshold below is simply the wrong question
+## to ask. 0.15 is the wall this threshold was tuned at, named here so the two move together or not
+## at all - a test that reads whatever the default happens to be is a test that changes meaning
+## when someone retunes a lever.
+const WALL_M: float = 0.15
+
 const TOL: float = 0.01
 const TOL_V3: Vector3 = Vector3(0.01, 0.01, 0.01)
 
@@ -539,6 +548,7 @@ func test_the_three_probe_points_are_actually_different_places() -> void:
 
 
 func test_each_style_puts_its_wall_on_its_own_surface() -> void:
+	_cfg.hull_thickness_m = WALL_M
 	var t: float = _cfg.hull_thickness_m
 	# style -> the probe that must be WALL under it; under the other two styles that same probe
 	# must stay cavity. That is what makes this a statement about WHERE the wall is rather than

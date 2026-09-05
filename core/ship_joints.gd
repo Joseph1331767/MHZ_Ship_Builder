@@ -26,8 +26,17 @@ const MIN_PAIR_STEPS: int = 4
 const MAX_PAIR_STEPS: int = 14
 
 ## Grid resolution per axis for [method solid_pair_state]. Coarse on purpose - the validator runs
-## it per joint, per edit (SPEC 7: "a cheap SDF sample, no meshing").
-const SOLID_SAMPLE_STEPS: int = 10
+## it per joint, per edit (SPEC 7: "a cheap SDF sample, no meshing") - but not so coarse that it
+## reports a real connection as absent.
+##
+## RETIRED(ADR 0015, 2026-09-04): 10. THE THING BEING LOOKED FOR IS A CAVITY, AND A CAVITY SHRINKS
+## WITH THE WALL. At the 0.15 m hull the pack used to ship, ten steps found every template joint;
+## at 0.20 m it started missing the narrow ones - a neon class tunnel, 0.6 m of cavity inside a 1 m
+## bore, meeting a pod eight metres across. The giveaway that it was sampling and not geometry: the
+## answer was NOT MONOTONIC in the embed depth, going from eight unmerged joints to none and back
+## as the overlap slid between grid lines. Sixteen steps is about four times the samples on a
+## region that is small by definition, and it is still a sample rather than a mesh.
+const SOLID_SAMPLE_STEPS: int = 16
 
 
 ## Candidate joint pairs, deterministic, one entry per overlapping bracket:
