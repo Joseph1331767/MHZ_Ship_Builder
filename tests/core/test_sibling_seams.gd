@@ -1,0 +1,118 @@
+# SIBLING SEAMS (ADR 0034): a seam between two parts that stand SIDE BY SIDE rather than one upon
+# the other. Every other seam borrows the attach model's own plane - the anchor P on the host and
+# the normal N there - and two parts anchored to the beacon (ADR 0033) have none to borrow, so the
+# line between their centres stands in: it finds the host's surface on the way to the child, and it
+# is the way the two come apart. FOLLOWUPS F19 recorded the limitation this lifts.
+class_name TestSiblingSeams
+extends GdUnitTestSuite
+
+var _data: ShipData
+var _cfg: ShipConfig
+
+
+func before() -> void:
+	_data = ShipData.new()
+	(
+		assert_bool(_data.load_all())
+		. append_failure_message("ShipData.load_all() failed: %s" % [str(_data.load_errors)])
+		. is_true()
+	)
+	_cfg = ShipConfig.defaults()
+
+
+## SIBLING SEAMS (ADR 0034): two parts that stand side by side and MEET have a seam wherever a joint
+## says so - the plane on the host's surface, the normal along the line between their centres. This
+## is FOLLOWUPS F19's limitation lifted; without it a nucleus ringing the beacon carries no links at
+## all and every body bakes as a room of its own.
+func test_two_anchored_parts_that_meet_get_a_seam() -> void:
+	var doc: ShipDoc = ShipDoc.create_new("sphere_pod", "", _data, 0.0)
+	# Far enough apart to overlap like two fused bodies rather than to sit inside each other.
+	var radius: float = (
+		(ShipAttach.resolve_shapes(doc, _data, _cfg)[doc.root] as ResolvedShape).local_aabb().size.x
+		* 0.5
+	)
+	var beside: ShipPart = ShipPart.new()
+	beside.kind = ShipPart.KIND_PRIMITIVE
+	beside.family = "sphere_pod"
+	beside.params = ShapeGen.default_params(_data, "sphere_pod", "")
+	beside.absolute = Transform3D(Basis.IDENTITY, Vector3(radius * 1.4, 0.0, 0.0))
+	# No mirror twin: this test is about the seam between these two and nothing else.
+	beside.asymmetric = true
+	var other: String = doc.add_part(beside)
+	var shapes: Dictionary = ShipAttach.resolve_shapes(doc, _data, _cfg)
+	var xforms: Dictionary = ShipAttach.resolve_all_from_shapes(doc, shapes, _cfg)
+	# Neither stands on the other, and nothing joins them: they merge, exactly as they always did.
+	assert_int(ShipSeams.seams(doc, shapes, xforms, _cfg, _data).size()).is_equal(0)
+	var joint: ShipJoint = ShipJoint.from_dict(
+		doc.new_joint_id(), {"a": doc.root, "b": other, "mode": ShipJoint.MODE_OPEN}
+	)
+	doc.joints[joint.id] = joint
+	var seams: Array[Dictionary] = ShipSeams.seams(doc, shapes, xforms, _cfg, _data)
+	assert_int(seams.size()).is_equal(1)
+	var seam: Dictionary = seams[0]
+	assert_str(str(seam[ShipSeams.SEAM_MODE])).is_equal(ShipSeams.MODE_OPEN)
+	# The host is the one placed first, so the chain the explode walks cannot close on itself.
+	assert_str(str(seam[ShipSeams.SEAM_HOST])).is_equal(doc.root)
+	var frame: Transform3D = seam[ShipSeams.SEAM_FRAME]
+	# The normal runs from the host to the child, and the plane stands ON THE HOST'S SURFACE, which
+	# on a sphere is its own radius away along that line - the face a wall would be built on.
+	assert_vector(frame.basis.z.normalized()).is_equal_approx(Vector3.RIGHT, Vector3.ONE * 0.01)
+	assert_float(frame.origin.x).is_equal_approx(radius, radius * 0.02)
+	assert_float(absf(frame.origin.y) + absf(frame.origin.z)).is_less(0.01)
+
+
+## Far enough apart and the same joint is inert: a record over two solids that never meet describes
+## nothing, and inventing a plane for it would put a wall in open space.
+func test_two_anchored_parts_that_miss_each_other_get_none() -> void:
+	var doc: ShipDoc = ShipDoc.create_new("sphere_pod", "", _data, 0.0)
+	var away: ShipPart = ShipPart.new()
+	away.kind = ShipPart.KIND_PRIMITIVE
+	away.family = "sphere_pod"
+	away.params = ShapeGen.default_params(_data, "sphere_pod", "")
+	away.absolute = Transform3D(Basis.IDENTITY, Vector3(500.0, 0.0, 0.0))
+	away.asymmetric = true
+	var other: String = doc.add_part(away)
+	var joint: ShipJoint = ShipJoint.from_dict(
+		doc.new_joint_id(), {"a": doc.root, "b": other, "mode": ShipJoint.MODE_OPEN}
+	)
+	doc.joints[joint.id] = joint
+	var shapes: Dictionary = ShipAttach.resolve_shapes(doc, _data, _cfg)
+	var xforms: Dictionary = ShipAttach.resolve_all_from_shapes(doc, shapes, _cfg)
+	assert_int(ShipSeams.seams(doc, shapes, xforms, _cfg, _data).size()).is_equal(0)
+
+
+## A seam whose frame IS the identity - two parts on the world Z axis meeting at the origin - is a
+## seam like any other. It was dropped while "no seam" was reported as an identity transform, and a
+## ship built around a beacon at the origin is exactly where that pair turns up.
+func test_a_seam_that_lands_on_the_origin_is_still_a_seam() -> void:
+	var doc: ShipDoc = ShipDoc.create_new("sphere_pod", "", _data, 0.0)
+	var root: ShipPart = doc.parts[doc.root]
+	root.asymmetric = true
+	var radius: float = (
+		(ShipAttach.resolve_shapes(doc, _data, _cfg)[doc.root] as ResolvedShape).local_aabb().size.z
+		* 0.5
+	)
+	# The host one radius BACK of the origin, so its surface toward the child crosses exactly there.
+	root.absolute = Transform3D(Basis.IDENTITY, Vector3(0.0, 0.0, -radius))
+	var ahead: ShipPart = ShipPart.new()
+	ahead.kind = ShipPart.KIND_PRIMITIVE
+	ahead.family = "sphere_pod"
+	ahead.params = ShapeGen.default_params(_data, "sphere_pod", "")
+	ahead.absolute = Transform3D(Basis.IDENTITY, Vector3(0.0, 0.0, radius * 0.5))
+	ahead.asymmetric = true
+	var other: String = doc.add_part(ahead)
+	var joint: ShipJoint = ShipJoint.from_dict(
+		doc.new_joint_id(), {"a": doc.root, "b": other, "mode": ShipJoint.MODE_OPEN}
+	)
+	doc.joints[joint.id] = joint
+	var shapes: Dictionary = ShipAttach.resolve_shapes(doc, _data, _cfg)
+	var xforms: Dictionary = ShipAttach.resolve_all_from_shapes(doc, shapes, _cfg)
+	var seams: Array[Dictionary] = ShipSeams.seams(doc, shapes, xforms, _cfg, _data)
+	assert_int(seams.size()).is_equal(1)
+	var frame: Transform3D = seams[0][ShipSeams.SEAM_FRAME]
+	(
+		assert_float(frame.origin.length())
+		. append_failure_message("the seam did not land on the origin: %s" % str(frame.origin))
+		. is_less(0.01)
+	)
+	assert_bool(frame.is_equal_approx(Transform3D())).is_true()

@@ -528,9 +528,11 @@ whatever the joint already carries): the hole is cut from the family's pack defa
 the joint's stored params, so a family chosen any other way — a template option, a hand-edited
 file — is honoured. A picker is the remaining piece of that item.
 
-**Known limits, recorded rather than hidden.** A seam exists only where a part stands on its
-parent; two siblings that overlap have no attach plane and merge as they always did, whatever
-joint they carry. The metrics grid (`metrics_cell_m`, 0.5 m) is coarser than a wall and does not
+**Known limits, recorded rather than hidden.** RETIRED(ADR 0034, 2026-09-22): "A seam exists only
+where a part stands on its parent; two siblings that overlap have no attach plane and merge as they
+always did, whatever joint they carry" -> a JOINED pair that meets has a seam wherever the two
+stand, from the line between their centres (`ShipSeams._sibling_seams`). A pair with no joint
+record still merges. The metrics grid (`metrics_cell_m`, 0.5 m) is coarser than a wall and does not
 see the plates, so the interior-volume gauge reads the studio hull's cavity; the bake report
 does not. The explode view's per-module cell is coarse by design (`explode_cells_per_axis`).
 
@@ -963,6 +965,8 @@ ADR 0018.
    to be read on such a shell. Same root as limit 1.
 4. **Sibling overlaps on a WALLED nucleus are still unresolved** - the attach tree has no seam
    between them, and joints are only over pairs the player links. ADR 0017 limit, unchanged.
+   RESOLVED(ADR 0034, 2026-09-22): a joined pair that meets has a seam whether or not one stands on
+   the other, and the nucleus writes its own joints.
 5. **DOORWAY and HATCHED still resolve as WALL**, reported as `pending_seams`.
 
 
@@ -1564,3 +1568,38 @@ templates build.
 3. **The dot reads through everything** (no depth test), so it shows inside a hull it sits in. That
    is deliberate; it is also the only thing on screen that ignores depth besides the overlays.
 4. **`MeshFlange`'s relative tolerance changed no measured number** — it is a hardening, not a fix.
+
+
+## F46 - Additive extensions of 2026-09-22: the nucleus rings the beacon - OPEN, DELIBERATE
+
+ADR 0034. The public surfaces `docs/API_CONTRACT.md` pins are unchanged in name and signature.
+
+- **`ShipSeams.seams()`** also returns SIBLING seams: one per joined pair that meets without one
+  standing on the other. New private `_sibling_seams`, `_joined_pairs`, `_expanded_key`,
+  `_add_pair`, `_placement_rank`, `_sibling_frame`, `_crossing`, `_stand_apart`; new consts
+  `SIBLING_WALK_STEPS`, `SIBLING_REFINE_STEPS`.
+- **`ShipSeams.pairs_within()`** returns pairs of parts that stand side by side - two parts of one
+  definition, or two anchored to the beacon - as well as the tree pairs it always did.
+- **`ShipComponents.make_component()`** accepts anchored RIDERS beside the head (new private
+  `_anchored_tops`; `_selection_root` generalised; `_build_definition` stores a rider's anchor
+  relative to the head; `_swap_in_instance` takes a trailing `riders`, defaulted).
+  **`dissolve()`** returns a rider to the beacon.
+- **`ShipAttach._expand_instance_transforms`** places a parentless inner part by its `absolute`.
+- **`ShipTemplates`**: `_nucleus_radius`, `_reach_along`, `_anchored_at`, `_clump_pairs` (new,
+  private), `_lift_nucleus` takes `data`/`cfg`, `_layout` returns `slots`, `_node` carries an
+  `anchor`. `NUCLEUS_SOLVE_STEPS` is a new const. `nucleus_dirs()` is unchanged and still returns
+  the hang directions, which the fallback layout still uses.
+- **`ShipComponents.definition_order()`** walks each anchored member's own subtree instead of
+  leaving it to the id sort, so a parent precedes its child in a definition whose ids were not
+  handed out by `make_component`.
+- **`ShipSeams._sibling_frame()`** returns `{SEAM_FRAME: Transform3D}` or `{}`, not a sentinel
+  transform - the identity is a legal frame for a seam that lands on the origin.
+- Tests: `tests/core/test_sibling_seams.gd` (new, three), two in `tests/core/test_beacon.gd`, one
+  in `tests/core/test_components.gd`. Suite **320/320**.
+
+**No hash moves.** Measured: `5536787c6c35d236` either side.
+
+**Known limits** are ADR 0034's four: a sibling seam needs the pair to meet on the line between
+their centres; `dissolve` resolves a rider against the instance's own anchor (exact for an anchored
+instance, which is where nucleus components live); the radius is solved for the arrangement's
+tightest pair; and nothing places a part on the beacon from the UI yet.

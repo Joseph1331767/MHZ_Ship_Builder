@@ -15,9 +15,11 @@ extends RefCounted
 ## ONE SEAM PER PLACED PART THAT STANDS ON ANOTHER. Every non-root doc part, every component
 ## instance (on its proxy shape), and every symmetry twin gets one; the inner parts of a
 ## component do not, because a component is one room (SPEC 6, "combining multiple into the same
-## room removes all internal walls"). Sibling overlaps that are not parent/child have no attach
-## plane and therefore no seam: two children of one hull that happen to intersect merge as they
-## always did.
+## room removes all internal walls").
+## RETIRED(ADR 0034, 2026-09-22): "Sibling overlaps that are not parent/child have no attach plane
+## and therefore no seam" -> a JOINED pair that meets gets one wherever it stands, from the line
+## between their centres ([method _sibling_seams] below). Two parts that merely intersect with no
+## joint record between them still merge as they always did.
 ##
 ## THE PLANE IS THE ATTACH MODEL'S, NOT A NEW ONE. `frame.origin` is the anchor P the part was
 ## traced onto (or snapped to) and `frame.basis.z` is the mount normal N there, both carried
@@ -138,6 +140,13 @@ const OVAL_FAMILIES: Array = ["sliding_oval"]
 ## Below this a Vector2 is treated as zero length.
 const MIN_LENGTH_SQ: float = 1.0e-20
 
+## Steps along the line between two siblings' centres when a seam is looked for there, and the
+## bisections that sharpen each crossing afterwards. Coarse walk, exact finish: 48 steps cannot
+## miss a solid the pair could plausibly share, and 20 bisections put the plane inside a
+## ten-thousandth of the span (ADR 0034).
+const SIBLING_WALK_STEPS: int = 48
+const SIBLING_REFINE_STEPS: int = 20
+
 
 ## Every seam in the placed ship, in deterministic order. See the class docs for what a seam is.
 ## `shapes` and `xforms` are the attach pass's results ([method ShipAttach.resolve_shapes] and
@@ -216,7 +225,232 @@ static func seams(
 		var host_twin: String = ShipSymmetry.twin_id(host)
 		var twin_host: String = host_twin if xforms.has(host_twin) else host
 		out.append(_record(twin, twin_host, ShipMirror.reflect(frame, plane), mode, hole, style))
+	out.append_array(_sibling_seams(doc, shapes, xforms, cfg, data, out))
 	return out
+
+
+## SIBLING SEAMS (ADR 0034) - the seams of every JOINED PAIR that the two passes above cannot see,
+## because neither part stands on the other. Anchored parts ring the beacon side by side (ADR 0033)
+## and a nucleus laid out that way has no parent-child link to carry its links at all: without this,
+## its bodies read as separate rooms that happen to intersect, each shelled and walled against the
+## others. RESOLVES the limitation FOLLOWUPS F19 recorded as "seams only exist parent -> child".
+##
+## THE LINK IS THE JOINT RECORD, never mere contact: two parts that grew into each other with no
+## joint between them stay as they were, so nothing any existing document holds changes meaning.
+## The pairs come from the document's joints and from every placed instance's definition joints
+## (ADR 0025), which is where a component's internal links live.
+##
+## THE FRAME sits in the MIDDLE OF THE OVERLAP, on the line between the two centres, its Z pointing
+## at the child - the plane a wall would stand in, and the direction the explode pulls along. HOST
+## IS THE ONE PLACED FIRST, so the explode's host chains stay acyclic (its walk would otherwise
+## stall on a ring of sibling seams and leave the whole clump unmoved).
+static func _sibling_seams(
+	doc: ShipDoc,
+	shapes: Dictionary,
+	xforms: Dictionary,
+	cfg: ShipConfig,
+	data: ShipData,
+	placed_seams: Array[Dictionary]
+) -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	var seen: Dictionary = {}
+	for seam: Dictionary in placed_seams:
+		seen[ShipDoc.joint_key_for(str(seam[SEAM_CHILD]), str(seam[SEAM_HOST]))] = true
+	var rank: Dictionary = _placement_rank(doc, xforms)
+	var plane: String = doc.symmetry_plane
+	for pair: PackedStringArray in _joined_pairs(doc, xforms):
+		var a: String = pair[0]
+		var b: String = pair[1]
+		var host: String = a if int(rank.get(a, 0)) <= int(rank.get(b, 0)) else b
+		var child: String = b if host == a else a
+		if seen.has(ShipDoc.joint_key_for(child, host)):
+			continue
+		var found: Dictionary = _sibling_frame(shapes, xforms, child, host)
+		if found.is_empty():
+			continue
+		var frame: Transform3D = found[SEAM_FRAME]
+		seen[ShipDoc.joint_key_for(child, host)] = true
+		var mode: String = mode_for(doc, child, host)
+		var joint: ShipJoint = _joint_for(doc, child, host)
+		var hole: Dictionary = hole_for(mode, joint, data, cfg)
+		var style: String = joint.seam_style if joint != null else STYLE_FLAT
+		out.append(_record(child, host, frame, mode, hole, style))
+		var twin_child: String = ShipSymmetry.twin_id(child)
+		var twin_host: String = ShipSymmetry.twin_id(host)
+		if not xforms.has(twin_child):
+			continue
+		if not xforms.has(twin_host):
+			twin_host = host
+		out.append(
+			_record(twin_child, twin_host, ShipMirror.reflect(frame, plane), mode, hole, style)
+		)
+	return out
+
+
+## Every placed pair that carries a joint record, lowest id first, in deterministic order: the
+## document's own joints, then the definition joints of every placed instance mapped onto its
+## expanded keys (the definition's root is the instance itself - it has no key of its own).
+static func _joined_pairs(doc: ShipDoc, xforms: Dictionary) -> Array[PackedStringArray]:
+	var out: Array[PackedStringArray] = []
+	var seen: Dictionary = {}
+	var ids: Array = doc.joints.keys()
+	ids.sort()
+	for jid: Variant in ids:
+		var joint: ShipJoint = doc.joints[jid]
+		_add_pair(out, seen, xforms, joint.a, joint.b)
+	var keys: Array = xforms.keys()
+	keys.sort()
+	for key_v: Variant in keys:
+		var key: String = str(key_v)
+		if ShipSymmetry.is_twin_id(key):
+			continue
+		var part: ShipPart = doc.part_at(key)
+		if part == null and ShipComponents.is_expanded_id(key):
+			part = ShipComponents.inner_part(doc, key)
+		if part == null or part.kind != ShipPart.KIND_COMPONENT_INSTANCE:
+			continue
+		var definition: Dictionary = doc.components.get(part.family, {})
+		var root_inner: String = str(definition.get("root", ""))
+		var stored: Dictionary = definition.get("joints", {})
+		var joint_keys: Array = stored.keys()
+		joint_keys.sort()
+		for jkey: Variant in joint_keys:
+			var record: Variant = stored[jkey]
+			if not (record is Dictionary):
+				continue
+			var joint: ShipJoint = ShipJoint.from_dict(str(jkey), record)
+			_add_pair(
+				out,
+				seen,
+				xforms,
+				_expanded_key(key, joint.a, root_inner),
+				_expanded_key(key, joint.b, root_inner)
+			)
+	return out
+
+
+## The placed key of the inner part [param inner] of the instance at [param key]: the instance
+## itself for the definition's root, which has no key of its own.
+static func _expanded_key(key: String, inner: String, root_inner: String) -> String:
+	return key if inner == root_inner else key + "/" + inner
+
+
+## Append the placed pair ([param a], [param b]) once, lowest id first - skipping a pair that is
+## not placed, names one part twice, or has already been recorded.
+static func _add_pair(
+	out: Array[PackedStringArray], seen: Dictionary, xforms: Dictionary, a: String, b: String
+) -> void:
+	if a == b or not xforms.has(a) or not xforms.has(b):
+		return
+	var key: String = ShipDoc.joint_key_for(a, b)
+	if seen.has(key):
+		return
+	seen[key] = true
+	out.append(PackedStringArray([a, b]) if a <= b else PackedStringArray([b, a]))
+
+
+## Where each placed id stands in the order the attach pass built it: doc parts in tree order,
+## then the expanded inner parts. Only the ORDER matters - it decides which of two siblings is the
+## host, and an instance always outranks its own inner parts.
+static func _placement_rank(doc: ShipDoc, xforms: Dictionary) -> Dictionary:
+	var out: Dictionary = {}
+	var next: int = 0
+	for id: String in ShipAttach.ordered_part_ids(doc):
+		if xforms.has(id):
+			out[id] = next
+			next += 1
+	var keys: Array = xforms.keys()
+	keys.sort()
+	for key_v: Variant in keys:
+		var key: String = str(key_v)
+		if not out.has(key):
+			out[key] = next
+			next += 1
+	return out
+
+
+## The seam frame between two parts that merely overlap: the middle of the overlap along the line
+## from the host's centre to the child's, Z pointing at the child. An identity transform when the
+## two do not share space at all, which is the caller's signal to emit nothing.
+##
+## Returns `{SEAM_FRAME: Transform3D}`, or `{}` for a pair that does not meet. A DICTIONARY rather
+## than a sentinel transform: the identity IS a legal answer here - two bodies on the world Z axis
+## whose seam falls on the origin, which a ship built around a beacon makes ordinary - and reporting
+## it as "nothing found" would drop that seam silently.
+##
+## THE LINE OF CENTRES IS THE WHOLE MODEL. A pair with no attach between them has no mount normal
+## to borrow, and the line between what they are built around is the one direction both agree on:
+## it is the axis a wall would stand square to and the way the two come apart. It is also the
+## overlap test - the walk finds the child's near surface and the host's far one, and a pair whose
+## solids do not meet ALONG THAT LINE gets no seam rather than an invented plane, which is the
+## honest answer for two arms that cross off-centre.
+static func _sibling_frame(
+	shapes: Dictionary, xforms: Dictionary, child: String, host: String
+) -> Dictionary:
+	var child_shape_v: Variant = shapes.get(child)
+	var host_shape_v: Variant = shapes.get(host)
+	if not (child_shape_v is ResolvedShape) or not (host_shape_v is ResolvedShape):
+		return {}
+	var child_shape: ResolvedShape = child_shape_v
+	var host_shape: ResolvedShape = host_shape_v
+	var child_xform: Transform3D = xforms[child]
+	var host_xform: Transform3D = xforms[host]
+	if not (child_xform * child_shape.local_aabb()).intersects(
+		host_xform * host_shape.local_aabb()
+	):
+		return {}
+	var from: Vector3 = host_xform.origin
+	var axis: Vector3 = child_xform.origin - from
+	if axis.length_squared() <= MIN_LENGTH_SQ:
+		return {}
+	# PAST THE CHILD'S CENTRE, not up to it: two bodies can be fused deeply enough that the host
+	# still holds the child's centre - measured on a pair of pods a metre apart on a five metre
+	# span - and the host's surface in the child's direction is then further out than the child
+	# itself. The walk runs to the far side of the host's own bounds, where it must have left.
+	var to: Vector3 = (
+		from + axis.normalized() * (axis.length() + host_shape.local_aabb().size.length())
+	)
+	var enter: float = _crossing(child_shape, child_xform, from, to, false)
+	var leave: float = _crossing(host_shape, host_xform, from, to, true)
+	if enter < 0.0 or leave < 0.0 or leave <= enter:
+		return {}
+	return {
+		SEAM_FRAME: Transform3D(ShipAttach.mount_frame(axis.normalized()), from.lerp(to, leave))
+	}
+
+
+## Where the surface of [param shape] crosses the segment [param from] -> [param to], as a
+## fraction of it: the first EXIT when [param leaving] - the walk starts inside the host - and the
+## first ENTRY otherwise, which is the child's near surface. -1.0 when there is no crossing.
+static func _crossing(
+	shape: ResolvedShape, xform: Transform3D, from: Vector3, to: Vector3, leaving: bool
+) -> float:
+	var inv: Transform3D = xform.affine_inverse()
+	# THE WALK CAN START OR END INSIDE. Two bodies fused deep enough each hold the other's centre -
+	# ordinary in a nucleus, where the neighbours overlap by more than half a body - and there is
+	# then no crossing to find: the overlap simply runs to that end of the line.
+	if leaving and shape.sdf(inv * to) < 0.0:
+		return 1.0
+	if not leaving and shape.sdf(inv * from) < 0.0:
+		return 0.0
+	var steps: int = SIBLING_WALK_STEPS
+	var previous: float = shape.sdf(inv * from)
+	for i: int in range(1, steps + 1):
+		var t: float = float(i) / float(steps)
+		var here: float = shape.sdf(inv * from.lerp(to, t))
+		var crossed: bool = (previous < 0.0) != (here < 0.0)
+		if crossed and (leaving == (previous < 0.0)):
+			var lo: float = float(i - 1) / float(steps)
+			var hi: float = t
+			for _refine: int in SIBLING_REFINE_STEPS:
+				var mid: float = (lo + hi) * 0.5
+				if (shape.sdf(inv * from.lerp(to, mid)) < 0.0) == (previous < 0.0):
+					lo = mid
+				else:
+					hi = mid
+			return (lo + hi) * 0.5
+		previous = here
+	return -1.0
 
 
 ## The seam style over a (child, host) pair - see [ShipJoint]'s SEAM STYLES. A pair with no
@@ -311,16 +545,47 @@ static func pairs_within(doc: ShipDoc, ids: PackedStringArray) -> Array[PackedSt
 			continue
 		seen[key] = true
 		out.append(PackedStringArray([id, parent]))
-	if not out.is_empty() or inside.size() != 2:
-		return out
-	# TWO PARTS ALWAYS NAME THEIR OWN PAIR, even when neither stands on the other. A joint is keyed
-	# over an unordered pair, not over the attach tree, and two siblings that grew into each other
-	# meet just as truly as a child meets its host - whether they do is the caller job to check.
-	var both: PackedStringArray = PackedStringArray()
+	# PARTS THAT STAND SIDE BY SIDE NAME THEIR OWN PAIRS. A joint is keyed over an unordered pair,
+	# not over the attach tree, and two siblings that grew into each other meet just as truly as a
+	# child meets its host - whether they do is the caller's job to check (ADR 0034 gave the seam
+	# pass the geometry to answer it). Two parts always pair; past two, only parts that stand on
+	# NOTHING do - the bodies of a nucleus ringing the beacon, or the members of one definition -
+	# so an ordinary selection of seated parts still reports its tree links and nothing else.
+	var members: PackedStringArray = PackedStringArray()
 	for id: String in inside:
-		both.append(id)
-	out.append(both)
+		members.append(id)
+	members.sort()
+	if out.is_empty() and members.size() == 2:
+		out.append(members)
+		return out
+	for i: int in members.size():
+		for j: int in range(i + 1, members.size()):
+			var pair_key: String = ShipDoc.joint_key_for(members[i], members[j])
+			if seen.has(pair_key) or not _stand_apart(doc, members[i], members[j]):
+				continue
+			seen[pair_key] = true
+			out.append(PackedStringArray([members[i], members[j]]))
 	return out
+
+
+## Do [param a] and [param b] stand beside each other rather than one upon the other - two parts of
+## one definition, or two parts anchored to the beacon (ADR 0034)? A pair where either stands on
+## something is not one of these, whether or not it stands on the other.
+static func _stand_apart(doc: ShipDoc, a: String, b: String) -> bool:
+	if a == b:
+		return false
+	if not ShipComponents.inner_pair(doc, a, b).is_empty():
+		return true
+	# Past this point the answer is about parts anchored to the SHIP's beacon, so two inner parts of
+	# two unrelated instances are not a pair: each is anchored inside its own definition, which is
+	# not the same place, and `part_at` resolves an expanded id as readily as a document one.
+	if ShipComponents.is_expanded_id(a) or ShipComponents.is_expanded_id(b):
+		return false
+	var pa: ShipPart = doc.part_at(a)
+	var pb: ShipPart = doc.part_at(b)
+	if pa == null or pb == null:
+		return false
+	return pa.parent.is_empty() and pb.parent.is_empty()
 
 
 ## The link mode every pair in [param pairs] carries, or [constant MODE_WALL] when they disagree.

@@ -117,3 +117,59 @@ func test_the_anchor_travels_with_the_root() -> void:
 		. append_failure_message("dissolving the nucleus moved the ship off the beacon")
 		. is_less(0.01)
 	)
+
+
+## THE NUCLEUS RINGS THE BEACON (ADR 0034): every body stands in its arrangement's own slot at one
+## radius, so a class comes out symmetric about the centre instead of leaning off its first module.
+## On a CUBE family this is what the author was looking at - "the center proton was not centered top
+## and bottom .. when i exploded it it did not yeild parts that were expected, which in this exact
+## case would be 6 little square slabs" (2026-09-21).
+func test_the_nucleus_stands_in_its_arrangements_slots() -> void:
+	for family: String in ["box_hull", "sphere_pod", "cylinder_spar"]:
+		var doc: ShipDoc = ShipTemplates.build(
+			_data, _cfg, "carbon", {ShipTemplates.OPT_ROOM_FAMILY: family}
+		)
+		var xforms: Dictionary = ShipAttach.resolve_all(doc, _data, _cfg)
+		var places: Array[Vector3] = []
+		for key: Variant in xforms.keys():
+			var id: String = str(key)
+			if ShipSymmetry.is_twin_id(id):
+				continue
+			if id == doc.root or id.begins_with(doc.root + "/"):
+				places.append((xforms[id] as Transform3D).origin)
+		assert_int(places.size()).append_failure_message(family).is_equal(6)
+		# One radius, and an octahedron: each body on an axis, each with its opposite number.
+		var radius: float = places[0].length()
+		assert_float(radius).append_failure_message(family).is_greater(0.1)
+		for at: Vector3 in places:
+			(
+				assert_float(at.length())
+				. append_failure_message("%s: %s is not on the ring" % [family, str(at)])
+				. is_equal_approx(radius, radius * 0.01)
+			)
+			var opposite: bool = false
+			for other: Vector3 in places:
+				opposite = opposite or (at + other).length() < radius * 0.01
+			(
+				assert_bool(opposite)
+				. append_failure_message("%s: %s has nothing across from it" % [family, str(at)])
+				. is_true()
+			)
+
+
+## And the clump is still ONE ROOM, on every family: the bodies stand side by side with nothing to
+## hang a seam off, so their links come from the joints the template writes between them (ADR 0034).
+func test_the_nucleus_is_one_room_on_every_family() -> void:
+	for family: String in ["box_hull", "sphere_pod", "cylinder_spar"]:
+		for element: String in ["helium", "carbon", "neon"]:
+			var doc: ShipDoc = ShipTemplates.build(
+				_data, _cfg, element, {ShipTemplates.OPT_ROOM_FAMILY: family}
+			)
+			var biggest: int = 0
+			for members: PackedStringArray in ShipMeshBake.plan(doc, _data, _cfg)["rooms"]:
+				biggest = maxi(biggest, members.size())
+			(
+				assert_int(biggest)
+				. append_failure_message("%s %s: the nucleus is not one room" % [family, element])
+				. is_equal(ShipTemplates.nucleus_count(ShipTemplates.entry(_data, element)))
+			)

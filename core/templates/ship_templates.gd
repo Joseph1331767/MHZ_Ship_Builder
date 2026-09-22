@@ -60,6 +60,11 @@ const LINK_ROOT: String = "root"
 const LINK_FUSE: String = "fuse"
 const LINK_TUNNEL: String = "tunnel"
 
+## Halvings the nucleus radius is solved to (ADR 0034). Each one halves the bracket, which starts
+## at the body's own reach: twenty puts it inside a millionth of that, far below anything a hull
+## can show.
+const NUCLEUS_SOLVE_STEPS: int = 20
+
 ## Nucleus bodies, capped. "1-8 for practicality": past eight the fused mass stops reading as a
 ## core and starts reading as gravel, and the eight-children-per-parent rule runs out of berths.
 const MAX_NUCLEUS: int = 8
@@ -225,6 +230,13 @@ static func build(
 	# slot like any other and the plane would duplicate it - measured on helium, whose twin landed
 	# exactly on its other proton.
 	root_part.asymmetric = true
+	# THE ROOT STANDS IN ITS OWN SLOT (ADR 0034), anchored to the beacon like every other body of
+	# the nucleus. A class whose arrangement has no slot to give - a single-body one - lays its
+	# root over the beacon, which is the identity anchor it already carries.
+	var radius: float = _nucleus_radius(nodes, room_shape, conf)
+	var root_anchor: Vector3 = nodes[0].get("anchor", Vector3.ZERO)
+	if root_anchor.length_squared() > 0.0:
+		root_part.absolute = _anchored_at(root_anchor, radius)
 	part_of_node[0] = doc.root
 	var nucleus_ids: PackedStringArray = PackedStringArray([doc.root])
 
@@ -255,6 +267,14 @@ static func build(
 				ShipAttach.default_offset(room_shape, room_shape, seat, conf)
 				- room_span * FUSE_OVERLAP
 			)
+			# ANCHORED IN ITS SLOT (ADR 0034), standing on nothing: the four attach numbers above
+			# stay on the part as the record of where it WOULD have been seated, and are ignored
+			# while it has no parent (ShipAttach._place_part). A class with no arrangement big
+			# enough falls back to the old hub and spoke, which needs them.
+			var anchor: Vector3 = node.get("anchor", Vector3.ZERO)
+			if anchor.length_squared() > 0.0:
+				fused.parent = ""
+				fused.absolute = _anchored_at(anchor, radius)
 			fused.scale = room_scale
 			fused.role = ROLE_ROOM
 			fused.display_name = _room_name(node, i)
@@ -266,7 +286,9 @@ static func build(
 		# The first body that is not fused: the nucleus is complete, so it becomes the ship's
 		# root component before anything hangs off it (ADR 0024).
 		if nucleus_ids.size() > 1 and doc.root == nucleus_ids[0]:
-			part_of_node = _lift_nucleus(doc, nucleus_ids, part_of_node, _symbol_of(nodes))
+			part_of_node = _lift_nucleus(
+				doc, data, conf, nucleus_ids, part_of_node, _symbol_of(nodes)
+			)
 			parent_id = part_of_node[parent_index]
 
 		var tunnel: ShipPart = ShipPart.new()
@@ -313,9 +335,92 @@ static func build(
 		_hatch(doc, parent_id, tunnel_id, hatch, data)
 		_hatch(doc, tunnel_id, room_id, hatch, data)
 	if nucleus_ids.size() > 1 and doc.root == nucleus_ids[0]:
-		part_of_node = _lift_nucleus(doc, nucleus_ids, part_of_node, _symbol_of(nodes))
+		part_of_node = _lift_nucleus(doc, data, conf, nucleus_ids, part_of_node, _symbol_of(nodes))
 	_centre_on_the_beacon(doc, data, conf)
 	return doc
+
+
+## How far every nucleus body stands from the beacon (ADR 0034): the radius at which the CLOSEST
+## pair of the arrangement sinks into each other by [constant FUSE_OVERLAP] of the body's own reach
+## toward the other, which is what the chain of seats used to do one body at a time.
+##
+## IT IS SOLVED AGAINST THE FIELD, NOT DERIVED. The old chain could ask the attach model to seat one
+## body on another and read the answer off it; a ring of bodies around a centre has no seat to read,
+## and the reach of a shape along a direction is the shape's own business - 4.73 m up a box of that
+## half-span, 6.69 m into its corner, and a spar is long one way and thin the other two. So the
+## sink is measured straight off [method ResolvedShape.sdf], walking out along the chord between the
+## two slots until the field reads exactly the depth wanted, and the radius follows from the chord.
+## MEASURED: a spar nucleus sized by one axial distance came out as six rooms that never touched.
+##
+## The bisection is deterministic to [constant NUCLEUS_SOLVE_STEPS] halvings - well under a
+## millimetre on any ship - and the pair it solves for is the tightest angle in the arrangement,
+## lowest index first, so the answer cannot depend on the order the pairs come out in.
+static func _nucleus_radius(
+	nodes: Array[Dictionary], room_shape: ResolvedShape, cfg: ShipConfig
+) -> float:
+	var anchors: Array[Vector3] = []
+	for node: Dictionary in nodes:
+		var anchor: Vector3 = node.get("anchor", Vector3.ZERO)
+		if anchor.length_squared() > 0.0:
+			anchors.append(anchor.normalized())
+	if anchors.size() < 2 or room_shape == null:
+		return 0.0
+	var first: int = -1
+	var second: int = -1
+	var closest: float = PI
+	for i: int in anchors.size():
+		for j: int in range(i + 1, anchors.size()):
+			# A pathological pack naming one direction twice has no chord between that pair and
+			# nothing to size against; it is skipped rather than allowed to collapse the clump onto
+			# the beacon, which is what returning a zero radius would do.
+			if (anchors[j] - anchors[i]).length() <= 1.0e-6:
+				continue
+			var angle: float = anchors[i].angle_to(anchors[j])
+			if first < 0 or angle < closest - 1.0e-6:
+				closest = angle
+				first = i
+				second = j
+	if first < 0:
+		return 0.0
+	var chord: Vector3 = anchors[second] - anchors[first]
+	var span: float = chord.length()
+	# In the body's OWN frame: it is turned to face its slot (ADR 0034), so the direction of its
+	# neighbour is the chord seen from there.
+	var toward: Vector3 = (
+		(ShipAttach.mount_frame(anchors[first]).inverse() * (chord / span)).normalized()
+	)
+	var reach: float = _reach_along(room_shape, toward, cfg)
+	if reach <= 0.0:
+		return 0.0
+	var wanted: float = FUSE_OVERLAP * reach
+	var near: float = 0.0
+	var far: float = reach
+	for _step: int in NUCLEUS_SOLVE_STEPS:
+		var mid: float = (near + far) * 0.5
+		if -room_shape.sdf(toward * mid) >= wanted:
+			near = mid
+		else:
+			far = mid
+	return (near + far) / span
+
+
+## How far the surface of [param room_shape] is from its centre along [param dir], read off the
+## attach model's own tracer so a template measures a shape exactly as a placement does.
+static func _reach_along(room_shape: ResolvedShape, dir: Vector3, cfg: ShipConfig) -> float:
+	var probe: ShipPart = ShipPart.new()
+	var angles: Vector2 = ShipAttach.angles_from_direction(dir)
+	probe.yaw = angles.x
+	probe.pitch = angles.y
+	return (ShipAttach.anchor_for(room_shape, probe, cfg)["pos"] as Vector3).length()
+
+
+## A body standing in the slot [param dir] at [param radius] from the beacon, TURNED TO FACE ITS
+## SLOT - its own +Y along the direction it stands in, which is where the attach model would have
+## pointed it had it been seated from the centre. It matters on a family that is not round: a spar
+## nucleus is a starburst of spars, not six parallel ones crossing at the middle.
+static func _anchored_at(dir: Vector3, radius: float) -> Transform3D:
+	var out: Vector3 = dir.normalized()
+	return Transform3D(ShipAttach.mount_frame(out), out * radius)
 
 
 ## THE BEACON (ADR 0033): every class is built AROUND the ship's centre, not off its first module.
@@ -366,16 +471,38 @@ static func _nodes_for(data: ShipData, template_id: String) -> Array[Dictionary]
 		var nucleus: Array[Vector3] = plan["nucleus"]
 		var nucleus_slots: PackedInt32Array = plan["nucleus_slots"]
 		var node_of_slot: Dictionary = {}
-		# The root, then the rest of the nucleus fused to it, then the extremities.
-		out.append(_node(0, Vector3.UP, id, symbol, LINK_ROOT))
-		if int(plan["root_slot"]) >= 0:
-			node_of_slot[int(plan["root_slot"])] = 0
+		var slots: Array[Vector3] = plan["slots"]
+		var root_slot_index: int = int(plan["root_slot"])
+		# THE NUCLEUS RINGS THE BEACON (ADR 0034): every body stands in its arrangement's own slot,
+		# anchored, rather than hanging off the body before it. The slot directions are what the
+		# arrangement actually says; the old hang directions could only ever approximate them,
+		# because a surface seat lands where the host's normal pushes it - on a box hull, four of a
+		# carbon's six bodies slid sideways onto a face and the clump came out lopsided.
+		var anchored: bool = root_slot_index >= 0 and slots.size() > root_slot_index
+		# The root, then the rest of the nucleus, then the extremities.
+		out.append(
+			_node(
+				0,
+				Vector3.UP,
+				id,
+				symbol,
+				LINK_ROOT,
+				false,
+				slots[root_slot_index] if anchored else Vector3.ZERO
+			)
+		)
+		if root_slot_index >= 0:
+			node_of_slot[root_slot_index] = 0
 		for i: int in nucleus.size():
 			if out.size() >= MAX_NODES:
 				break
-			if i < nucleus_slots.size() and nucleus_slots[i] >= 0:
-				node_of_slot[nucleus_slots[i]] = out.size()
-			out.append(_node(0, nucleus[i], id, symbol, LINK_FUSE))
+			var slot: int = nucleus_slots[i] if i < nucleus_slots.size() else -1
+			if slot >= 0:
+				node_of_slot[slot] = out.size()
+			var anchor: Vector3 = Vector3.ZERO
+			if anchored and slot >= 0 and slot < slots.size():
+				anchor = slots[slot]
+			out.append(_node(0, nucleus[i], id, symbol, LINK_FUSE, false, anchor))
 
 		# A POD IS BUILT ON THE PROTON WHOSE SLOT IT SHARES, and continues straight out from it -
 		# a tunnel's own +Y already points away from the core, so Vector3.UP here is "keep going".
@@ -437,7 +564,8 @@ static func _node(
 	element_id: String,
 	symbol: String,
 	link: String = LINK_TUNNEL,
-	world: bool = false
+	world: bool = false,
+	anchor: Vector3 = Vector3.ZERO
 ) -> Dictionary:
 	return {
 		"parent": parent,
@@ -446,6 +574,9 @@ static func _node(
 		"symbol": symbol,
 		"link": link,
 		"world": world,
+		# THE SLOT THIS BODY STANDS IN, as a unit direction from the beacon - zero for a body that
+		# is placed on a surface instead (ADR 0034). The radius is [method _nucleus_radius]'s.
+		"anchor": anchor,
 	}
 
 
@@ -576,6 +707,7 @@ static func _layout(data: ShipData, element: Dictionary) -> Dictionary:
 		"extremity": extremity,
 		"extremity_slots": extremity_slots,
 		"root_slot": root,
+		"slots": slots,
 	}
 
 
@@ -798,7 +930,12 @@ static func _hatch(
 ## now names its inner part ("<instance>/<inner>") so tunnels hang off the proton they were laid
 ## out for; the top body is the instance's own proxy.
 static func _lift_nucleus(
-	doc: ShipDoc, nucleus_ids: PackedStringArray, part_of_node: PackedStringArray, symbol: String
+	doc: ShipDoc,
+	data: ShipData,
+	cfg: ShipConfig,
+	nucleus_ids: PackedStringArray,
+	part_of_node: PackedStringArray,
+	symbol: String
 ) -> PackedStringArray:
 	var names: Dictionary = {}
 	for id: String in nucleus_ids:
@@ -822,7 +959,7 @@ static func _lift_nucleus(
 	for inner_id: String in inner:
 		if inner_id != root_inner:
 			keys.append(instance_id + "/" + inner_id)
-	for pair: PackedStringArray in ShipSeams.pairs_within(doc, keys):
+	for pair: PackedStringArray in _clump_pairs(doc, data, cfg, keys):
 		var joint: ShipJoint = ShipJoint.new()
 		joint.mode = ShipJoint.MODE_OPEN
 		ShipComponents.set_inner_joint(doc, pair[0], pair[1], joint)
@@ -836,6 +973,39 @@ static func _lift_nucleus(
 			out[node_index] = instance_id
 		else:
 			out[node_index] = instance_id + "/" + inner_id
+	return out
+
+
+## Every pair of the clump that is linked: the ones that stand on each other, and - since the bodies
+## ring the beacon and stand on nothing (ADR 0034) - every pair whose SOLIDS ACTUALLY MEET. Without
+## the second half an anchored nucleus would carry no links at all, and each body would bake as a
+## room of its own, shelled and walled against the neighbours it is fused into.
+static func _clump_pairs(
+	doc: ShipDoc, data: ShipData, cfg: ShipConfig, keys: PackedStringArray
+) -> Array[PackedStringArray]:
+	var out: Array[PackedStringArray] = []
+	var seen: Dictionary = {}
+	for pair: PackedStringArray in ShipSeams.pairs_within(doc, keys):
+		seen[ShipDoc.joint_key_for(pair[0], pair[1])] = true
+		out.append(pair)
+	var shapes: Dictionary = ShipAttach.resolve_shapes(doc, data, cfg)
+	var xforms: Dictionary = ShipAttach.resolve_all_from_shapes(doc, shapes, cfg)
+	var thickness: float = maxf(cfg.hull_thickness_m, 0.0) if cfg != null else 0.0
+	for i: int in keys.size():
+		for j: int in range(i + 1, keys.size()):
+			var a: String = keys[i]
+			var b: String = keys[j]
+			if seen.has(ShipDoc.joint_key_for(a, b)):
+				continue
+			if not shapes.has(a) or not shapes.has(b) or not xforms.has(a) or not xforms.has(b):
+				continue
+			var state: Dictionary = ShipJoints.solid_pair_state(
+				shapes[a], xforms[a], shapes[b], xforms[b], thickness
+			)
+			if not bool(state.get("overlaps", false)):
+				continue
+			seen[ShipDoc.joint_key_for(a, b)] = true
+			out.append(PackedStringArray([a, b]))
 	return out
 
 

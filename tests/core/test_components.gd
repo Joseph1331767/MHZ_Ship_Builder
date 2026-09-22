@@ -306,8 +306,11 @@ func test_dissolve_puts_the_inner_parts_back() -> void:
 	for pid: String in doc.part_order():
 		var part: ShipPart = doc.parts[pid]
 		if pid != doc.root:
+			# A part either stands on a part of this document or on NOTHING - anchored to the
+			# beacon (ADR 0033), which is how a nucleus body comes back out (ADR 0034). What may
+			# not happen is a parent that is not there any more.
 			(
-				assert_bool(doc.parts.has(part.parent))
+				assert_bool(doc.parts.has(part.parent) or part.parent.is_empty())
 				. append_failure_message("%s hangs off %s" % [pid, part.parent])
 				. is_true()
 			)
@@ -409,3 +412,20 @@ func test_a_tunnel_meeting_a_module_is_hatched_by_default() -> void:
 	var arm: String = ShipComponents.instantiate(doc, arm_id, doc.root)
 	assert_str(ShipSeams.role_of(doc, arm)).is_equal(ShipPart.ROLE_HALLWAY)
 	assert_str(ShipSeams.default_link_for(doc, arm, doc.root)).is_equal(ShipSeams.MODE_HATCHED)
+
+
+## A definition's parts come out PARENT BEFORE CHILD even when the ids say otherwise: an anchored
+## member (ADR 0034) is unreachable from the root, and appending it with the leftovers in id order
+## put its own child ahead of it. Both readers of this order - the attach pass and dissolve - fail
+## silently rather than loudly on that, so it is asserted here rather than left to a ship to show.
+func test_definition_order_walks_an_anchored_members_subtree() -> void:
+	var inner: Dictionary = {}
+	for record: Array in [["cp_0001", ""], ["cp_0002", "cp_0009"], ["cp_0009", ""]]:
+		var part: ShipPart = ShipPart.new()
+		part.id = str(record[0])
+		part.parent = str(record[1])
+		part.kind = ShipPart.KIND_PRIMITIVE
+		part.family = "sphere_pod"
+		inner[part.id] = part
+	var order: PackedStringArray = ShipComponents.definition_order(inner, "cp_0001")
+	assert_array(Array(order)).contains_exactly(["cp_0001", "cp_0009", "cp_0002"])

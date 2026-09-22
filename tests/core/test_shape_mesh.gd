@@ -612,12 +612,15 @@ func test_the_pure_bake_plans_an_open_seam_as_a_pair_of_cuts() -> void:
 	for jid: String in doc.joints.keys():
 		if (doc.joints[jid] as ShipJoint).mode == ShipJoint.MODE_OPEN:
 			doc.joints.erase(jid)
+	# The first pair of the dissolved nucleus: its bodies ring the beacon and stand on nothing
+	# (ADR 0034), so the pair is the root and the body beside it rather than a parent and a child.
 	var pair: PackedStringArray = PackedStringArray()
 	for pid: String in doc.part_order():
+		if pid == doc.root:
+			continue
 		var part: ShipPart = doc.parts[pid]
-		if not part.parent.is_empty():
-			pair = PackedStringArray([part.parent, pid])
-			break
+		pair = PackedStringArray([part.parent if not part.parent.is_empty() else doc.root, pid])
+		break
 	var joint: ShipJoint = ShipJoint.from_dict(
 		doc.new_joint_id(), {"a": pair[0], "b": pair[1], "mode": ShipJoint.MODE_OPEN}
 	)
@@ -650,12 +653,15 @@ func test_a_bounded_opening_is_planned_as_a_door_the_pure_bake_does_not_bore() -
 	for jid: String in doc.joints.keys():
 		if (doc.joints[jid] as ShipJoint).mode == ShipJoint.MODE_OPEN:
 			doc.joints.erase(jid)
+	# The first pair of the dissolved nucleus: its bodies ring the beacon and stand on nothing
+	# (ADR 0034), so the pair is the root and the body beside it rather than a parent and a child.
 	var pair: PackedStringArray = PackedStringArray()
 	for pid: String in doc.part_order():
+		if pid == doc.root:
+			continue
 		var part: ShipPart = doc.parts[pid]
-		if not part.parent.is_empty():
-			pair = PackedStringArray([part.parent, pid])
-			break
+		pair = PackedStringArray([part.parent if not part.parent.is_empty() else doc.root, pid])
+		break
 	var joint: ShipJoint = ShipJoint.from_dict(
 		doc.new_joint_id(), {"a": pair[0], "b": pair[1], "mode": ShipJoint.MODE_DOORWAY}
 	)
@@ -698,8 +704,11 @@ func test_a_class_with_many_open_seams_still_bakes_quickly_and_closed() -> void:
 	var protons: PackedStringArray = PackedStringArray([doc.root])
 	for pid: String in doc.part_order():
 		var part: ShipPart = doc.parts[pid]
-		if part.parent == doc.root and part.role == ShipPart.ROLE_ROOM:
+		var on_the_core: bool = part.parent == doc.root or part.parent.is_empty()
+		if on_the_core and pid != doc.root and part.role == ShipPart.ROLE_ROOM:
 			protons.append(pid)
+	# EVERY pair of the clump. The dissolved bodies are ANCHORED to the beacon (ADR 0034) rather
+	# than hung off each other, and parts that stand side by side name their own pairs.
 	var pairs: Array[PackedStringArray] = ShipSeams.pairs_within(doc, protons)
 	assert_int(pairs.size()).is_greater(1)
 	for pair: PackedStringArray in pairs:
@@ -708,7 +717,16 @@ func test_a_class_with_many_open_seams_still_bakes_quickly_and_closed() -> void:
 		)
 		doc.joints[joint.id] = joint
 	var report: Dictionary = ShipMeshBake.bake(doc, _data, _cfg)
-	assert_int(int(report["open_seams"])).is_equal(pairs.size())
+	# Not every named pair is a seam: a pair has one where the two solids MEET, and the bodies
+	# across the nucleus from each other do not (ADR 0034). What matters is that they all end up
+	# in ONE room, which is the thing this test is timing.
+	assert_int(int(report["open_seams"])).is_greater(1)
+	var biggest: int = 0
+	for members: PackedStringArray in ShipMeshBake.plan(doc, _data, _cfg)["rooms"]:
+		biggest = maxi(biggest, members.size())
+	assert_int(biggest).append_failure_message("the nucleus did not come out as one room").is_equal(
+		protons.size()
+	)
 	# One room of six: five absorbed, one solid carrying them all. The room's own surfaces are
 	# unions computed from two sides and may carry seam hairlines (ADR 0019 records the sagitta);
 	# what may NOT happen is any module OTHER than the room coming out open.

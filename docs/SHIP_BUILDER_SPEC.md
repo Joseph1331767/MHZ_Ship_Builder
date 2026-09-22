@@ -50,6 +50,11 @@ other.
 
 ## 3. The attach model — CONTRACT
 
+AMENDED(ADR 0034, 2026-09-22): a part standing on nothing is anchored inside a COMPONENT too — by
+its own `absolute` in the instance's frame — which is what lets a nucleus ring the beacon instead of
+hanging off one of its own bodies. A ring of bodies around a centre cannot be reached from their own
+surfaces at all: on a box hull the diagonal neighbours fall off every face.
+
 AMENDED(ADR 0033, 2026-09-22): **the ship is built around a BEACON — its origin — and the root is
 ANCHORED to it, not pinned to it.** A part with no parent (the root, or one floating free) is placed
 by its own `absolute` transform, so a class rings the beacon instead of hanging off whichever module
@@ -266,8 +271,10 @@ offset, `0.05` on scale with a uniform-lock toggle. A held modifier bypasses mom
 ## 7. Joints and hatches — authored in Phase 1, geometry in Phase 2
 
 RETIRED(ADR 0008, 2026-09-02): "geometry in Phase 2" and "the Phase 1 bake produces the all-open
-studio hull with no walls" -> the seam geometry is built. Every part lays a **seam** where it
-stands on its parent — the plane through `P` with normal `N` that section 3 computes — and the
+studio hull with no walls" -> the seam geometry is built. AMENDED(ADR 0034, 2026-09-22): a seam is
+not only parent -> child. Two parts that stand SIDE BY SIDE and meet lay one too, wherever a joint
+record says so: its plane stands on the host's surface where the line between the two centres leaves
+it. Every part lays a **seam** where it stands on its parent — the plane through `P` with normal `N` that section 3 computes — and the
 seam carries a **wall of hull thickness** unless its joint says otherwise: no record or `sealed`
 is a solid wall (the default: "if its 2 separate rooms, just a solid wall"); `doorway` is the
 wall with a plain centred opening (`ShipConfig.doorway_width_m x doorway_height_m`); `hatched`

@@ -2850,3 +2850,57 @@ the centre of the nucleus it is built around.
 Load a carbon: the teal dot sits at the middle of the nucleus, and the nucleus rings it rather than
 hanging below its top proton. Explode and set SLICES Y RADIAL to TRISECT with SLICE CLUSTER CHUNKS
 on: the nucleus chunks now cut on one grid instead of six.
+
+
+## [2026-09-22] The nucleus rings the beacon, and parts side by side have seams
+
+> "i built a carbon with cube rooms and the center proton was not centered top and bottom etc, and
+> when i exploded it it did not yeild parts that were expected, which in this exact case would be 6
+> little square slabs, theoretically speaking."
+
+ADR 0034. The beacon (ADR 0033) put the ship's centre at the origin and it was there - the carbon's
+core centroid measured 0.00 - but ADR 0017 still hung each nucleus body off the one before it, on
+the surface, and a surface seat lands along the host's NORMAL. On a sphere that is the direction it
+was aimed; on a CUBE a 45 degree ray strikes a side face and the body slides sideways. Measured: a
+cube carbon's root at +2.76, its four rim bodies at y = 0 and its bottom at -2.88, 10.28 m wide and
+7.40/-7.52 tall, with six pieces of 18.9 to 29.2 m3. And it cannot be tuned out - there is no face
+of a box whose normal reaches a neighbouring slot of an octahedron.
+
+So the bodies are ANCHORED in their arrangement's own slots now, at one radius, facing outward. The
+radius is solved against the field rather than derived: the walk goes out along the chord between
+the tightest pair until the shape's own SDF reads the fuse depth, which means the same thing on a
+box, a sphere and a spar (sized by one axial distance instead, a spar nucleus came out as six rooms
+that never touched). A component may hold members that stand on nothing, and the anchor travels
+through MAKE COMP and dissolve with them.
+
+That leaves a nucleus with no parent-child links at all, so seams had to grow the other half they
+never had: a JOINED pair that MEETS has a seam wherever the two stand, its plane on the host's
+surface along the line between the centres. That is FOLLOWUPS F19's limitation lifted - a doorway
+between two fused siblings plans and bores now, where a joint between siblings used to do nothing
+at all, silently.
+
+A review of the diff caught two silent-wrong-answer bugs before the commit, both fixed and now
+asserted: `definition_order` left an anchored member's subtree to the id sort (right only because
+`make_component` hands out ids in subtree order - a hand-edited pack would have placed a child
+before its parent, where the attach pass falls back to the instance's frame without a word), and a
+seam whose frame IS the identity was dropped, which is exactly the pair on the world Z axis whose
+seam lands on the beacon at the origin.
+
+### Verified
+
+A cube carbon's six bodies stand at 4.94 m on their own axes, a symmetric plus of +/-9.58 m, and its
+six pieces come out 26.46 to 27.01 m3 - within 2% of each other. Every class on every room family
+centres to 0.01 m and bakes its nucleus as ONE room of exactly its body count. **gdUnit4 320/320**
+(six new); selfcheck PASSED, hash unchanged at `5536787c6c35d236`; data validator PASSED; gdformat
+and gdlint clean; windowed visual, resolve and explode checks PASSED. Frames:
+`reports/visual_box_carbon.png` and `reports/visual_box_carbon_explode.png`.
+
+Three tests were asserting on the tree the nucleus used to be - every part hanging off another, the
+first part with a parent, every piece coming apart in the middle - and they assert on what was meant
+instead: a part may stand on nothing, a pair is named, and it is the ROOM that comes apart.
+
+### Still the human's to check
+
+Build a carbon with CUBE rooms: the nucleus is a symmetric 3D plus about the dot, the same top and
+bottom. EXPLODE it - six equal bodies pull apart instead of the lopsided lumps. Then try a spar
+carbon, which is the family this could have quietly broken.

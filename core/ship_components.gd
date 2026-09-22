@@ -41,6 +41,13 @@ const MAX_NESTING_DEPTH: int = 8
 ## silently orphaning the parts that were left out. Mirror derivatives cannot be lifted (their
 ## source would end up outside the definition), and neither can a part that something outside the
 ## selection mirrors.
+##
+## ANCHORED PARTS RIDE WITH IT (ADR 0034). A selection may also hold parts that stand on nothing —
+## anchored to the beacon by [member ShipPart.absolute] (ADR 0033) — with their own subtrees: a
+## nucleus laid out AROUND a centre is exactly that, and it cannot be a single subtree, because the
+## bodies ringing a centre are not reachable from each other's surfaces. Each one's anchor is stored
+## relative to the head, so the clump moves as one. The head must then be anchored too, since
+## nothing here can resolve where a seated head actually stands.
 static func make_component(doc: ShipDoc, part_ids: PackedStringArray, label: String) -> String:
 	if doc == null or part_ids.is_empty():
 		return ""
@@ -60,7 +67,10 @@ static func make_component(doc: ShipDoc, part_ids: PackedStringArray, label: Str
 	if (doc.parts[head] as ShipPart).kind == KIND_INSTANCE:
 		push_warning("ShipComponents.make_component: the head of the selection is an instance.")
 		return ""
+	var riders: PackedStringArray = _anchored_tops(doc, chosen, head)
 	var ids: PackedStringArray = ShipMirror.subtree_ids(doc, head)
+	for rider: String in riders:
+		ids.append_array(ShipMirror.subtree_ids(doc, rider))
 	if not _selection_is_whole_subtree(chosen, ids):
 		push_warning("ShipComponents.make_component: select the whole subtree, children included.")
 		return ""
@@ -69,7 +79,7 @@ static func make_component(doc: ShipDoc, part_ids: PackedStringArray, label: Str
 	var component_id: String = _unique_component_id(doc, label)
 	doc.components[component_id] = _build_definition(doc, ids, head, label)
 	_move_inside_joints(doc, ids, component_id)
-	return _swap_in_instance(doc, head, component_id, label)
+	return _swap_in_instance(doc, head, component_id, label, riders)
 
 
 ## Place another instance of an existing definition under `parent_id`. Returns the new part id.
@@ -208,18 +218,48 @@ static func definition_parts(definition: Dictionary) -> Dictionary:
 
 
 # The one selected part whose parent is outside the selection; "" if there is not exactly one.
+## The one part of [param chosen] the rest hangs off. Every member whose parent is outside the
+## selection is a TOP; a lift needs exactly one of them seated on something, or none at all.
+##
+## ANCHORED TOPS (ADR 0034) are the several-tops case that is legal: parts standing on nothing, each
+## with its own subtree, that ride the head. They need the head anchored too — their placement is
+## stored relative to it, and where a SEATED head stands is a question only the attach pass can
+## answer, which `core/`'s document layer cannot ask here. The ship's own root wins the headship
+## when it is in the selection, so lifting a nucleus leaves the ship rooted at its instance.
 static func _selection_root(doc: ShipDoc, chosen: Dictionary) -> String:
-	var head: String = ""
 	var ids: Array = chosen.keys()
 	ids.sort()
+	var seated: String = ""
+	var anchored: PackedStringArray = PackedStringArray()
 	for id: String in ids:
 		var part: ShipPart = doc.parts[id]
 		if chosen.has(part.parent):
 			continue
-		if head != "":
+		if part.parent.is_empty():
+			anchored.append(id)
+			continue
+		if seated != "":
 			return ""
-		head = id
-	return head
+		seated = id
+	if seated != "":
+		return "" if not anchored.is_empty() else seated
+	if anchored.is_empty():
+		return ""
+	return doc.root if anchored.has(doc.root) else anchored[0]
+
+
+## The anchored members of [param chosen] that stand on nothing and are not the head — the parts
+## that ride it (ADR 0034), lowest id first.
+static func _anchored_tops(doc: ShipDoc, chosen: Dictionary, head: String) -> PackedStringArray:
+	var out: PackedStringArray = PackedStringArray()
+	var ids: Array = chosen.keys()
+	ids.sort()
+	for id: String in ids:
+		if id == head:
+			continue
+		if (doc.parts[id] as ShipPart).parent.is_empty():
+			out.append(id)
+	return out
 
 
 static func _selection_is_whole_subtree(chosen: Dictionary, ids: PackedStringArray) -> bool:
@@ -292,6 +332,7 @@ static func _build_definition(
 ) -> Dictionary:
 	var id_map: Dictionary = _inner_id_map(ids)
 	var inner: Dictionary = {}
+	var head_anchor: Transform3D = (doc.parts[head] as ShipPart).absolute
 	for id: String in ids:
 		var part: ShipPart = doc.parts[id]
 		var copy: ShipPart = part.duplicate_part()
@@ -304,9 +345,14 @@ static func _build_definition(
 			copy.pitch = 0.0
 			copy.rot = Vector3.ZERO
 			copy.offset = 0.0
+			copy.absolute = Transform3D.IDENTITY
 		else:
 			var mapped_parent: String = id_map.get(part.parent, "")
 			copy.parent = mapped_parent
+			if mapped_parent.is_empty():
+				# A RIDER (ADR 0034): anchored to the beacon outside, anchored to the HEAD inside,
+				# so the clump keeps its shape wherever the instance is put.
+				copy.absolute = head_anchor.affine_inverse() * part.absolute
 		inner[inner_id] = copy.to_dict()
 	var root_inner: String = id_map[head]
 	return {"label": label, "root": root_inner, "parts": inner}
@@ -327,7 +373,11 @@ static func _build_definition(
 # joint touching a removed part, so the records are taken before it runs and the survivors are
 # put back afterwards, under their own ids, against the instance.
 static func _swap_in_instance(
-	doc: ShipDoc, head: String, component_id: String, label: String
+	doc: ShipDoc,
+	head: String,
+	component_id: String,
+	label: String,
+	riders: PackedStringArray = PackedStringArray()
 ) -> String:
 	var root_part: ShipPart = doc.parts[head]
 	var attach: Dictionary = {
@@ -344,6 +394,9 @@ static func _swap_in_instance(
 	)
 	var was_root: bool = head == doc.root
 	var joints_before: Dictionary = _joint_records(doc)
+	# The riders first - each one's subtree goes with it - then the head, which may be the doc root.
+	for rider: String in riders:
+		doc.remove_part(rider)
 	doc.remove_part(head)
 	var part: ShipPart = ShipPart.from_dict(doc.new_part_id(), record)
 	# THE ANCHOR TRAVELS WITH THE HEAD (ADR 0033). The head's four attach numbers are copied above;
@@ -498,8 +551,17 @@ static func _emit_expanded(
 		out[key] = {"shape": shape_v, "xform": xform_v}
 
 
-## Definition root first, then depth first by inner id; anything unreachable is appended sorted.
+## Definition root first, then depth first by inner id, then each ANCHORED member and its own
+## subtree; anything still unreachable is appended sorted.
 ## The order [ShipAttach] places a definition's parts in, so a parent always precedes its child.
+##
+## THE RIDERS ARE WALKED, NOT LEFT TO THE SORT (ADR 0034). A member that stands on nothing is
+## unreachable from the root, and appending it with the leftovers put its own children in id order
+## - which happens to be right for a definition this code built, because the ids are handed out in
+## subtree order, and is right for nothing else. A hand-edited pack (`data/` is hand-editable by
+## rule) or any future tool that renumbers would have placed a child before its parent, where
+## [method ShipAttach._expand_instance_transforms] silently falls back to the instance's own frame
+## and [method dissolve] cannot tell the child from a rider. Neither errors; both come out wrong.
 static func definition_order(inner: Dictionary, root_id: String) -> PackedStringArray:
 	var children: Dictionary = {}
 	var ids: Array = inner.keys()
@@ -510,7 +572,14 @@ static func definition_order(inner: Dictionary, root_id: String) -> PackedString
 		bucket.append(inner_id)
 		children[part.parent] = bucket
 	var order: PackedStringArray = PackedStringArray()
-	var stack: Array[String] = [root_id]
+	# Pushed in reverse, because the walk pops from the back: the root comes out first, then the
+	# anchored members in id order, each with its own subtree behind it.
+	var stack: Array[String] = []
+	var anchored: PackedStringArray = children.get("", PackedStringArray())
+	for i: int in range(anchored.size() - 1, -1, -1):
+		if anchored[i] != root_id:
+			stack.append(anchored[i])
+	stack.append(root_id)
 	var seen: Dictionary = {}
 	while not stack.is_empty():
 		var current: String = stack.pop_back()
@@ -844,6 +913,13 @@ static func dissolve(doc: ShipDoc, instance_id: String) -> PackedStringArray:
 				part.display_name = instance.display_name
 		else:
 			part.parent = str(new_id.get(part.parent, ""))
+			if part.parent.is_empty():
+				# A RIDER comes back out to the beacon (ADR 0034): its anchor is stored relative to
+				# the definition root, which the instance stands for. Exact while the instance is
+				# itself anchored, which the ship's root - where a nucleus lives - always is; an
+				# instance SEATED on a host would need the attach pass this layer cannot run
+				# (recorded in FOLLOWUPS).
+				part.absolute = instance.absolute * part.absolute
 		doc.parts[part.id] = part
 		doc._bump_part_counter(part.id)
 		out.append(part.id)

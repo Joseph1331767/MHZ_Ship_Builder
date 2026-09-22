@@ -218,12 +218,27 @@ func test_every_piece_is_sliced_into_two_closed_halves() -> void:
 			var report: Dictionary = await ShipCsgBake.bake_extras(self, assembled)
 			var cells: Dictionary = report["cells"]
 			var solids: Dictionary = report["solids"]
+			# A ROOM is cut as one body (ADR 0033): one grid of planes runs through all of its
+			# members, so it is the ROOM that comes apart down the middle - a member standing on
+			# one side of it, which a nucleus ringing the beacon guarantees (ADR 0034), keeps all
+			# of its cells on that side and is not a sliver for it.
+			var room_of: Dictionary = {}
+			for members: PackedStringArray in assembled["rooms"]:
+				for id: String in members:
+					room_of[id] = members[0]
+			var halves_of: Dictionary = {}
 			for pid: String in doc.part_order():
 				(
 					assert_bool(cells.has(pid))
 					. append_failure_message("%s: %s was not split" % [family, pid])
 					. is_true()
 				)
+			# EVERY placed piece, not only the document's own parts: a room of several is mostly
+			# made of the inner parts of a component (ADR 0024), and it is the room that has to
+			# come apart in two.
+			var pieces: Array = cells.keys()
+			pieces.sort()
+			for pid: String in pieces:
 				var halves: Array[float] = [0.0, 0.0]
 				for entry: Dictionary in cells[pid]:
 					var cell: PolyMesh = entry["solid"]
@@ -237,8 +252,20 @@ func test_every_piece_is_sliced_into_two_closed_halves() -> void:
 					)
 					. is_equal_approx(piece, maxf(piece * 0.02, 0.01))
 				)
-				# Down the MIDDLE: neither half is a sliver.
-				assert_float(minf(halves[0], halves[1])).is_greater(piece * 0.2)
+				var room: String = str(room_of.get(pid, pid))
+				var sum: Array = halves_of.get(room, [0.0, 0.0])
+				halves_of[room] = [sum[0] + halves[0], sum[1] + halves[1]]
+			# Down the MIDDLE: neither half of a room is a sliver.
+			for room: String in halves_of:
+				var sum: Array = halves_of[room]
+				var whole: float = float(sum[0]) + float(sum[1])
+				(
+					assert_float(minf(float(sum[0]), float(sum[1])))
+					. append_failure_message(
+						"%s: the room at %s came apart %f / %f" % [family, room, sum[0], sum[1]]
+					)
+					. is_greater(whole * 0.2)
+				)
 
 
 func test_every_drawn_mesh_names_its_exterior_and_interior() -> void:

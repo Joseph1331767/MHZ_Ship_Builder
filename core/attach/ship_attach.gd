@@ -1027,6 +1027,19 @@ static func _expand_instance_transforms(
 	for inner_id: String in walk["order"]:
 		var inner_part: ShipPart = inner[inner_id]
 		var inner_key: String = key + "/" + inner_id
+		# ANCHORED INSIDE A COMPONENT (ADR 0034). An inner part with no parent stands on nothing,
+		# so it is placed by its own `absolute` in the DEFINITION's frame - which is the instance's
+		# - exactly as a parentless doc part is placed in the ship's by ADR 0033. This is what lets
+		# a nucleus ring the beacon: six bodies around a centre cannot be reached from each other's
+		# surfaces (measured on a box hull, the diagonal neighbours are off every face).
+		if inner_part.parent.is_empty():
+			locals[inner_id] = inner_part.absolute
+			out[inner_key] = world * inner_part.absolute
+			if inner_part.kind == KIND_COMPONENT_INSTANCE:
+				_expand_instance_transforms(
+					doc, cfg, shapes, inner_key, inner_part, out[inner_key], depth + 1, out
+				)
+			continue
 		var parent_key: String = key
 		if inner_part.parent != root_id:
 			parent_key = key + "/" + inner_part.parent
