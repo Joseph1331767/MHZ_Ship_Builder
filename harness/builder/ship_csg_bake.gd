@@ -37,6 +37,13 @@ extends RefCounted
 ## in the CUT surface. The door leaves themselves are not booleans; the view builds them from the
 ## same records ([method ShipDoors.leaves]).
 ##
+## ONLY WHAT IS ON SCREEN (ADR 0030). [method bake] makes the assembled ship - the pieces with
+## their doors - and reads each piece back once. [method bake_extras] makes what only the exploded
+## view and ROOMS: WHOLE draw - every piece halved, every room of several as one bored shell and
+## its halves - from that report, when first asked. Measured on a carbon of spheres: 58 read-backs
+## a bake, of which 14 are the ship on screen, and the n-gon merge in each read-back was 7.6 s of
+## the 19.
+##
 ## ASYNCHRONOUS BY NECESSITY. A CSG node computes on a deferred call after it enters the tree, so
 ## [method bake] awaits frames between building nodes and reading meshes. Callers `await` it.
 
@@ -46,6 +53,11 @@ const READ_WELD_M: float = 1.0e-5
 
 ## How many frames a pass will wait for the engine before reading what it has.
 const READY_FRAMES: int = 12
+
+## The report keys under which [method bake] keeps what [method bake_extras] needs, and which say
+## the extras are in (ADR 0030).
+const EXTRAS_INPUT: String = "extras_input"
+const EXTRAS_READY: String = "extras_ready"
 
 ## The three named surfaces every drawn mesh carries - see [method _grouped].
 const SURFACE_EXTERIOR: String = "exterior"
@@ -69,6 +81,11 @@ const READ_VOLUME_REL: float = 1.0e-3
 ## n-gons (the engine's triangles merged back into faces, so a box shows twelve lines and not
 ## eighteen). [param progress], when given, is called with (fraction, label) as each pass lands,
 ## so a bar can move while the engine works (ADR 0023).
+##
+## THE ASSEMBLED SHIP, AND NOTHING IT DOES NOT SHOW (ADR 0030): every piece with its doors, each
+## read back ONCE, from the last combiner that touched it. The halves and the whole-room shells
+## that only the exploded view and ROOMS: WHOLE draw are [method bake_extras], made from this
+## report the first time they are asked for; what they need is kept under [constant EXTRAS_INPUT].
 static func bake(
 	host: Node, doc: ShipDoc, data: ShipData, cfg: ShipConfig, progress: Callable = Callable()
 ) -> Dictionary:
@@ -90,14 +107,12 @@ static func bake(
 	stage.name = "CsgBakeStage"
 	host.add_child(stage)
 	var shells: Dictionary = {}
-	var keeper_of: Dictionary = {}
 	for members: PackedStringArray in plan["rooms"]:
 		var shell: CSGCombiner3D = CSGCombiner3D.new()
 		var bodies: CSGCombiner3D = CSGCombiner3D.new()
 		var rooms: CSGCombiner3D = CSGCombiner3D.new()
 		var any_room: bool = false
 		for id: String in members:
-			keeper_of[id] = members[0]
 			bodies.add_child(_less_cuts(outer[id], cuts.get(id, []), cutters, "outer"))
 			if inner.has(id):
 				rooms.add_child(_less_cuts(inner[id], cuts.get(id, []), cutters, "inner"))
@@ -110,23 +125,21 @@ static func bake(
 		stage.add_child(shell)
 		shells[members[0]] = shell
 	await _until_ready(host, shells.values())
-	_tick(progress, 0.45, "PIECES")
+	_tick(progress, 0.3, "PIECES")
 
 	# PASS TWO: each member's piece is the room's shell within the member's ORIGINAL body, less the
-	# bodies of the members before it. A room of one is simply its shell.
-	var solids: Dictionary = {}
+	# bodies of the members before it. A room of one is simply its shell. Nothing is read back
+	# here (ADR 0030): a piece stays in the engine, as the combiner that made it, until the doors
+	# are through it - measured, reading every piece at every pass was the larger half of a bake.
 	var pieces: Dictionary = {}
 	for members: PackedStringArray in plan["rooms"]:
-		var shell: CSGCombiner3D = shells[members[0]]
 		if members.size() == 1:
-			var alone: PolyMesh = _read_combiner(shell)
-			solids[members[0]] = alone if not alone.is_empty() else outer[members[0]]
 			continue
 		# The shell goes back into the engine AS THE ENGINE MADE IT - its own manifold triangles -
 		# not as this file's merged n-gons re-triangulated. Measured on a box nucleus: the merged
 		# reading, with holed faces bridged by PolyMesh, made pass two return 348 m3 for a piece of a
 		# 50 m3 shell; the engine's own mesh does not.
-		var engine_shell: Mesh = _engine_mesh(shell)
+		var engine_shell: Mesh = _engine_mesh(shells[members[0]])
 		for i: int in members.size():
 			var id: String = members[i]
 			var piece: CSGCombiner3D = CSGCombiner3D.new()
@@ -138,94 +151,150 @@ static func bake(
 			pieces[id] = piece
 	if not pieces.is_empty():
 		await _until_ready(host, pieces.values())
-		for id: String in pieces:
-			var solid: PolyMesh = _read_combiner(pieces[id])
-			# Nothing came back: the engine rejected an operand. Keep the part as its own plain
-			# body rather than lose it from the screen, and let the volume say so.
-			solids[id] = solid if not solid.is_empty() else outer[id]
+	# Where every piece stands so far: its own combiner, or a room of one's shell.
+	var made: Dictionary = {}
+	for members: PackedStringArray in plan["rooms"]:
+		for id: String in members:
+			made[id] = pieces[id] if pieces.has(id) else shells[members[0]]
 
 	# PASS TWO AND A HALF: THE DOORS (ADR 0029). Every bounded seam's opening, on both of its
-	# pieces at once - a piece with several doors takes them all in one combiner - and on the
-	# whole shell of any room a door opens out of, for the ROOMS: WHOLE view.
+	# pieces at once - a piece with several doors takes them all in one combiner. A piece the
+	# engine returned empty is bored as its own plain body, which is what it is drawn as.
 	var bored: Dictionary = {}
-	var bored_rooms: Dictionary = {}
 	var doors: Array = plan.get("doors", [])
 	if not doors.is_empty():
-		_tick(progress, 0.55, "DOORS")
-		var work: Dictionary = _door_work(doors, solids)
+		_tick(progress, 0.5, "DOORS")
+		var work: Dictionary = _door_work(doors, made)
 		var ids: Array = work.keys()
 		ids.sort()
 		for id: String in ids:
-			var source: Mesh = (
-				_engine_mesh(pieces[id]) if pieces.has(id) else _engine_mesh(shells[keeper_of[id]])
-			)
-			bored[id] = _with_doors(stage, source, solids[id], work[id])
-		for members: PackedStringArray in plan["rooms"]:
-			if members.size() < 2:
-				continue
-			var all: Dictionary = {"union": [], "cut": []}
-			for id: String in members:
-				if work.has(id):
-					(all["union"] as Array).append_array(work[id]["union"])
-					(all["cut"] as Array).append_array(work[id]["cut"])
-			if (all["cut"] as Array).is_empty():
-				continue
-			var keeper: String = members[0]
-			bored_rooms[keeper] = _with_doors(
-				stage, _engine_mesh(shells[keeper]), _read_combiner(shells[keeper]), all
-			)
-		await _until_ready(host, bored.values() + bored_rooms.values())
+			bored[id] = _with_doors(stage, _engine_mesh(made[id]), outer[id], work[id])
+		await _until_ready(host, bored.values())
+	_tick(progress, 0.75, "READING")
+
+	# THE READ-BACK, once per piece. A boring the engine rejected leaves the piece its wall, and the
+	# report says so; a piece the engine returned empty is kept as its own plain body rather than
+	# lost from the screen, and the volume says so.
+	var solids: Dictionary = {}
+	var engine: Dictionary = {}
 	var bored_ids: PackedStringArray = PackedStringArray()
 	var door_failed: PackedStringArray = PackedStringArray()
-	for id: String in bored:
+	var bored_keys: Array = bored.keys()
+	bored_keys.sort()
+	for id: String in bored_keys:
 		var solid: PolyMesh = _read_combiner(bored[id])
 		if solid.is_empty():
-			# The engine rejected the boring: the piece keeps its wall, and the report says so.
 			door_failed.append(id)
 			continue
 		solids[id] = solid
+		engine[id] = _engine_mesh(bored[id])
 		bored_ids.append(id)
-	for id: String in door_failed:
-		bored.erase(id)
-	_tick(progress, 0.7, "HALVES")
+	var room_engine: Dictionary = {}
+	for members: PackedStringArray in plan["rooms"]:
+		if members.size() > 1:
+			room_engine[members[0]] = _engine_mesh(shells[members[0]])
+		for id: String in members:
+			if solids.has(id):
+				continue
+			var solid: PolyMesh = _read_combiner(made[id])
+			solids[id] = solid if not solid.is_empty() else outer[id]
+			engine[id] = _engine_mesh(made[id])
+	# The engine's meshes are Resources and outlive the nodes that made them: the extras operate
+	# on them later, after this stage is gone.
+	stage.queue_free()
+	_tick(progress, 0.9, "SURFACES")
+
+	var report: Dictionary = ShipMeshBake.report(solids, plan, t0)
+	# Every mesh the view draws carries its faces in three NAMED surfaces - exterior, interior,
+	# cut - so the INTERIOR display mode can treat them apart (PolyMesh.to_array_mesh_grouped).
+	var meshes: Dictionary = {}
+	for members: PackedStringArray in plan["rooms"]:
+		for id: String in members:
+			meshes[id] = _grouped(solids[id], members, cutters, outer, inner)
+	report["meshes"] = meshes
+	report["split"] = plan["split"]
+	report["rooms"] = plan["rooms"]
+	report["bored"] = bored_ids
+	report["door_failed"] = door_failed
+	report[EXTRAS_READY] = false
+	report[EXTRAS_INPUT] = {"plan": plan, "engine": engine, "room_engine": room_engine}
+	return report
+
+
+## The exploded view's extras for a report [method bake] made (ADR 0030): every piece sliced down
+## the middle on its manufacturing plane - "in manufacturing they are made in 2 pieces"
+## (2026-09-05) - and every room of several as one whole shell, its own doors bored, with its
+## halves. Returns a COPY of [param bake] with `halves`, `half_meshes`, `room_shells`,
+## `room_shell_halves`, `room_meshes` and `room_half_meshes` in and [constant EXTRAS_READY] set;
+## [param bake] itself is not touched. A report that never reached the engine comes back marked
+## ready with nothing added, so a caller asks once.
+static func bake_extras(
+	host: Node, bake: Dictionary, progress: Callable = Callable()
+) -> Dictionary:
+	var out: Dictionary = bake.duplicate()
+	out[EXTRAS_READY] = true
+	var input: Dictionary = bake.get(EXTRAS_INPUT, {})
+	if input.is_empty() or host == null or not host.is_inside_tree():
+		return out
+	var plan: Dictionary = input["plan"]
+	var engine: Dictionary = input["engine"]
+	var room_engine: Dictionary = input["room_engine"]
+	var solids: Dictionary = bake.get("solids", {})
+	var outer: Dictionary = plan["outer"]
+	var inner: Dictionary = plan["inner"]
+	var cutters: Dictionary = plan["cutters"]
+	var split: Dictionary = plan["split"]
+	var stage: Node3D = Node3D.new()
+	stage.name = "CsgExtrasStage"
+	host.add_child(stage)
+
+	# THE WHOLE ROOMS: a room of several shown as one shell for ROOMS: WHOLE, bored with every
+	# door any of its members opens (ADR 0029), from the room's shell as the engine made it.
+	_tick(progress, 0.1, "WHOLE ROOMS")
+	var work: Dictionary = _door_work(plan.get("doors", []), solids)
+	var bored_rooms: Dictionary = {}
+	for members: PackedStringArray in plan["rooms"]:
+		if members.size() < 2:
+			continue
+		var keeper: String = members[0]
+		var room_mesh: Mesh = room_engine.get(keeper, null)
+		if room_mesh == null:
+			continue
+		var all: Dictionary = {"union": [], "cut": []}
+		for id: String in members:
+			if work.has(id):
+				(all["union"] as Array).append_array(work[id]["union"])
+				(all["cut"] as Array).append_array(work[id]["cut"])
+		if (all["cut"] as Array).is_empty():
+			continue
+		bored_rooms[keeper] = _with_doors(stage, room_mesh, PolyMesh.new(), all)
+	if not bored_rooms.is_empty():
+		await _until_ready(host, bored_rooms.values())
+	_tick(progress, 0.3, "HALVES")
 
 	# PASS THREE: EVERY SOLID SLICED DOWN THE MIDDLE - each piece, and each room's whole shell -
 	# on the part's manufacturing plane (ShipMeshBake.plan, "split"): the solid intersected with a
-	# box on either side of the plane. "in manufacturing they are made in 2 pieces" (2026-09-05).
-	var split: Dictionary = plan["split"]
+	# box on either side of the plane.
 	var room_shells: Dictionary = {}
 	var half_combiners: Dictionary = {}
 	for members: PackedStringArray in plan["rooms"]:
 		var keeper: String = members[0]
 		if members.size() > 1:
-			var room_node: CSGCombiner3D = (
-				bored_rooms[keeper] if bored_rooms.has(keeper) else shells[keeper]
-			)
-			var whole: PolyMesh = _read_combiner(room_node)
-			if whole.is_empty() and bored_rooms.has(keeper):
-				room_node = shells[keeper]
-				whole = _read_combiner(room_node)
+			var room_mesh: Mesh = null
+			var whole: PolyMesh = PolyMesh.new()
+			if bored_rooms.has(keeper):
+				room_mesh = _engine_mesh(bored_rooms[keeper])
+				whole = _read_combiner(bored_rooms[keeper])
+			if whole.is_empty():
+				room_mesh = room_engine.get(keeper, null)
+				whole = _read(room_mesh)
 			if not whole.is_empty():
 				room_shells[keeper] = whole
-				_halve(
-					stage,
-					half_combiners,
-					"room:" + keeper,
-					_engine_mesh(room_node),
-					whole,
-					split[keeper]
-				)
+				_halve(stage, half_combiners, "room:" + keeper, room_mesh, whole, split[keeper])
 		for id: String in members:
-			var source: Mesh = null
-			if bored.has(id):
-				source = _engine_mesh(bored[id])
-			elif pieces.has(id):
-				source = _engine_mesh(pieces[id])
-			else:
-				source = _engine_mesh(shells[keeper])
-			_halve(stage, half_combiners, id, source, solids[id], split[id])
+			_halve(stage, half_combiners, id, engine.get(id, null), solids[id], split[id])
 	await _until_ready(host, half_combiners.values())
-	_tick(progress, 0.9, "SURFACES")
+	_tick(progress, 0.6, "READING HALVES")
 	var halves: Dictionary = {}
 	var room_shell_halves: Dictionary = {}
 	for key: String in half_combiners:
@@ -239,17 +308,13 @@ static func bake(
 		pair[0 if key.ends_with("#a") else 1] = half
 		into[id] = pair
 	stage.queue_free()
+	_tick(progress, 0.9, "SURFACES")
 
-	var report: Dictionary = ShipMeshBake.report(solids, plan, t0)
-	# Every mesh the view draws carries its faces in three NAMED surfaces - exterior, interior,
-	# cut - so the INTERIOR display mode can treat them apart (PolyMesh.to_array_mesh_grouped).
-	var meshes: Dictionary = {}
 	var half_meshes: Dictionary = {}
 	var room_meshes: Dictionary = {}
 	var room_half_meshes: Dictionary = {}
 	for members: PackedStringArray in plan["rooms"]:
 		for id: String in members:
-			meshes[id] = _grouped(solids[id], members, cutters, outer, inner)
 			if halves.has(id):
 				half_meshes[id] = [
 					_grouped(halves[id][0], members, cutters, outer, inner),
@@ -263,28 +328,26 @@ static func bake(
 					_grouped(room_shell_halves[keeper][0], members, cutters, outer, inner),
 					_grouped(room_shell_halves[keeper][1], members, cutters, outer, inner),
 				]
-	report["meshes"] = meshes
-	report["halves"] = halves
-	report["half_meshes"] = half_meshes
-	report["split"] = split
-	report["rooms"] = plan["rooms"]
-	report["room_shells"] = room_shells
-	report["room_meshes"] = room_meshes
-	report["room_half_meshes"] = room_half_meshes
-	report["bored"] = bored_ids
-	report["door_failed"] = door_failed
-	return report
+	out["halves"] = halves
+	out["half_meshes"] = half_meshes
+	out["room_shells"] = room_shells
+	# The PolyMesh halves of each whole room. The view has always read this key; until ADR 0030
+	# the bake never wrote it, so a whole room exploded unhalved.
+	out["room_shell_halves"] = room_shell_halves
+	out["room_meshes"] = room_meshes
+	out["room_half_meshes"] = room_half_meshes
+	return out
 
 
 ## What every piece takes at its doors (ADR 0029): id -> `{"union": [PolyMesh], "cut":
 ## [PolyMesh]}` - its collar halves to add, then its clearing prisms and the bores to subtract.
-## Only pieces the bake produced are listed.
-static func _door_work(doors: Array, solids: Dictionary) -> Dictionary:
+## Only pieces [param made] holds (id -> anything) are listed.
+static func _door_work(doors: Array, made: Dictionary) -> Dictionary:
 	var work: Dictionary = {}
 	for door: Dictionary in doors:
 		for side: String in ShipDoors.SIDES:
 			var id: String = str(door[side])
-			if not solids.has(id):
+			if not made.has(id):
 				continue
 			var entry: Dictionary = work.get(id, {"union": [], "cut": []})
 			(entry["union"] as Array).append(door[ShipDoors.DOOR_COLLAR][side])

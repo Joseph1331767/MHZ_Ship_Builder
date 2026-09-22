@@ -213,7 +213,8 @@ func test_every_piece_is_sliced_into_two_closed_halves() -> void:
 	for family: String in ["sphere_pod", "box_hull"]:
 		for open_nucleus: bool in [false, true]:
 			var doc: ShipDoc = _carbon(family, open_nucleus)
-			var report: Dictionary = await ShipCsgBake.bake(self, doc, _data, _cfg)
+			var assembled: Dictionary = await ShipCsgBake.bake(self, doc, _data, _cfg)
+			var report: Dictionary = await ShipCsgBake.bake_extras(self, assembled)
 			var halves: Dictionary = report["halves"]
 			var solids: Dictionary = report["solids"]
 			for pid: String in doc.part_order():
@@ -265,9 +266,36 @@ func test_every_drawn_mesh_names_its_exterior_and_interior() -> void:
 		if (doc.parts[pid] as ShipPart).role == ShipPart.ROLE_ROOM and pid == doc.root:
 			# The root of an open nucleus carries five holes: cut faces.
 			assert_int(mesh.surface_find_by_name(ShipCsgBake.SURFACE_CUT)).is_greater_equal(0)
-	# And a room shown whole is there to be drawn, in halves too.
-	assert_int((report["room_shells"] as Dictionary).size()).is_equal(1)
-	assert_int((report["room_half_meshes"] as Dictionary).size()).is_equal(1)
+	# And a room shown whole is there to be drawn, in halves too - once the extras are made.
+	var extras: Dictionary = await ShipCsgBake.bake_extras(self, report)
+	assert_int((extras["room_shells"] as Dictionary).size()).is_equal(1)
+	assert_int((extras["room_half_meshes"] as Dictionary).size()).is_equal(1)
+	# The PolyMesh halves too: the view reads them to explode a whole room in two (ADR 0030).
+	assert_int((extras["room_shell_halves"] as Dictionary).size()).is_equal(1)
+
+
+## The assembled bake makes only what the assembled ship shows; the halves and whole rooms wait
+## for the first ask, are made from the report without re-baking it, and leave it untouched (ADR
+## 0030). "yes" - the author, 2026-09-21, to the first EXPLODE after an update taking its time.
+func test_the_assembled_bake_leaves_the_extras_for_the_first_ask() -> void:
+	var doc: ShipDoc = _carbon("sphere_pod", true)
+	var report: Dictionary = await ShipCsgBake.bake(self, doc, _data, _cfg)
+	assert_bool(bool(report[ShipCsgBake.EXTRAS_READY])).is_false()
+	assert_bool(report.has("halves") or report.has("room_shells")).is_false()
+	var extras: Dictionary = await ShipCsgBake.bake_extras(self, report)
+	assert_bool(bool(extras[ShipCsgBake.EXTRAS_READY])).is_true()
+	# The report it was made from is not touched: the extras are a copy with them in.
+	assert_bool(report.has("halves")).is_false()
+	assert_bool(bool(report[ShipCsgBake.EXTRAS_READY])).is_false()
+	# The pieces are the SAME pieces - the extras slice them, they do not bake them again.
+	assert_bool(is_same(extras["solids"], report["solids"])).is_true()
+	var halves: Dictionary = extras["halves"]
+	for pid: String in report["solids"] as Dictionary:
+		assert_bool(halves.has(pid)).append_failure_message("%s was not halved" % pid).is_true()
+	# A report that never reached the engine comes back ready with nothing to add.
+	var empty: Dictionary = await ShipCsgBake.bake_extras(self, {})
+	assert_bool(bool(empty[ShipCsgBake.EXTRAS_READY])).is_true()
+	assert_bool(empty.has("halves")).is_false()
 
 
 ## The bake reports its progress in order - a bar has something to move with (ADR 0023).

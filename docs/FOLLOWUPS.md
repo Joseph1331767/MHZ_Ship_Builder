@@ -1396,3 +1396,41 @@ ADR 0029.
 8. **The fit is measured on twelve rim samples** and marched at half a wall; a cavity thinner
    than that, or a rim feature between samples, is missed. The bore margin (`BORE_MARGIN_M`)
    covers the ordinary case.
+
+
+## F42 — Additive extensions of 2026-09-21: the bake makes what is on screen — OPEN, DELIBERATE
+
+ADR 0030. Harness only; nothing in `core/` changed.
+
+- **`ShipCsgBake.bake()`** no longer returns `halves`, `half_meshes`, `room_shells`,
+  `room_meshes` or `room_half_meshes`. It returns `EXTRAS_READY: false` and `EXTRAS_INPUT`
+  (`{"plan", "engine": {id: Mesh}, "room_engine": {keeper: Mesh}}`). Its progress ticks are
+  PLANNING, ROOM SHELLS, PIECES, DOORS, READING, SURFACES.
+- **`ShipCsgBake.bake_extras(host, bake, progress)`** (new, async): a copy of the report with those
+  five keys in, plus **`room_shell_halves`**, which the view already read and no bake had ever
+  written.
+- **`ShipCsgBake.EXTRAS_INPUT`, `EXTRAS_READY`** (new constants); `_door_work`'s second argument
+  is any id-keyed map now.
+- **`harness/builder/ship_bake_session.gd` — `class_name ShipBakeSession`** (new): `last`,
+  `stale`, `busy`, `request_update()`, `request_extras()`, `has_extras()`, `drop()`. `--import`
+  was run.
+- **`ShipBuilder`**: `_explode_baking`, `_last_bake`, `_meshes_stale` and `_bake_pending` are gone,
+  replaced by `_bake_session`; `_current_doc()` is new (private). `_show_bake` asks for the extras
+  when exploded or rooms-whole; `_on_rooms_pressed` does too over the baked view.
+- **Tools**: `ship_visual_check.gd` and `ship_resolve_check.gd` read `_bake_session.busy` and
+  `.last`.
+- Tests: `test_the_assembled_bake_leaves_the_extras_for_the_first_ask`; the halving and
+  named-surface tests call `bake_extras`. Suite **301/301**.
+
+**No hash moves.** Measured: `5536787c6c35d236` either side.
+
+**Known limits, recorded rather than hidden.**
+
+1. **The first EXPLODE after an update costs the extras**: 9.7 s on a carbon of spheres, 4.0 s on
+   boxes, with the bar up. Accepted by the author in exchange for the assembled bake's 19.3 -> 6.0 s.
+2. **A report now keeps its plan and the engine's meshes alive** under `EXTRAS_INPUT` for as long
+   as the builder holds the bake. That is one ship's worth of operands, released with the bake.
+3. **An extras pass cannot be cancelled.** An edit during one queues an update behind it, and the
+   extras of the replaced bake are thrown away when they land.
+4. **The n-gon merge is still the largest single cost** of the read-back. The step-2 cache makes it
+   rarer; making the merge itself cheaper is separate work.

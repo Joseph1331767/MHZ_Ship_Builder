@@ -1316,7 +1316,7 @@ func _explode_begin() -> void:
 func _explode_wait(scene: Object, explode: Object) -> bool:
 	# Two waits: the engine bake the builder awaits before it hands modules to the view (ADR
 	# 0020), and then the view placing them a module a frame.
-	if bool(_builder.get("_explode_baking")) or bool(explode.call("is_busy")):
+	if (_builder.get("_bake_session") as ShipBakeSession).busy or bool(explode.call("is_busy")):
 		if _frames <= EXPLODE_MAX_FRAMES:
 			return false
 		_failures.append("explode: still baking after %d frames" % _frames)
@@ -1989,7 +1989,7 @@ func _update_wait(explode: Object) -> bool:
 	var bar: ProgressBar = _builder.get("_progress")
 	if _frames == 2 and (bar == null or not bar.visible):
 		_failures.append("update: no progress bar while the engine bakes")
-	if bool(_builder.get("_explode_baking")) or bool(explode.call("is_busy")):
+	if (_builder.get("_bake_session") as ShipBakeSession).busy or bool(explode.call("is_busy")):
 		if _frames <= EXPLODE_MAX_FRAMES:
 			return false
 		_failures.append("update: still baking after %d frames" % _frames)

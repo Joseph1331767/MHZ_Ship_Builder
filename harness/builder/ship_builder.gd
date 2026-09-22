@@ -143,15 +143,10 @@ var _rooms_button: Button = null
 ## "an explode control toggle to choose to explode rooms or keep them whole" (2026-09-05).
 var _rooms_whole: bool = false
 var _exploded: bool = false
-## True from the EXPLODE press until the engine has handed the baked modules to the view - the
-## frames the CSG nodes take to compute. The visual check waits on it; nothing else needs to.
-var _explode_baking: bool = false
-## The baked assembled view (ADR 0023): the last engine bake, whether it is on screen, whether
-## the document has moved on since, and whether AUTO re-bakes on every edit.
-var _last_bake: Dictionary = {}
+## What the engine has made - the last bake, its extras, whether it is stale, whether the engine
+## is busy (ADR 0030) - and whether the baked assembled view is on screen (ADR 0023).
+var _bake_session: ShipBakeSession = null
 var _baked: bool = false
-var _meshes_stale: bool = false
-var _bake_pending: bool = false
 var _update_button: Button = null
 ## The component instance open for editing in isolation (ADR 0024), or "".
 var _isolated: String = ""
@@ -200,6 +195,7 @@ func _ready() -> void:
 
 	theme = _ship_theme.build_theme()
 	_history = ShipHistory.new()
+	_bake_session = ShipBakeSession.new(self, _current_doc, _show_bake, _on_bake_progress)
 
 	_build_layout()
 	_build_context_menu()
@@ -833,7 +829,7 @@ func _set_exploded(on: bool) -> void:
 		# The exact per-part bake, carried out by the ENGINE's CSG (ShipCsgBake, ADR 0020): the
 		# plan is core's, the booleans are Manifold's. A fresh bake is shown as it is; a stale or
 		# missing one is made first, and _show_bake() finds _exploded set when it lands.
-		if _last_bake.is_empty() or _meshes_stale:
+		if _bake_session.last.is_empty() or _bake_session.stale:
 			_update_meshes()
 		else:
 			_show_bake()
@@ -844,7 +840,7 @@ func _set_exploded(on: bool) -> void:
 		_view.set_exploded(false)
 		# Back into the baked view when there is one - the assembled ship is the finished pieces
 		# where they stand, not the preview primitives (ADR 0023).
-		if not _last_bake.is_empty():
+		if not _bake_session.last.is_empty():
 			_show_bake()
 		set_status("ASSEMBLED")
 	if _explode_button != null:
@@ -859,63 +855,51 @@ func _on_rooms_pressed() -> void:
 	_rooms_whole = not _rooms_whole
 	if _rooms_button != null:
 		_rooms_button.text = "ROOMS: WHOLE" if _rooms_whole else "ROOMS: PIECES"
-	if _view != null:
-		_view.set_rooms_whole(_rooms_whole)
+	if _view == null:
+		return
+	# A whole room is an extra (ADR 0030): shown once made, by _show_bake when it lands.
+	if _rooms_whole and (_baked or _exploded) and not _bake_session.has_extras():
+		_show_bake()
+		return
+	_view.set_rooms_whole(_rooms_whole)
 
 
 # ---------------------------------------------------------------- baked view and its update
 
 
 ## UPDATE MESHES: the engine bake of the document as it is now, shown assembled or exploded
-## (ADR 0023). A coroutine over frames; a request during a bake queues one more; a bake of a
-## document since replaced is discarded (ADR 0028).
+## (ADR 0023). The session queues a request made during a bake and discards a bake of a document
+## since replaced (ADR 0028); _show_bake runs when it lands.
 func _update_meshes() -> void:
 	if _doc == null or _view == null:
 		return
-	if _explode_baking:
-		_bake_pending = true
-		return
-	_explode_baking = true
-	_bake_pending = false
-	_meshes_stale = false
-	if _bake_hud != null:
-		_bake_hud.refresh_button(_meshes_stale)
-	if _bake_hud != null:
+	if not _bake_session.busy and _bake_hud != null:
+		_bake_hud.refresh_button(false)
 		_bake_hud.show_progress(0.0)
-	set_status("BAKING...")
-	var doc_at_start: ShipDoc = _doc
-	var exact: Dictionary = await ShipCsgBake.bake(self, _doc, _data, _config, _on_bake_progress)
-	_explode_baking = false
-	if _view == null:
-		return
-	if _doc != doc_at_start:
-		# Another document arrived meanwhile (measured: the chooser's blank ship baking when the
-		# class replaced it): its bake is not this ship's. Bake this one instead.
-		_update_meshes()
-		return
-	if _bake_pending:
-		_meshes_stale = true
-	_last_bake = exact
-	_show_bake()
-	if _bake_pending:
-		_update_meshes()
+		set_status("BAKING...")
+	_bake_session.request_update(_data, _config)
 
 
-## Put the last bake on screen - exploded when the exploded view is up, assembled otherwise.
+## Put the last bake on screen - exploded when the exploded view is up, assembled otherwise. The
+## exploded view and ROOMS: WHOLE draw the bake's extras, made on the first ask (ADR 0030).
 func _show_bake() -> void:
-	if _view == null or _doc == null or _last_bake.is_empty():
+	if _view == null or _doc == null or _bake_session.last.is_empty():
+		return
+	if (_exploded or _rooms_whole) and not _bake_session.has_extras():
+		set_status("HALVING THE PIECES...")
+		_bake_session.request_extras()
 		return
 	_connect_explode()
 	var sdf: ShipSdf = ShipSdf.build(_doc, _data, _config)
 	_view.set_rooms_whole(_rooms_whole)
 	if _exploded:
 		_baked = false
-		_view.set_exploded(true, sdf, _selection, _last_bake)
+		_view.set_exploded(true, sdf, _selection, _bake_session.last)
 	else:
 		_baked = true
-		_view.set_baked(true, sdf, _selection, _last_bake)
+		_view.set_baked(true, sdf, _selection, _bake_session.last)
 	if _bake_hud != null:
-		_bake_hud.refresh_button(_meshes_stale)
+		_bake_hud.refresh_button(_bake_session.stale)
 
 
 ## A ship that arrives RESOLVES ITSELF: one bake, the bar up, the pieces on screen (ADR 0028).
@@ -929,7 +913,7 @@ func _resolve_on_load() -> void:
 ## Leave the baked view for the primitives (the visual check uses this); the bake is kept.
 func _set_baked(on: bool) -> void:
 	if on:
-		if _last_bake.is_empty() or _meshes_stale:
+		if _bake_session.last.is_empty() or _bake_session.stale:
 			_update_meshes()
 		else:
 			_show_bake()
@@ -942,19 +926,23 @@ func _set_baked(on: bool) -> void:
 	set_status("PREVIEW")
 
 
+## The document as it is now, for the bake session to tell a replaced one by (ADR 0030).
+func _current_doc() -> ShipDoc:
+	return _doc
+
+
 ## The document changed: the baked view (if up) is stale and the button lights (ADR 0024).
 func _mark_meshes_stale() -> void:
 	if _doc == null:
 		return
-	_meshes_stale = true
+	_bake_session.stale = true
 	if _bake_hud != null:
-		_bake_hud.refresh_button(_meshes_stale)
+		_bake_hud.refresh_button(true)
 
 
 ## Forget the bake: the document was swapped wholesale.
 func _drop_bake() -> void:
-	_last_bake = {}
-	_meshes_stale = false
+	_bake_session.drop()
 	if _baked:
 		_baked = false
 		if _view != null:

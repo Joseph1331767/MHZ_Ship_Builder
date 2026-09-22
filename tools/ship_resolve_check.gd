@@ -102,7 +102,7 @@ func _wait_for_resolve() -> bool:
 	var bar: ProgressBar = _builder.get("_progress")
 	if _frames == 3 and (bar == null or not bar.visible):
 		_failures.append("no progress bar while the ship resolves")
-	if bool(_builder.get("_explode_baking")) or bool(explode.call("is_busy")):
+	if (_builder.get("_bake_session") as ShipBakeSession).busy or bool(explode.call("is_busy")):
 		if _frames <= MAX_BAKE_FRAMES:
 			return false
 		_failures.append("still resolving after %d frames" % _frames)
@@ -130,7 +130,7 @@ func _read_back() -> void:
 	var modules: int = int(explode.call("module_count"))
 	if modules != placed:
 		_failures.append("%d modules on screen, %d placed ids" % [modules, placed])
-	var bake: Dictionary = _builder.get("_last_bake")
+	var bake: Dictionary = (_builder.get("_bake_session") as ShipBakeSession).last
 	var biggest: int = 0
 	for members: PackedStringArray in bake.get("rooms", []):
 		biggest = maxi(biggest, members.size())
@@ -165,7 +165,7 @@ func _read_back() -> void:
 func _open_a_hatch() -> void:
 	var view: Object = _builder.call("get_view")
 	var explode: Object = view.call("get_explode_view")
-	var bake: Dictionary = _builder.get("_last_bake")
+	var bake: Dictionary = (_builder.get("_bake_session") as ShipBakeSession).last
 	var doors: Array = bake.get("doors", [])
 	var bored: PackedStringArray = bake.get("bored", PackedStringArray())
 	var failed: PackedStringArray = bake.get("door_failed", PackedStringArray())

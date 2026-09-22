@@ -2701,3 +2701,38 @@ provenance through the bake, a band field on the joint, a styles pack.
 Bridge driven over stdio: 46 tools, `editor_state` answered from the live editor; the same calls
 from this session's own tools; the editor error log empty after the plugin swap. No `core/`,
 `data/` or `harness/` change, so no test run was needed.
+
+
+## [2026-09-21b] The bake makes what is on screen; the exploded extras wait for the first ask
+
+> "we will take off from the top and continue" / "1) yes 2) yes 3) now, go ahead with step 1"
+
+ADR 0030, step 1 of the Phase One Hull Review's first recommendation. Measured first: a carbon of
+spheres baked in 19.0 s and a second bake of the same ship cost the same. 7.6 s of it was the
+n-gon merge on read-back, and the bake read back 58 times, of which 14 are the ship on screen.
+`ShipCsgBake.bake()` now makes the assembled ship only, reading each piece once after its doors;
+`bake_extras()` makes the halves and whole rooms from that report on the first EXPLODE or
+ROOMS: WHOLE. The builder's bake state moved into `ShipBakeSession` (`ShipBuilder` 1997 -> 1985
+lines). On the way: the view had always read `room_shell_halves`, which no bake wrote, so a whole
+room exploded unhalved; the extras write it.
+
+The author's answers to the texturing questions went into `docs/future/texturing.md`: band width a
+range with 0 for none, surface only, an edge function per mesh chunk, mirror follows the component
+path, textures from the author's own pipeline. The bake's per-primitive chunks are recorded there as
+load-bearing. `docs/future/symmetry.md` is new: mirror on any combination of X, Y and Z, and radial,
+point and repeat symmetry for later.
+
+### Verified
+
+Identical geometry: both families of the template carbon, before and after, field by field (every
+piece, surface, half, whole room, bored set): **zero differences**. Assembled bake 19.3 -> 6.0 s on
+spheres and 8.9 -> 2.9 s on boxes; extras 9.7 s and 4.0 s. **gdUnit4 301/301**; selfcheck PASSED,
+hash unchanged at `5536787c6c35d236`; data validator PASSED, 0 warnings; gdformat and gdlint clean;
+windowed visual check PASSED (EXPLODE, ASSEMBLE, UPDATE); resolve check PASSED (14 modules, a room of
+6, 8 doors, 12 pieces bored, 16 leaves).
+
+### Still the human's to check
+
+Pick a carbon of spheres: the bar should finish in about a third of the old time. Press EXPLODE:
+"HALVING THE PIECES..." and the bar again, then every module in two. ASSEMBLE and EXPLODE again:
+instant. Toggle ROOMS: WHOLE while exploded: the nucleus shows as one shell, now also in two halves.
