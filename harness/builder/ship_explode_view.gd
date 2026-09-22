@@ -43,9 +43,21 @@ const MIN_CELLS_PER_AXIS: int = 4
 ## preview of where the walls are, not a measurement of how thick they are.
 const WALL_PREVIEW_CELLS: float = 1.6
 
-## How far each half of a sliced module is pulled off its split plane, as a fraction of the
-## explode gap.
+## How far each slice of a module is pulled off its cut, as a fraction of the explode gap, when
+## no [ShipExplodeSettings] were handed over.
 const HALF_GAP_FRACTION: float = 0.35
+
+## Which separation moves a visual (ADR 0031): none (a whole piece, a door), the slice separation
+## of a piece standing alone or a room shown whole, or the cluster chunks' own.
+const SEP_NONE: int = 0
+const SEP_PARTS: int = 1
+const SEP_CLUSTER: int = 2
+## Every visual remembers where it hangs, so [method relayout] can move it without a rebuild: the
+## module whose offset it rides, the unit direction its slice is pulled along, and which
+## separation scales that.
+const META_MODULE: String = "explode_module"
+const META_SHIFT: String = "explode_shift"
+const META_KIND: String = "explode_kind"
 
 ## THE DOORS (ADR 0029). Every piece at a hatched or doorway seam carries its own door over the
 ## opening - one per module, "so one can be closed or both" - built from the bake's door records
@@ -62,8 +74,9 @@ class Module:
 	extends RefCounted
 
 	var id: String = ""
-	## The visuals, one per half - "in manufacturing they are made in 2 pieces" (2026-09-05) -
-	## or one when the bake gave no halves. `solid` is the first, for a check that wants one.
+	## The visuals, one per slice of the piece's slicing grid (ADR 0031) - "in manufacturing they
+	## are made in 2 pieces" (2026-09-05) was the first grid - or one when it is not sliced.
+	## `solid` is the first, for a check that wants one.
 	var solids: Array[MeshInstance3D] = []
 	var wires: Array[MeshInstance3D] = []
 	var bodies: Array[StaticBody3D] = []
@@ -103,6 +116,12 @@ var _solids: Dictionary = {}
 var _bake: Dictionary = {}
 ## Explode a room as one whole shell rather than its pieces.
 var _rooms_whole: bool = false
+## The player's explode settings (ADR 0031): separations and slicing. Null falls back to the tuning
+## pack's explode gap and the old half gap.
+var _settings: ShipExplodeSettings = null
+## Module id -> ship-space box, kept from [method show_modules] so [method relayout] can work the
+## offsets out again.
+var _boxes: Dictionary = {}
 ## The bake's door records (ADR 0029), and how far open each door is: key -> {side -> 0..1}.
 ## The amounts outlive [method clear] - a rebake does not shut every door.
 var _doors: Array = []
@@ -174,7 +193,8 @@ func show_modules(
 			_queue.append(module)
 			boxes[module] = sdf.part_aabb(i)
 	# Assembled, nothing moves: the pieces sit exactly where the document puts them.
-	_offsets = {} if assembled else ShipSeams.explode_offsets(sdf.seams(), cfg, boxes)
+	_boxes = boxes
+	_offsets = {} if assembled else _offsets_for(boxes)
 	# A room shown WHOLE is one module under its first member; the other members wait unseen.
 	if _rooms_whole and _bake.has("rooms"):
 		for members: PackedStringArray in _bake["rooms"]:
@@ -226,6 +246,7 @@ func clear() -> void:
 	_doors = []
 	_queue = PackedStringArray()
 	_offsets = {}
+	_boxes = {}
 	_selected = {}
 	_bounds = AABB()
 	_has_bounds = false
@@ -300,6 +321,35 @@ func module_nodes() -> Array[MeshInstance3D]:
 	return out
 
 
+## The player's explode settings (ADR 0031). Held by reference: the panel writes into the same
+## object, and [method relayout] reads it.
+func set_settings(settings: ShipExplodeSettings) -> void:
+	_settings = settings
+
+
+## Move everything on screen to where the settings now put it - module offsets, cluster chunks and
+## slices - without rebuilding a node. What a separation slider calls on every change.
+func relayout() -> void:
+	if not _showing or _sdf == null or _cfg == null:
+		return
+	_offsets = {} if _assembled else _offsets_for(_boxes)
+	_bounds = AABB()
+	_has_bounds = false
+	for child: Node in get_children():
+		if not (child is Node3D) or not child.has_meta(META_MODULE):
+			continue
+		var node: Node3D = child
+		node.position = _placed_at(
+			str(node.get_meta(META_MODULE)),
+			node.get_meta(META_SHIFT, Vector3.ZERO) as Vector3,
+			int(node.get_meta(META_KIND, SEP_NONE))
+		)
+		if node is MeshInstance3D and (node as MeshInstance3D).mesh != null:
+			var box: AABB = node.transform * (node as MeshInstance3D).mesh.get_aabb()
+			_bounds = _bounds.merge(box) if _has_bounds else box
+			_has_bounds = true
+
+
 ## Whether an exploded room shows as its pieces or as one whole shell. When one is showing it
 ## is rebuilt on the spot.
 func set_rooms_whole(on: bool) -> void:
@@ -358,36 +408,46 @@ func _bake_exact(id: String, exact: PolyMesh) -> void:
 ## where it sits, [param id] which piece of the bake it is (its own pick id).
 func _bake_exact_as(module_id: String, id: String, exact: PolyMesh) -> void:
 	# Which solid this module shows: with rooms whole and this id keeping a room's shell, the
-	# shell; otherwise the piece. Each comes with its drawn (named-surface) mesh and its halves.
+	# shell; otherwise the piece. Each comes with its drawn (named-surface) mesh and its slices.
 	var whole: PolyMesh = exact
 	var whole_mesh: ArrayMesh = _bake.get("meshes", {}).get(id, null)
-	var halves: Array = _bake.get("halves", {}).get(id, [])
-	var meshes: Array = _bake.get("half_meshes", {}).get(id, [])
-	var split: Dictionary = _bake.get("split", {}).get(id, {})
+	var chunks: Array = _bake.get("chunks", {}).get(id, [])
+	var meshes: Array = _bake.get("chunk_meshes", {}).get(id, [])
+	var cells: Array = _bake.get("chunk_cells", {}).get(id, [])
+	var counts: Vector3i = _bake.get("chunk_counts", {}).get(id, Vector3i.ZERO)
+	var kind: int = SEP_CLUSTER if _in_cluster(id) else SEP_PARTS
 	if _rooms_whole and _bake.get("room_shells", {}).has(id):
 		whole = _bake["room_shells"][id]
 		whole_mesh = _bake.get("room_meshes", {}).get(id, null)
-		halves = _bake.get("room_shell_halves", {}).get(id, [])
-		meshes = _bake.get("room_half_meshes", {}).get(id, [])
+		chunks = _bake.get("room_chunks", {}).get(id, [])
+		meshes = _bake.get("room_chunk_meshes", {}).get(id, [])
+		cells = _bake.get("room_chunk_cells", {}).get(id, [])
+		counts = _bake.get("room_chunk_counts", {}).get(id, Vector3i.ZERO)
+		kind = SEP_PARTS
 	if whole_mesh == null:
 		whole_mesh = whole.to_array_mesh()
-	var halved: bool = halves.size() == 2 and halves[0] != null and halves[1] != null
-	if _assembled or not halved or split.is_empty():
+	var frame: Transform3D = _bake.get("frames", {}).get(id, Transform3D.IDENTITY)
+	if _assembled or chunks.size() < 2 or cells.size() != chunks.size():
 		_place_module_at(module_id, id, whole_mesh, whole.to_wire_mesh())
 		return
-	var normal: Vector3 = (split["normal"] as Vector3).normalized()
-	var apart: float = maxf(_cfg.explode_gap_m, 0.0) * HALF_GAP_FRACTION
 	var module: Module = Module.new()
 	module.id = id
 	module.selected = _is_selected(id)
-	for side: int in 2:
-		var half: PolyMesh = halves[side]
-		if half.is_empty():
+	for i: int in chunks.size():
+		var chunk: PolyMesh = chunks[i]
+		if chunk.is_empty():
 			continue
-		var mesh: ArrayMesh = meshes[side] if meshes.size() == 2 else half.to_array_mesh()
-		var shift: Vector3 = normal * apart * (1.0 if side == 1 else -1.0)
+		var mesh: ArrayMesh = meshes[i] if meshes.size() == chunks.size() else chunk.to_array_mesh()
+		var cell: Vector3i = cells[i]
 		_add_visual_at(
-			module, module_id, id, mesh, half.to_wire_mesh(), shift, "_a" if side == 0 else "_b"
+			module,
+			module_id,
+			id,
+			mesh,
+			chunk.to_wire_mesh(),
+			_shift_unit(frame, cell, counts),
+			"_c%d%d%d" % [cell.x, cell.y, cell.z],
+			kind
 		)
 	if module.solids.is_empty():
 		_place_module_at(module_id, id, whole_mesh, whole.to_wire_mesh())
@@ -407,7 +467,7 @@ func _place_module_at(module_id: String, id: String, mesh: ArrayMesh, wire: Mesh
 	var module: Module = Module.new()
 	module.id = id
 	module.selected = _is_selected(id)
-	_add_visual_at(module, module_id, id, mesh, wire, Vector3.ZERO, "")
+	_add_visual_at(module, module_id, id, mesh, wire, Vector3.ZERO, "", SEP_NONE)
 	_add_doors(module, module_id)
 	_apply_materials(module)
 	_modules.append(module)
@@ -424,29 +484,22 @@ func _is_selected(id: String) -> bool:
 	return _selected.has(ShipSymmetry.source_of_twin(ShipComponents.instance_of(id)))
 
 
-## One visual of [param module] - a whole piece, or one half - at the module's explode offset
-## plus [param shift], with its wireframe and its pick body.
-func _add_visual(
-	module: Module, id: String, mesh: ArrayMesh, wire: Mesh, shift: Vector3, suffix: String
-) -> void:
-	_add_visual_at(module, id, id, mesh, wire, shift, suffix)
-
-
-## [method _add_visual] at module [param module_id]'s offset, picked as [param id].
+## One visual of [param module] - a whole piece, or one slice - at module [param module_id]'s
+## explode offset, pulled along [param unit] by the separation [param kind] names, with its
+## wireframe and its pick body, picked as [param id].
 func _add_visual_at(
 	module: Module,
 	module_id: String,
 	id: String,
 	mesh: ArrayMesh,
 	wire: Mesh,
-	shift: Vector3,
-	suffix: String
+	unit: Vector3,
+	suffix: String,
+	kind: int
 ) -> void:
 	# A node name cannot hold the slash of an expanded id or the tilde of a twin.
 	var node_name: String = id.replace("/", "__").replace("~", "_") + suffix
-	var placed: Transform3D = Transform3D(
-		Basis.IDENTITY, (_offsets.get(module_id, Vector3.ZERO) as Vector3) + shift
-	)
+	var placed: Transform3D = Transform3D(Basis.IDENTITY, _placed_at(module_id, unit, kind))
 
 	# The exterior (with the cuts) and the interior are SEPARATE meshes (ADR 0028): the bake
 	# names them as surfaces of one ArrayMesh, and the split here gives each its own node, so
@@ -456,6 +509,7 @@ func _add_visual_at(
 	solid.name = NODE_PREFIX + node_name
 	solid.mesh = split[0]
 	solid.transform = placed
+	_hang(solid, module_id, unit, kind)
 	add_child(solid)
 	module.solids.append(solid)
 	if split[1] != null:
@@ -463,6 +517,7 @@ func _add_visual_at(
 		inner.name = NODE_PREFIX + node_name + "_inner"
 		inner.mesh = split[1]
 		inner.transform = placed
+		_hang(inner, module_id, unit, kind)
 		add_child(inner)
 		module.solids.append(inner)
 
@@ -470,6 +525,7 @@ func _add_visual_at(
 	wire_node.name = NODE_PREFIX + node_name + "_wire"
 	wire_node.mesh = wire
 	wire_node.transform = placed
+	_hang(wire_node, module_id, unit, kind)
 	add_child(wire_node)
 	module.wires.append(wire_node)
 
@@ -489,6 +545,7 @@ func _add_visual_at(
 	body.collision_mask = 0
 	body.set_meta(ShipSceneBuilder.PART_META, id)
 	body.transform = placed
+	_hang(body, module_id, unit, kind)
 	var collider: CollisionShape3D = CollisionShape3D.new()
 	collider.shape = mesh.create_convex_shape(true, true)
 	body.add_child(collider)
@@ -673,12 +730,14 @@ func _add_doors(module: Module, module_id: String) -> void:
 				solid.name = node_name
 				solid.mesh = leaf.to_array_mesh()
 				solid.transform = placed
+				_hang(solid, module_id, Vector3.ZERO, SEP_NONE)
 				add_child(solid)
 				module.doors.append(solid)
 				var wire: MeshInstance3D = MeshInstance3D.new()
 				wire.name = node_name + "_wire"
 				wire.mesh = leaf.to_wire_mesh()
 				wire.transform = placed
+				_hang(wire, module_id, Vector3.ZERO, SEP_NONE)
 				add_child(wire)
 				module.door_wires.append(wire)
 
@@ -727,6 +786,65 @@ func _door_material(base: Material) -> Material:
 		out = dup
 	_door_materials[key] = out
 	return out
+
+
+## Where a visual of module [param module_id] sits: the module's offset, plus [param unit] times the
+## separation [param kind] names.
+func _placed_at(module_id: String, unit: Vector3, kind: int) -> Vector3:
+	return (_offsets.get(module_id, Vector3.ZERO) as Vector3) + unit * _separation(kind)
+
+
+## The distance a separation of [param kind] pulls a slice off its cut, from the settings.
+func _separation(kind: int) -> float:
+	if kind == SEP_NONE:
+		return 0.0
+	if _settings == null:
+		return maxf(_cfg.explode_gap_m, 0.0) * HALF_GAP_FRACTION if _cfg != null else 0.0
+	if kind == SEP_CLUSTER:
+		return _settings.cluster_slice_separation_m
+	return _settings.slice_separation_m
+
+
+## The module offsets for [param boxes], at the settings' separation: none when the player turned
+## separation off, the tuning pack's explode gap when no settings were handed over.
+func _offsets_for(boxes: Dictionary) -> Dictionary:
+	if _sdf == null or _cfg == null:
+		return {}
+	if _settings == null:
+		return ShipSeams.explode_offsets(_sdf.seams(), _cfg, boxes)
+	if not _settings.separate:
+		return {}
+	var cfg: ShipConfig = ShipConfig.from_dict(_cfg.snapshot())
+	cfg.explode_gap_m = _settings.separation_m
+	return ShipSeams.explode_offsets(_sdf.seams(), cfg, boxes)
+
+
+## Remember on [param node] where it hangs, for [method relayout].
+static func _hang(node: Node3D, module_id: String, unit: Vector3, kind: int) -> void:
+	node.set_meta(META_MODULE, module_id)
+	node.set_meta(META_SHIFT, unit)
+	node.set_meta(META_KIND, kind)
+
+
+## The direction a slice in [param cell] of a grid of [param counts] is pulled: along each sliced
+## axis of [param frame], away from the middle - an outer slice of a trisection outward, the middle
+## one not at all, each half of a bisection its own way. Diagonal when several axes are sliced.
+static func _shift_unit(frame: Transform3D, cell: Vector3i, counts: Vector3i) -> Vector3:
+	var axes: Array[Vector3] = [frame.basis.x, frame.basis.y, frame.basis.z]
+	var out: Vector3 = Vector3.ZERO
+	for axis: int in 3:
+		if counts[axis] <= 0:
+			continue
+		out += axes[axis] * signf(float(cell[axis]) - float(counts[axis]) * 0.5)
+	return out
+
+
+## Is [param id] a chunk of a room of several - a cluster (ADR 0031)?
+func _in_cluster(id: String) -> bool:
+	for members: PackedStringArray in _bake.get("rooms", []):
+		if members.size() > 1 and members.has(id):
+			return true
+	return false
 
 
 ## [param mesh] as two: every surface but the interior, and the interior alone (null when the

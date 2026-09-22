@@ -2736,3 +2736,39 @@ windowed visual check PASSED (EXPLODE, ASSEMBLE, UPDATE); resolve check PASSED (
 Pick a carbon of spheres: the bar should finish in about a third of the old time. Press EXPLODE:
 "HALVING THE PIECES..." and the bar again, then every module in two. ASSEMBLE and EXPLODE again:
 instant. Toggle ROOMS: WHOLE while exploded: the nucleus shows as one shell, now also in two halves.
+
+
+## [2026-09-21c] Explode options: separations, and a slicer in each part's own axes
+
+> "explode looks cool, but i want to make it AAA ... a part separation toggle with a slider ... 3
+> orthogonal slices, and offer single slice or double slice in each orthogonal direction ... a
+> nodecluster bisector includer toggle ... " / "exact slow bake, then cache and animations"
+
+ADR 0031. An EXPLODE OPTIONS panel docks over the 3D view while it is exploded. SEPARATE MODULES
+with its gap; a slicer with X, Y RADIAL and Z each OFF, BISECT or TRISECT, and a slice gap; SLICE
+CLUSTER CHUNKS with its own three axes and gap; APPLY SLICES. Every part is cut in its own frame, Y
+its placement normal, at equal divisions of its original body's extent, by the engine, one axis at a
+time. The gaps move what is on screen at once with no rebake; the slicer lights APPLY, which re-cuts.
+The settings live in `user://explode_settings.json`, never in a ship file. The default is the old
+single cut across Z.
+
+Found by looking at the frames, not by the tests: with the clusters cut on X and the parts on Y,
+every standalone piece came out whole. The slicer re-read every job after each axis, and a job not
+cut on that axis lost its cells. Fixed, and the test and the check now assert the slices made rather
+than the counts asked for.
+
+### Verified
+
+**gdUnit4 307/307** (six new in `test_explode_slicing.gd`); selfcheck PASSED, hash unchanged at
+`5536787c6c35d236`; data validator PASSED; gdformat and gdlint clean; windowed visual check and
+resolve check PASSED; the new windowed explode check PASSED: default 14 of 14 pieces bisected;
+parts trisected on Y and cluster chunks bisected on X, 8 and 6, 72 nodes; a wider gap moved a piece
+3.4 m with no rebake; separation off put every module back on its seam. Frames:
+`reports/visual_explode_{default,sliced,spread}.png`.
+
+### Still the human's to check
+
+Pick a carbon and press EXPLODE: the panel in the top right. Drag GAP and SLICE GAP: the pieces
+follow live. Set Y RADIAL to TRISECT: APPLY SLICES lights; press it and wait for the bar: every pod
+in three bands along the way it points. Turn SLICE CLUSTER CHUNKS off and APPLY: the nucleus chunks
+whole, the pods still sliced. Close the builder and reopen: the settings are as you left them.

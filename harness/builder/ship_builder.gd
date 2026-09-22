@@ -147,6 +147,8 @@ var _exploded: bool = false
 ## is busy (ADR 0030) - and whether the baked assembled view is on screen (ADR 0023).
 var _bake_session: ShipBakeSession = null
 var _baked: bool = false
+## The explode options: the player's settings, their panel and their file (ADR 0031).
+var _explode_opts: ShipExplodeControl = null
 var _update_button: Button = null
 ## The component instance open for editing in isolation (ADR 0024), or "".
 var _isolated: String = ""
@@ -204,6 +206,9 @@ func _ready() -> void:
 	_build_tutorial()
 	_build_post_process()
 	_view.setup(_ship_theme, self)
+	_explode_opts = ShipExplodeControl.new(
+		_view.get_parent() as Control, _view, _bake_session, _config, _ship_theme, _show_bake
+	)
 	_build_placement()
 
 	_new_document()
@@ -825,6 +830,7 @@ func _set_exploded(on: bool) -> void:
 		cancel_placement()
 		_connect_explode()
 		_exploded = true
+		_explode_opts.set_shown(true)
 		set_status("EXPLODING...")
 		# The exact per-part bake, carried out by the ENGINE's CSG (ShipCsgBake, ADR 0020): the
 		# plan is core's, the booleans are Manifold's. A fresh bake is shown as it is; a stale or
@@ -837,6 +843,7 @@ func _set_exploded(on: bool) -> void:
 		if not _exploded:
 			return
 		_exploded = false
+		_explode_opts.set_shown(false)
 		_view.set_exploded(false)
 		# Back into the baked view when there is one - the assembled ship is the finished pieces
 		# where they stand, not the preview primitives (ADR 0023).
@@ -858,7 +865,11 @@ func _on_rooms_pressed() -> void:
 	if _view == null:
 		return
 	# A whole room is an extra (ADR 0030): shown once made, by _show_bake when it lands.
-	if _rooms_whole and (_baked or _exploded) and not _bake_session.has_extras():
+	if (
+		_rooms_whole
+		and (_baked or _exploded)
+		and not _bake_session.has_extras(_explode_opts.slicing())
+	):
 		_show_bake()
 		return
 	_view.set_rooms_whole(_rooms_whole)
@@ -885,9 +896,9 @@ func _update_meshes() -> void:
 func _show_bake() -> void:
 	if _view == null or _doc == null or _bake_session.last.is_empty():
 		return
-	if (_exploded or _rooms_whole) and not _bake_session.has_extras():
-		set_status("HALVING THE PIECES...")
-		_bake_session.request_extras()
+	if (_exploded or _rooms_whole) and not _bake_session.has_extras(_explode_opts.slicing()):
+		set_status("SLICING THE PIECES...")
+		_bake_session.request_extras(_explode_opts.slicing())
 		return
 	_connect_explode()
 	var sdf: ShipSdf = ShipSdf.build(_doc, _data, _config)
@@ -898,6 +909,7 @@ func _show_bake() -> void:
 	else:
 		_baked = true
 		_view.set_baked(true, sdf, _selection, _bake_session.last)
+	_explode_opts.refresh()
 	if _bake_hud != null:
 		_bake_hud.refresh_button(_bake_session.stale)
 

@@ -67,20 +67,25 @@ func request_update(data: ShipData, cfg: ShipConfig) -> void:
 		request_update(data, cfg)
 
 
-## Whether [member last] carries its extras - or has had them attempted, which is the same answer
-## to "should they be asked for again".
-func has_extras() -> bool:
-	return bool(last.get(ShipCsgBake.EXTRAS_READY, false))
+## Whether [member last] carries extras made with [param slicing] - or has had them attempted,
+## which is the same answer to "should they be asked for again" (ADR 0031: the player's slicer
+## decides what they are).
+func has_extras(slicing: Dictionary) -> bool:
+	return (
+		bool(last.get(ShipCsgBake.EXTRAS_READY, false))
+		and str(last.get(ShipCsgBake.EXTRAS_SLICING, "")) == ShipCsgBake.slicing_key(slicing)
+	)
 
 
-## Make the halves and whole rooms of [member last], once. Does nothing while the engine is busy:
-## whatever it is busy with lands through [code]landed[/code], and the builder asks again then.
-func request_extras() -> void:
-	if busy or last.is_empty() or has_extras():
+## Make the slices and whole rooms of [member last] with [param slicing], unless they are made
+## already. Does nothing while the engine is busy: whatever it is busy with lands through
+## [code]landed[/code], and the builder asks again then.
+func request_extras(slicing: Dictionary) -> void:
+	if busy or last.is_empty() or has_extras(slicing):
 		return
 	busy = true
 	var from: Dictionary = last
-	var made: Dictionary = await ShipCsgBake.bake_extras(_host, from, _progress)
+	var made: Dictionary = await ShipCsgBake.bake_extras(_host, from, slicing, _progress)
 	busy = false
 	# An update that landed meanwhile replaced the bake these belong to.
 	if is_same(last, from):

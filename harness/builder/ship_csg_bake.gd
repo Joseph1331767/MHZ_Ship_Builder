@@ -39,10 +39,10 @@ extends RefCounted
 ##
 ## ONLY WHAT IS ON SCREEN (ADR 0030). [method bake] makes the assembled ship - the pieces with
 ## their doors - and reads each piece back once. [method bake_extras] makes what only the exploded
-## view and ROOMS: WHOLE draw - every piece halved, every room of several as one bored shell and
-## its halves - from that report, when first asked. Measured on a carbon of spheres: 58 read-backs
-## a bake, of which 14 are the ship on screen, and the n-gon merge in each read-back was 7.6 s of
-## the 19.
+## view and ROOMS: WHOLE draw - every piece cut into its slicing grid (ADR 0031), every room of
+## several as one bored shell and its grid - from that report, when first asked. Measured on a
+## carbon of spheres: 58 read-backs a bake, of which 14 are the ship on screen, and the n-gon merge
+## in each read-back was 7.6 s of the 19.
 ##
 ## ASYNCHRONOUS BY NECESSITY. A CSG node computes on a deferred call after it enters the tree, so
 ## [method bake] awaits frames between building nodes and reading meshes. Callers `await` it.
@@ -58,6 +58,19 @@ const READY_FRAMES: int = 12
 ## the extras are in (ADR 0030).
 const EXTRAS_INPUT: String = "extras_input"
 const EXTRAS_READY: String = "extras_ready"
+
+## The report key naming the slicing a report's extras were made with ([method slicing_key]).
+const EXTRAS_SLICING: String = "extras_slicing"
+
+## The slicing the extras are made with when a caller names none: every piece, cluster chunks
+## included, bisected across its Z - the one cut the exploded view made before ADR 0031.
+const DEFAULT_SLICING: Dictionary = {"parts": Vector3i(0, 0, 1), "clusters": Vector3i(0, 0, 1)}
+
+## At most this many cuts per axis: two, a trisection.
+const MAX_CUTS: int = 2
+
+## A whole room's slicing job is keyed by its keeper under this prefix.
+const ROOM_PREFIX: String = "room:"
 
 ## The three named surfaces every drawn mesh carries - see [method _grouped].
 const SURFACE_EXTERIOR: String = "exterior"
@@ -83,7 +96,7 @@ const READ_VOLUME_REL: float = 1.0e-3
 ## so a bar can move while the engine works (ADR 0023).
 ##
 ## THE ASSEMBLED SHIP, AND NOTHING IT DOES NOT SHOW (ADR 0030): every piece with its doors, each
-## read back ONCE, from the last combiner that touched it. The halves and the whole-room shells
+## read back ONCE, from the last combiner that touched it. The slices and the whole-room shells
 ## that only the exploded view and ROOMS: WHOLE draw are [method bake_extras], made from this
 ## report the first time they are asked for; what they need is kept under [constant EXTRAS_INPUT].
 static func bake(
@@ -221,18 +234,25 @@ static func bake(
 	return report
 
 
-## The exploded view's extras for a report [method bake] made (ADR 0030): every piece sliced down
-## the middle on its manufacturing plane - "in manufacturing they are made in 2 pieces"
-## (2026-09-05) - and every room of several as one whole shell, its own doors bored, with its
-## halves. Returns a COPY of [param bake] with `halves`, `half_meshes`, `room_shells`,
-## `room_shell_halves`, `room_meshes` and `room_half_meshes` in and [constant EXTRAS_READY] set;
-## [param bake] itself is not touched. A report that never reached the engine comes back marked
-## ready with nothing added, so a caller asks once.
+## The exploded view's extras for a report [method bake] made (ADR 0030/0031): every room of
+## several as one whole shell, its own doors bored, and every piece and whole room cut into the
+## cells of its SLICING GRID - per axis of its own frame (plan "frames"), off, one cut (bisect) or
+## two (trisect), at equal divisions of its body's extent. [param slicing] is
+## `{"parts": Vector3i, "clusters": Vector3i}`: the counts for a piece standing alone (and for a
+## room shown whole), and for a chunk of a room of several. Returns a COPY of [param bake] with
+## `chunks`, `chunk_cells`, `chunk_counts`, `chunk_meshes`, `frames`, `room_shells`,
+## `room_meshes` and their `room_chunk*` twins in, [constant EXTRAS_READY] set and
+## [constant EXTRAS_SLICING] naming the slicing; [param bake] itself is not touched. A report
+## that never reached the engine comes back marked ready with nothing added, so a caller asks once.
 static func bake_extras(
-	host: Node, bake: Dictionary, progress: Callable = Callable()
+	host: Node,
+	bake: Dictionary,
+	slicing: Dictionary = DEFAULT_SLICING,
+	progress: Callable = Callable()
 ) -> Dictionary:
 	var out: Dictionary = bake.duplicate()
 	out[EXTRAS_READY] = true
+	out[EXTRAS_SLICING] = slicing_key(slicing)
 	var input: Dictionary = bake.get(EXTRAS_INPUT, {})
 	if input.is_empty() or host == null or not host.is_inside_tree():
 		return out
@@ -243,7 +263,7 @@ static func bake_extras(
 	var outer: Dictionary = plan["outer"]
 	var inner: Dictionary = plan["inner"]
 	var cutters: Dictionary = plan["cutters"]
-	var split: Dictionary = plan["split"]
+	var frames: Dictionary = plan.get("frames", {})
 	var stage: Node3D = Node3D.new()
 	stage.name = "CsgExtrasStage"
 	host.add_child(stage)
@@ -270,73 +290,229 @@ static func bake_extras(
 		bored_rooms[keeper] = _with_doors(stage, room_mesh, PolyMesh.new(), all)
 	if not bored_rooms.is_empty():
 		await _until_ready(host, bored_rooms.values())
-	_tick(progress, 0.3, "HALVES")
-
-	# PASS THREE: EVERY SOLID SLICED DOWN THE MIDDLE - each piece, and each room's whole shell -
-	# on the part's manufacturing plane (ShipMeshBake.plan, "split"): the solid intersected with a
-	# box on either side of the plane.
 	var room_shells: Dictionary = {}
-	var half_combiners: Dictionary = {}
+	var room_source: Dictionary = {}
+	for members: PackedStringArray in plan["rooms"]:
+		if members.size() < 2:
+			continue
+		var keeper: String = members[0]
+		var room_mesh: Mesh = null
+		var whole: PolyMesh = PolyMesh.new()
+		if bored_rooms.has(keeper):
+			room_mesh = _engine_mesh(bored_rooms[keeper])
+			whole = _read_combiner(bored_rooms[keeper])
+		if whole.is_empty():
+			room_mesh = room_engine.get(keeper, null)
+			whole = _read(room_mesh)
+		if not whole.is_empty():
+			room_shells[keeper] = whole
+			room_source[keeper] = room_mesh
+	_tick(progress, 0.3, "SLICING")
+
+	# THE SLICES (ADR 0031). "3 orthogonal slices, and offer single slice or double slice in each
+	# orthogonal direction for bisection vs trisection" (2026-09-21). A piece standing alone takes
+	# the parts' counts; a chunk of a room of several takes the clusters'; a room shown whole takes
+	# the parts', in its keeper's frame, across the extent of all its members.
+	var parts_counts: Vector3i = _counts(slicing.get("parts", Vector3i.ZERO))
+	var cluster_counts: Vector3i = _counts(slicing.get("clusters", Vector3i.ZERO))
+	var jobs: Dictionary = {}
 	for members: PackedStringArray in plan["rooms"]:
 		var keeper: String = members[0]
-		if members.size() > 1:
-			var room_mesh: Mesh = null
-			var whole: PolyMesh = PolyMesh.new()
-			if bored_rooms.has(keeper):
-				room_mesh = _engine_mesh(bored_rooms[keeper])
-				whole = _read_combiner(bored_rooms[keeper])
-			if whole.is_empty():
-				room_mesh = room_engine.get(keeper, null)
-				whole = _read(room_mesh)
-			if not whole.is_empty():
-				room_shells[keeper] = whole
-				_halve(stage, half_combiners, "room:" + keeper, room_mesh, whole, split[keeper])
+		if room_shells.has(keeper):
+			var bodies: Array = []
+			for id: String in members:
+				bodies.append(outer[id])
+			jobs[ROOM_PREFIX + keeper] = _slice_job(
+				room_source[keeper], room_shells[keeper], frames[keeper], bodies, parts_counts
+			)
 		for id: String in members:
-			_halve(stage, half_combiners, id, engine.get(id, null), solids[id], split[id])
-	await _until_ready(host, half_combiners.values())
-	_tick(progress, 0.6, "READING HALVES")
-	var halves: Dictionary = {}
-	var room_shell_halves: Dictionary = {}
-	for key: String in half_combiners:
-		var half: PolyMesh = _read_combiner(half_combiners[key])
-		var id: String = key.trim_suffix("#a").trim_suffix("#b")
-		var into: Dictionary = halves
-		if id.begins_with("room:"):
-			id = id.trim_prefix("room:")
-			into = room_shell_halves
-		var pair: Array = into.get(id, [null, null])
-		pair[0 if key.ends_with("#a") else 1] = half
-		into[id] = pair
+			var counts: Vector3i = cluster_counts if members.size() > 1 else parts_counts
+			jobs[id] = _slice_job(engine.get(id, null), solids[id], frames[id], [outer[id]], counts)
+	for key: String in jobs.keys():
+		if (jobs[key]["counts"] as Vector3i) == Vector3i.ZERO:
+			jobs.erase(key)
+	var cut: Dictionary = await _slice(stage, host, jobs)
 	stage.queue_free()
 	_tick(progress, 0.9, "SURFACES")
 
-	var half_meshes: Dictionary = {}
+	var chunks: Dictionary = {}
+	var chunk_cells: Dictionary = {}
+	var chunk_counts: Dictionary = {}
+	var chunk_meshes: Dictionary = {}
+	var room_chunks: Dictionary = {}
+	var room_chunk_cells: Dictionary = {}
+	var room_chunk_counts: Dictionary = {}
+	var room_chunk_meshes: Dictionary = {}
 	var room_meshes: Dictionary = {}
-	var room_half_meshes: Dictionary = {}
 	for members: PackedStringArray in plan["rooms"]:
-		for id: String in members:
-			if halves.has(id):
-				half_meshes[id] = [
-					_grouped(halves[id][0], members, cutters, outer, inner),
-					_grouped(halves[id][1], members, cutters, outer, inner),
-				]
+		var keys: Array = members.duplicate()
 		var keeper: String = members[0]
 		if room_shells.has(keeper):
 			room_meshes[keeper] = _grouped(room_shells[keeper], members, cutters, outer, inner)
-			if room_shell_halves.has(keeper):
-				room_half_meshes[keeper] = [
-					_grouped(room_shell_halves[keeper][0], members, cutters, outer, inner),
-					_grouped(room_shell_halves[keeper][1], members, cutters, outer, inner),
-				]
-	out["halves"] = halves
-	out["half_meshes"] = half_meshes
+			keys.append(ROOM_PREFIX + keeper)
+		for key: String in keys:
+			if not cut.has(key):
+				continue
+			var polys: Array = []
+			var cells: Array = []
+			var meshes: Array = []
+			for leaf: Dictionary in cut[key]:
+				polys.append(leaf["solid"])
+				cells.append(leaf["cell"])
+				meshes.append(_grouped(leaf["solid"], members, cutters, outer, inner))
+			var room: bool = key.begins_with(ROOM_PREFIX)
+			var id: String = key.trim_prefix(ROOM_PREFIX) if room else key
+			(room_chunks if room else chunks)[id] = polys
+			(room_chunk_cells if room else chunk_cells)[id] = cells
+			(room_chunk_meshes if room else chunk_meshes)[id] = meshes
+			(room_chunk_counts if room else chunk_counts)[id] = jobs[key]["counts"]
+	out["frames"] = frames
+	out["chunks"] = chunks
+	out["chunk_cells"] = chunk_cells
+	out["chunk_counts"] = chunk_counts
+	out["chunk_meshes"] = chunk_meshes
 	out["room_shells"] = room_shells
-	# The PolyMesh halves of each whole room. The view has always read this key; until ADR 0030
-	# the bake never wrote it, so a whole room exploded unhalved.
-	out["room_shell_halves"] = room_shell_halves
 	out["room_meshes"] = room_meshes
-	out["room_half_meshes"] = room_half_meshes
+	out["room_chunks"] = room_chunks
+	out["room_chunk_cells"] = room_chunk_cells
+	out["room_chunk_counts"] = room_chunk_counts
+	out["room_chunk_meshes"] = room_chunk_meshes
 	return out
+
+
+## A stable name for [param slicing] - what a report's extras were made with, so a caller can tell
+## whether the extras on hand match the player's settings.
+static func slicing_key(slicing: Dictionary) -> String:
+	var parts: Vector3i = _counts(slicing.get("parts", Vector3i.ZERO))
+	var clusters: Vector3i = _counts(slicing.get("clusters", Vector3i.ZERO))
+	return "%d%d%d|%d%d%d" % [parts.x, parts.y, parts.z, clusters.x, clusters.y, clusters.z]
+
+
+## [param value] as per-axis cut counts, each 0 (off), 1 (bisect) or 2 (trisect).
+static func _counts(value: Variant) -> Vector3i:
+	if not (value is Vector3i):
+		return Vector3i.ZERO
+	var v: Vector3i = value
+	return Vector3i(clampi(v.x, 0, MAX_CUTS), clampi(v.y, 0, MAX_CUTS), clampi(v.z, 0, MAX_CUTS))
+
+
+## One slicing job: the solid (as the engine made it, or [param fallback] when it has none), the
+## frame it is cut in, its extent in that frame read off [param bodies] - the ORIGINAL bodies, so a
+## cut does not move when a neighbour changes what was carved off this piece - and the counts.
+static func _slice_job(
+	source: Mesh, fallback: PolyMesh, frame: Transform3D, bodies: Array, counts: Vector3i
+) -> Dictionary:
+	var inv: Transform3D = frame.affine_inverse()
+	var lo: Vector3 = Vector3.INF
+	var hi: Vector3 = -Vector3.INF
+	for body: PolyMesh in bodies:
+		for v: Vector3 in body.vertices:
+			var p: Vector3 = inv * v
+			lo = lo.min(p)
+			hi = hi.max(p)
+	if lo.x > hi.x:
+		lo = Vector3.ZERO
+		hi = Vector3.ZERO
+	return {
+		"source": source,
+		"fallback": fallback,
+		"frame": frame,
+		"lo": lo,
+		"hi": hi,
+		"counts": counts,
+	}
+
+
+## Every job of [param jobs] cut into the cells of its grid, one axis at a time: the X slabs of
+## the whole solid, then the Y slabs of each X slab, then Z - so each engine pass works on the
+## pieces of the last rather than all of every piece, and nothing is read back until the leaves.
+## Returns key -> `[{"cell": Vector3i, "solid": PolyMesh}]`, empty cells left out.
+static func _slice(stage: Node, host: Node, jobs: Dictionary) -> Dictionary:
+	var entries: Dictionary = {}
+	for key: String in jobs:
+		var job: Dictionary = jobs[key]
+		entries[key] = [
+			{
+				"cell": Vector3i.ZERO,
+				"mesh": job["source"],
+				"fallback": job["fallback"],
+				"made": null
+			}
+		]
+	for axis: int in 3:
+		var made: Array = []
+		var sliced: Array = []
+		for key: String in jobs:
+			var count: int = (jobs[key]["counts"] as Vector3i)[axis]
+			if count <= 0:
+				continue
+			sliced.append(key)
+			var next: Array = []
+			for entry: Dictionary in entries[key]:
+				for slab: int in count + 1:
+					var combiner: CSGCombiner3D = _slab(stage, entry, jobs[key], axis, slab, count)
+					var cell: Vector3i = entry["cell"]
+					cell[axis] = slab
+					next.append({"cell": cell, "mesh": null, "fallback": null, "made": combiner})
+					made.append(combiner)
+			entries[key] = next
+		if made.is_empty():
+			continue
+		await _until_ready(host, made)
+		# Only the jobs cut on THIS axis have new cells to read; a job cut on another axis keeps the
+		# cells it had. Measured: re-reading every job here dropped each piece sliced on Y whenever a
+		# cluster was sliced on X - the entry it still held had no combiner to read.
+		for key: String in sliced:
+			var kept: Array = []
+			for entry: Dictionary in entries[key]:
+				var combiner: CSGCombiner3D = entry["made"]
+				var mesh: Mesh = _engine_mesh(combiner) if combiner != null else null
+				if mesh == null or mesh.get_surface_count() == 0:
+					continue
+				entry["mesh"] = mesh
+				kept.append(entry)
+			entries[key] = kept
+	var out: Dictionary = {}
+	for key: String in jobs:
+		var leaves: Array = []
+		for entry: Dictionary in entries[key]:
+			var solid: PolyMesh = _read(entry["mesh"])
+			if not solid.is_empty():
+				leaves.append({"cell": entry["cell"], "solid": solid})
+		out[key] = leaves
+	return out
+
+
+## One cell of a slicing pass under [param stage]: [param entry]'s solid intersected with the
+## slab [param slab] of [param count] + 1 along [param axis] of the job's frame. The outer slabs
+## run out past the extent; the cuts sit at equal divisions of it.
+static func _slab(
+	stage: Node, entry: Dictionary, job: Dictionary, axis: int, slab: int, count: int
+) -> CSGCombiner3D:
+	var combiner: CSGCombiner3D = CSGCombiner3D.new()
+	var mesh: Mesh = entry["mesh"]
+	if mesh != null and mesh.get_surface_count() > 0:
+		_add_engine_mesh(combiner, mesh, CSGShape3D.OPERATION_UNION)
+	else:
+		_add_mesh(combiner, entry["fallback"], CSGShape3D.OPERATION_UNION)
+	var lo: Vector3 = job["lo"]
+	var hi: Vector3 = job["hi"]
+	var reach: float = (hi - lo).length() + 1.0
+	var step: float = (hi[axis] - lo[axis]) / float(count + 1)
+	var a: float = lo[axis] - reach if slab == 0 else lo[axis] + step * float(slab)
+	var b: float = hi[axis] + reach if slab == count else lo[axis] + step * float(slab + 1)
+	var center: Vector3 = (lo + hi) * 0.5
+	center[axis] = (a + b) * 0.5
+	var size: Vector3 = (hi - lo) + Vector3.ONE * (2.0 * reach)
+	size[axis] = b - a
+	var box: CSGBox3D = CSGBox3D.new()
+	box.size = size
+	box.operation = CSGShape3D.OPERATION_INTERSECTION
+	var frame: Transform3D = job["frame"]
+	box.transform = Transform3D(frame.basis, frame * center)
+	combiner.add_child(box)
+	stage.add_child(combiner)
+	return combiner
 
 
 ## What every piece takes at its doors (ADR 0029): id -> `{"union": [PolyMesh], "cut":
@@ -374,39 +550,6 @@ static func _with_doors(
 		_add_mesh(out, mesh, CSGShape3D.OPERATION_SUBTRACTION)
 	stage.add_child(out)
 	return out
-
-
-## Two combiners under [param stage], keyed `key#a` and `key#b` in [param out]: [param source]
-## (the engine's own mesh of the solid, or [param fallback] when it has none) intersected with a
-## box on each side of the plane [param cut] ({"origin", "normal"}).
-static func _halve(
-	stage: Node, out: Dictionary, key: String, source: Mesh, fallback: PolyMesh, cut: Dictionary
-) -> void:
-	var origin: Vector3 = cut["origin"]
-	var normal: Vector3 = (cut["normal"] as Vector3).normalized()
-	var reach: float = maxf(fallback.aabb().size.length(), 1.0) * 2.0
-	for side: int in 2:
-		var piece: CSGCombiner3D = CSGCombiner3D.new()
-		if source != null and source.get_surface_count() > 0:
-			_add_engine_mesh(piece, source, CSGShape3D.OPERATION_UNION)
-		else:
-			_add_mesh(piece, fallback, CSGShape3D.OPERATION_UNION)
-		var box: CSGBox3D = CSGBox3D.new()
-		box.size = Vector3(reach, reach, reach)
-		box.operation = CSGShape3D.OPERATION_INTERSECTION
-		var away: Vector3 = normal * (reach * 0.5) * (1.0 if side == 1 else -1.0)
-		box.transform = Transform3D(_basis_facing(normal), origin + away)
-		piece.add_child(box)
-		stage.add_child(piece)
-		out[key + ("#b" if side == 1 else "#a")] = piece
-
-
-## A basis whose Z is [param normal].
-static func _basis_facing(normal: Vector3) -> Basis:
-	var up: Vector3 = Vector3.UP if absf(normal.y) < 0.9 else Vector3.RIGHT
-	var x: Vector3 = up.cross(normal).normalized()
-	var y: Vector3 = normal.cross(x).normalized()
-	return Basis(x, y, normal)
 
 
 ## [param solid] as an ArrayMesh with its faces in three named surfaces: EXTERIOR where every

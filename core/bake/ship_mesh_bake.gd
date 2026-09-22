@@ -144,7 +144,9 @@ static func bake(
 ##     "inner": key} ]} (the WALLED seams), "open_cuts": the same shape for the OPEN seams as the
 ##     pure executor reads them, "rooms": [PackedStringArray] (every part in exactly one, members
 ##     sorted), "split": {id: {"origin": Vector3, "normal": Vector3}} (the manufacturing plane
-##     the exploded view slices a module on), "open_seams": int, "pending_seams": int,
+##     the exploded view slices a module on), "frames": {id: Transform3D} (the part's own
+##     orthonormal, right-handed axes, Y its placement normal: the frame the exploded view's slicer
+##     cuts in, ADR 0031), "open_seams": int, "pending_seams": int,
 ##     "hull_thickness_m": float }
 ## A cutter key is `_cutter_key(id, kind)` with kind one of CUT_BODY, CUT_ROOM, CUT_GROWN.
 ##
@@ -341,6 +343,20 @@ static func plan(
 			normal = Vector3.FORWARD
 		split[id] = {"origin": xform.origin, "normal": normal.normalized()}
 
+	# THE SLICING FRAME (ADR 0031): the part's own axes, orthonormal, with Y its placement normal -
+	# "choose orthogonal axes where one points radially with the parts placement, so alignment is
+	# preserved to the part itself" (2026-09-21). Right-handed always: a mirrored twin's basis has
+	# one axis turned back, so the engine is never handed a reflected box to cut with.
+	var frames: Dictionary = {}
+	for id: String in placed:
+		var xform: Transform3D = xforms[id]
+		var basis: Basis = Basis.IDENTITY
+		if absf(xform.basis.determinant()) > 1.0e-12:
+			basis = xform.basis.orthonormalized()
+			if basis.determinant() < 0.0:
+				basis.x = -basis.x
+		frames[id] = Transform3D(basis, xform.origin)
+
 	# THE DOORS (ADR 0029): one record per bounded seam both of whose modules have a cavity -
 	# its gasket plane, its collar halves, its clearing prisms and its bore, and the door leaves
 	# a view builds from it. A seam nothing can be bored for is PENDING: reported, not hidden.
@@ -357,6 +373,7 @@ static func plan(
 		"open_cuts": open_cuts,
 		"rooms": rooms,
 		"split": split,
+		"frames": frames,
 		"open_seams": open_seams,
 		"pending_seams": bounded_seams - door_list.size(),
 		"doors": door_list,

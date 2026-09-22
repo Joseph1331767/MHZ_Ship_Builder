@@ -1434,3 +1434,46 @@ ADR 0030. Harness only; nothing in `core/` changed.
    extras of the replaced bake are thrown away when they land.
 4. **The n-gon merge is still the largest single cost** of the read-back. The step-2 cache makes it
    rarer; making the merge itself cheaper is separate work.
+
+
+## F43 — Additive extensions of 2026-09-21b: explode options and the slicer — OPEN, DELIBERATE
+
+ADR 0031.
+
+- **`ShipMeshBake.plan`** gains **`frames`** (`{id: Transform3D}`, orthonormal, right-handed,
+  Y the placement normal). Core, additive; `split` stays in the plan and is no longer read by the
+  harness.
+- **`ShipCsgBake.bake_extras(host, bake, slicing = DEFAULT_SLICING, progress)`**: returns
+  `chunks`, `chunk_cells`, `chunk_counts`, `chunk_meshes`, `frames`, `room_shells`, `room_meshes`,
+  `room_chunks`, `room_chunk_cells`, `room_chunk_counts`, `room_chunk_meshes`, and
+  `EXTRAS_SLICING`. **Gone**: `halves`, `half_meshes`, `room_shell_halves`, `room_half_meshes`
+  (a bisection across Z is the same result under the new keys). New: `slicing_key()`,
+  `DEFAULT_SLICING`, `MAX_CUTS`, `ROOM_PREFIX`, `EXTRAS_SLICING`, and the private `_counts`,
+  `_slice_job`, `_slice`, `_slab`; `_halve` and `_basis_facing` removed.
+- **`ShipBakeSession.has_extras(slicing)` / `request_extras(slicing)`** take the slicing.
+- **New classes** (`--import` run): `ShipExplodeSettings` (harness/builder), `ShipExplodePanel`
+  (harness/panels), `ShipExplodeControl` (harness/builder).
+- **`ShipExplodeView`**: `set_settings()`, `relayout()`, `SEP_*`, `META_*`; `_add_visual` removed
+  and `_add_visual_at` takes a unit direction and a separation kind; `_placed_at`, `_separation`,
+  `_offsets_for`, `_hang`, `_shift_unit`, `_in_cluster`.
+- **`ShipBuilder`**: `_explode_opts`; the panel shows while exploded; `_show_bake` asks for extras
+  with the player's slicing. 1997 of 2000 lines.
+- **Tools**: `tools/ship_explode_check.gd` (new, windowed; `reports/visual_explode_*.png`).
+- Tests: `tests/harness/test_explode_slicing.gd` (six); the CSG suite reads `chunks`. Suite
+  **307/307**.
+
+**No hash moves.** Measured: `5536787c6c35d236` either side.
+
+**Known limits, recorded rather than hidden.**
+
+1. **Cost grows with the grid**: a combiner and a read-back per cell. Three axes trisected is 27
+   cells a piece, minutes on a carbon. The room cache is the answer.
+2. **A cell wholly inside a cavity is dropped**, so a piece can show fewer slices than its grid.
+   The cell index still says where each one sits.
+3. **The slices of a piece are placed by its frame, not by its seam**: a cluster chunk's slices pull
+   along its own axes, which for a proton of a nucleus is its placement normal, not the direction it
+   leaves the nucleus in.
+4. **Settings changed by code, not the panel,** show in the panel only on the next `refresh()`;
+   the checks refresh where they read it.
+5. **The door leaves ride their module's offset, not a slice's**: a sliced piece's door stays where
+   the whole piece would have carried it.
