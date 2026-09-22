@@ -14,5 +14,6 @@ assignment → interior equipment → exterior equipment → windows and hatches
 | file | phase | contents |
 |---|---|---|
 | [texturing.md](texturing.md) | procedural texturing | seam bands (rivets, bolts, welds, hidden fastener ribbons) and panels textured in their primitive's own coordinates |
+| [symmetry.md](symmetry.md) | hull creation (now) and later | mirror on any combination of X/Y/Z; radial, point and repeat symmetry later |
 
 One file per phase or topic. Quote the author where the idea came from them.

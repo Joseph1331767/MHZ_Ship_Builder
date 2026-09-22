@@ -75,17 +75,41 @@ Links to the Phase One Hull Review recommendations 5, 6 and 7.
   coordinates. Either the panel's coordinates are warped the same way (the warp is known; it is
   `ResolvedShape`'s op order, SPEC §4) or those ranges stay narrow.
 
-## 4. Open questions
+## 4. Decided (the author, 2026-09-21)
 
-- **Width:** per style, per seam, or scaled to the smaller of the two parts?
-- **Geometry or surface:** does a band change the mesh (a raised weld bead, rivet heads, a
-  recessed channel), or only texture and normals? Geometry would enter the bake; surface-only keeps
-  it out of the truth layer.
-- **Mirror:** does a mirrored seam take its source's band? Mirror is live-linked (SPEC §6), so
-  presumably yes.
+- **Width is a range, and 0 is valid** — 0 means no band on that seam. The range should be
+  appropriate to the style (a rivet row wants a narrower band than a weld plate); exact bounds are
+  set when the styles pack is written.
+- **No mesh change, for now.** A band is surface only: texture and normals. Nothing it does enters
+  the bake or the truth layer.
+- **A band is an edge function switched on or off per mesh chunk.** Each baked piece (one per
+  original primitive) either runs the joining-edge function along its seams or does not.
+- **Mirror follows the component path.** A mirrored seam takes its source's band the way an
+  instance follows its definition — one choice, every copy. (Symmetry itself is being reworked:
+  see [symmetry.md](symmetry.md).)
+- **Textures are generated outside this repo.** The author's own SDK generates them with AI, maps
+  them through the author's pipeline to specific surfaces, and caches them on the author's server
+  for reuse. Out of scope here. What this builder owes that pipeline is geometry it can map
+  reliably: per-primitive chunks with known panel shapes, face provenance, and the seam bands'
+  (u, v) coordinates.
+
+## 5. Keep the chunks: the bake already does
+
+> "i was thinking of keeping it separate mesh chunks of its original primitive shapes, you know
+> instead of union.. it will help with later dynamics anyway for texturing and component copy
+> etc." — the author, 2026-09-21
+
+This is how the bake already works, and it must stay that way. A room's shell is built whole and
+then **cut back into one closed piece per original primitive** (ADR 0021). Each piece carries its
+exterior, interior and cut faces as separate named surfaces, and the interior is drawn as its own
+mesh (ADR 0028). The fused whole-room shell exists only for the `ROOMS: WHOLE` view toggle. Any
+future optimisation of the bake must keep the per-primitive pieces as the output.
+
+## 6. Still open
+
 - **Crowded joins:** where several parts meet close together (a hub like `argon`'s eight branches),
   bands overlap. Priority, merge, or a hub plate?
 - **Tight curves:** u by arc length handles a non-planar join curve; check that rivet pitch still
   reads right where the curve is tight.
-- **Palette:** the builder quantizes everything to 16 colours (SPEC §11). Does texturing live inside
-  the palette or replace it for the in-game ship? (Phase One Hull Review, risks.)
+- **Palette:** the builder quantizes everything to 16 colours (SPEC §11). The in-game textures come
+  from the author's pipeline (section 4), so this is now only about how the builder previews them.
