@@ -84,6 +84,9 @@ const WASHED_ALPHA: float = 0.12
 const GRID_EXTENT: float = 20.0
 const GRID_STEP: float = 1.0
 
+## Half the length of each arm of the beacon dot, in metres (ADR 0033).
+const BEACON_ARM_M: float = 0.45
+
 ## How many colliders the surface probe may skip before giving up. Only the part being
 ## re-placed and its subtree are ever skipped, so this is generous.
 const PROBE_MAX_SKIPS: int = 8
@@ -1704,6 +1707,20 @@ func _rebuild_grid() -> void:
 	mesh.surface_add_vertex(Vector3(GRID_EXTENT, 0.0, 0.0))
 	mesh.surface_add_vertex(Vector3(0.0, 0.0, -GRID_EXTENT))
 	mesh.surface_add_vertex(Vector3(0.0, 0.0, GRID_EXTENT))
+	mesh.surface_end()
+
+	# THE BEACON (ADR 0033): the ship's build centre, at the origin, as a dot - "it can be entirely
+	# internal and viewable as a dot" (2026-09-21). Every class is laid out around it and the root
+	# module is anchored to it, so this is where a ship grows from rather than wherever its first
+	# module happens to be.
+	# Reads THROUGH the hull, like every other overlay line in this view: a reference the ship is
+	# built around is no use only when nothing stands on it.
+	var beacon_mat: StandardMaterial3D = _line_material(_role_color("accent", axis_color))
+	beacon_mat.no_depth_test = true
+	mesh.surface_begin(Mesh.PRIMITIVE_LINES, beacon_mat)
+	for axis: Vector3 in [Vector3.RIGHT, Vector3.UP, Vector3.BACK]:
+		mesh.surface_add_vertex(-axis * BEACON_ARM_M)
+		mesh.surface_add_vertex(axis * BEACON_ARM_M)
 	mesh.surface_end()
 
 	_grid.mesh = mesh

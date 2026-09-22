@@ -606,7 +606,9 @@ func _bake_exact_as(module_id: String, id: String, exact: PolyMesh) -> void:
 	if _assembled or cells.is_empty():
 		_place_module_at(module_id, id, whole_mesh, whole.to_wire_mesh())
 		return
-	var frame: Basis = (_bake.get("frames", {}).get(id, Transform3D.IDENTITY) as Transform3D).basis
+	# The frame the cells were CUT in: a room's chunks share their keeper's (ADR 0033).
+	var cut_in: Dictionary = _bake.get("cell_frames", _bake.get("frames", {}))
+	var frame: Basis = (cut_in.get(id, Transform3D.IDENTITY) as Transform3D).basis
 	var module: Module = Module.new()
 	module.id = id
 	module.selected = _is_selected(id)

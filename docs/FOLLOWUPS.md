@@ -54,7 +54,7 @@ has that muscle, and its rule that `.glsl` is not covered by any headless check)
 
 **Do not quote a bake time that was measured while other Godot processes held the GPU slot.**
 
-## F9 — `ShipPart.absolute` is dead data — OPEN
+## F9 — `ShipPart.absolute` is dead data — RESOLVED by ADR 0033
 
 The field is declared, documented as "positions it in ship space directly", and round-tripped
 through `to_dict()`/`from_dict()` — but **`ShipAttach` never reads it.** Repo-wide grep confirms.
@@ -70,6 +70,12 @@ in mid-air, cannot currently persist that position for a parentless part.
 **Fix:** `ShipAttach.local_transform()` / `resolve_all()` must use `part.absolute` when
 `part.parent == ""` and the part is not the doc root. Small change, but it needs a test that saves,
 reloads, and asserts the floating part did not move — otherwise this regresses invisibly.
+
+**RESOLVED 2026-09-22 (ADR 0033), and wider than this entry asked.** `ShipAttach._place_part` now
+returns `part.absolute` for the root AND for any parentless part: the ship's origin is a BEACON that
+every class is built around, and the root is anchored to it rather than pinned to identity. The test
+this entry asked for is `tests/core/test_beacon.gd::test_a_floating_part_keeps_where_it_was_put`,
+beside one that saves and reloads an anchored root.
 
 ## F8 — `HullBake._islands_of()` was called but never defined — RESOLVED
 
@@ -1522,3 +1528,39 @@ ADR 0032.
    and its disk copy are the next piece of work.
 5. **A module that is not a cluster chunk can move a little in the second stage**: the relaxation
    pass settles modules differently with and without the chunks riding.
+
+
+## F45 — Additive extensions of 2026-09-22: the beacon — OPEN, DELIBERATE
+
+ADR 0033. The public surfaces `docs/API_CONTRACT.md` pins are unchanged in name and signature; what
+changed is what `_place_part` (private) returns for a part that stands on nothing, and what the
+templates build.
+
+- **`ShipAttach`**: the root and any parentless part are placed by `ShipPart.absolute`. RETIRED: the
+  root pinned to `Transform3D.IDENTITY`. Section 12's pinned functions are untouched.
+- **`ShipTemplates._centre_on_the_beacon`** (new, private): every class is shifted so its core rings
+  the beacon. The root module is now `asymmetric`, like every other part a template makes.
+- **`ShipComponents`**: `make_component` carries the head's `absolute` onto the instance;
+  `dissolve` carries the instance's `absolute` and `asymmetric` back onto the new root.
+- **`ShipCsgBake.bake_extras`**: a room's cells are cut in the keeper's frame across the room's
+  extent, and the report gains **`cell_frames`** (the frame each piece's cells were cut in).
+- **`ShipExplodeView`** reads `cell_frames`; **`ShipView3D`** draws the beacon dot
+  (`BEACON_ARM_M`), no depth test.
+- **`MeshFlange`**: `PLANE_D_REL` and `_plane_match_tolerance` — the cap-face plane match is
+  relative to the distance from the origin.
+- Tests: `tests/core/test_beacon.gd` (five). Suite **314/314**.
+
+**No hash moves.** Measured: `5536787c6c35d236` either side. A document written before this carries
+`absolute` as identity on every part, so it resolves exactly as it did.
+
+**Known limits, recorded rather than hidden.**
+
+1. **Nothing in the harness places a part ON the beacon yet.** A central module means a part with no
+   parent and an `absolute`, which only code can make today. The author asked for the beacon so
+   things can grow away from it; the UI for growing FROM it is not built.
+2. **The beacon does not move.** It is the origin, not a stored point: a ship cannot be re-centred
+   on some other spot, and `_centre_on_the_beacon` runs at build time only. A ship edited afterwards
+   drifts off centre exactly as far as the player takes it.
+3. **The dot reads through everything** (no depth test), so it shows inside a hull it sits in. That
+   is deliberate; it is also the only thing on screen that ignores depth besides the overlays.
+4. **`MeshFlange`'s relative tolerance changed no measured number** — it is a hardening, not a fix.

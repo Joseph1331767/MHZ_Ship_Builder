@@ -381,18 +381,31 @@ func test_in_and_out_bump_put_the_plane_in_different_places() -> void:
 	# raises a pad by unioning a stub on, and a union that would open a solid is refused (ADR
 	# 0014), so on a class whose nucleus carries many seams the host can legitimately come out
 	# unchanged while the extremities still differ.
+	#
+	# PER PART, NOT THE SUM (2026-09-22). The two styles move hull from one side of a seam to the
+	# other, so the SHIP's total volume barely moves: measured on a carbon, twelve parts differ by
+	# 0.95 to 1.95 m3 each while the sum differs by 0.0055 - and by 0.00006 once the ship is centred
+	# on the beacon (ADR 0033) rather than pinned by its first module, which is what the sum had
+	# been reading. The sum was a near-cancellation; the parts are the answer.
 	var inward: Dictionary = _bake_with_style(ShipJoint.SEAM_SMALL_FLAT_INSERT)
 	var outward: Dictionary = _bake_with_style(ShipJoint.SEAM_BIG_FLAT_INSERT)
-	var moved: float = absf(float(inward["parts_volume_m3"]) - float(outward["parts_volume_m3"]))
+	var moved: float = 0.0
+	var count: int = 0
+	for id: String in inward["order"]:
+		var a: PolyMesh = inward["solids"][id]
+		var b: Variant = (outward["solids"] as Dictionary).get(id)
+		if not (b is PolyMesh):
+			continue
+		var apart: float = absf(a.volume() - (b as PolyMesh).volume())
+		if apart > 0.1:
+			count += 1
+		moved = maxf(moved, apart)
 	(
-		assert_float(moved)
+		assert_int(count)
 		. append_failure_message(
-			(
-				"in-bump and out-bump baked the same ship (%.4f m3) - the plane did not move"
-				% [float(inward["parts_volume_m3"])]
-			)
+			"in-bump and out-bump baked the same ship (biggest part apart by %.4f m3)" % [moved]
 		)
-		. is_greater(1.0e-3)
+		. is_greater_equal(4)
 	)
 	# ...and both must still be solid.
 	for report: Dictionary in [inward, outward]:

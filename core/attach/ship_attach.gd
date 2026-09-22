@@ -1104,8 +1104,15 @@ static func _place_part(
 	id: String,
 	part: ShipPart
 ) -> Transform3D:
-	if id == doc.root:
-		return Transform3D.IDENTITY
+	# THE BEACON (ADR 0033): the ship's build centre is the origin, and a part with nothing to stand
+	# on - the root, or any part floating free - is anchored to it by its own [member
+	# ShipPart.absolute]. RETIRED(ADR 0033): the root pinned to Transform3D.IDENTITY, which put the
+	# ship's first module at the centre instead of the ship itself; a class with no body in the
+	# middle then grew from an off-centre module ("the carbon atom .. ends up with an initial parent
+	# thats non central", 2026-09-21). Every other part still stands on its host's surface (SPEC 3),
+	# and the whole chain hangs off the anchored one - F9, at last.
+	if id == doc.root or part.parent == "":
+		return part.absolute
 	if part.is_mirror() and placed.has(part.mirror_source):
 		var source: Transform3D = placed[part.mirror_source]
 		return ShipMirror.reflect(source, part.mirror_plane)

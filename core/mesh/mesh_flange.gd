@@ -47,6 +47,10 @@ const CUTTER_REACH: float = 2.0
 ## well below any difference the author could have meant.
 const TIE_REL: float = 1.0e-4
 
+## How much of the distance from the origin two plane distances may differ by and still be read as
+## the same plane - see [method _plane_match_tolerance].
+const PLANE_D_REL: float = 1.0e-5
+
 
 ## One solid: its mesh, and the field that says where its surface is.
 ##
@@ -240,6 +244,20 @@ static func _bisect(against: Piece, pa: Vector3, pb: Vector3, da: float) -> Vect
 	return (lo + hi) * 0.5
 
 
+## How far two plane distances may differ and still be the same plane, for a solid sitting where
+## [param cut] sits. RELATIVE, NOT ABSOLUTE (2026-09-22): a plane's `d` is measured from the world
+## ORIGIN and a [PolyMesh] holds its vertices as 32-bit floats, so the same geometric plane computed
+## two ways drifts further apart the further the ship is from the origin - about 2.4e-6 m a
+## coordinate at 20 m, and more once a Newell normal has accumulated it. With the ships centred on
+## the beacon (ADR 0033) rather than pinned by their first module, a fixed 1e-4 stopped finding the
+## cap at all: measured, in-bump and out-bump baked the same carbon to within 6.2e-5 m3 where the
+## same ship at the old origin differed by 5.5e-3.
+static func _plane_match_tolerance(plane: Plane, cut: PolyMesh) -> float:
+	var box: AABB = cut.aabb()
+	var reach: float = absf(plane.d) + box.position.length() + box.size.length()
+	return maxf(EDGE_MARGIN, PLANE_D_REL * reach)
+
+
 ## A prism over [param cut]'s flat face, standing along [param up], for letting exactly that
 ## cross-section into the larger solid and nothing else.
 ##
@@ -261,7 +279,7 @@ static func _footprint_cutter(
 		var face_plane: Plane = cut.face_plane(i)
 		if face_plane.normal.dot(up) < 0.999:
 			continue
-		if absf(face_plane.d - plane.d) > 1.0e-4:
+		if absf(face_plane.d - plane.d) > _plane_match_tolerance(plane, cut):
 			continue
 		var area: float = absf(_loop_area(cut, cut.faces[i]))
 		if area > best_area:

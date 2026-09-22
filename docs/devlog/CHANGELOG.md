@@ -2810,3 +2810,43 @@ no bake; separation off; ASSEMBLE played back and landed on the 14 whole pieces.
 Pick a carbon and press EXPLODE: after the cut, the pieces fly apart in three beats. Drag POSITION
 back and forth. Change the slicer axes: the pieces regroup at once, no bar. Drag SPEED down and press
 ASSEMBLE: it comes back together slowly, then shows the whole pieces.
+
+
+## [2026-09-22] Every ship is built around a beacon, and a room is cut as one body
+
+> "the carbon atom (and other ship) that dont have a central node, end up with an initial parent
+> thats non central .. the proper way would be to use a beacon or reference node thats invisible but
+> still there where things can grow away from that" / "all should have this central build beacon,
+> even if a module lays simply over it with no offset .. it can be entirely internal and viewable as
+> a dot"
+
+ADR 0033. Measured first: `ShipAttach` pinned the ROOT to the origin, so a class whose arrangement
+has nothing at its middle put its first module there instead of its centre - a carbon 3.56 m off,
+helium 6.24 m, neon 3.89 m - and the slicer, which cuts each piece in its own frame, then cut one
+nucleus on six differently tilted grids (0°, four at 118°, one at 180°). That is what the author saw.
+
+The root is anchored to the beacon by its own `absolute` now, which is F9's dead field given a job,
+and every class is laid out so its core rings the beacon. The anchor travels with whatever becomes
+the root through MAKE COMP and dissolve. A room's cells are cut in one shared frame across the whole
+room, so a nucleus slices like the single body it is. The beacon is drawn as a dot that reads through
+the hull.
+
+Two tests turned out to be asserting on accidents, and centring exposed both: a dissolved helium grew
+a mirror twin of its root (the template's root module now stands outside symmetry, like every other
+part it makes), and the in/out bump test compared the SUM of part volumes, where the two styles
+nearly cancel - twelve parts differ by 0.95 to 1.95 m³ each while the sum differed by 0.0055 on a
+6287 m³ ship. It asserts on the parts now.
+
+### Verified
+
+Carbon, helium, neon and hydrogen centre their cores to within 0.01 m; a carbon's cells fall from 656
+to 534 on one shared grid. **gdUnit4 314/314** (`tests/core/test_beacon.gd`, five new); selfcheck
+PASSED, hash unchanged at `5536787c6c35d236`; data validator PASSED; gdformat and gdlint clean;
+windowed visual, resolve and explode checks PASSED. Frame: `reports/visual_beacon.png` - the dot at
+the centre of the nucleus it is built around.
+
+### Still the human's to check
+
+Load a carbon: the teal dot sits at the middle of the nucleus, and the nucleus rings it rather than
+hanging below its top proton. Explode and set SLICES Y RADIAL to TRISECT with SLICE CLUSTER CHUNKS
+on: the nucleus chunks now cut on one grid instead of six.

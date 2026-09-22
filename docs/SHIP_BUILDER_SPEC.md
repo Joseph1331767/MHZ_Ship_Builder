@@ -50,6 +50,13 @@ other.
 
 ## 3. The attach model — CONTRACT
 
+AMENDED(ADR 0033, 2026-09-22): **the ship is built around a BEACON — its origin — and the root is
+ANCHORED to it, not pinned to it.** A part with no parent (the root, or one floating free) is placed
+by its own `absolute` transform, so a class rings the beacon instead of hanging off whichever module
+happened to be first: measured, a carbon's core sat 3.56 m off its own centre, helium's 6.24 m. The
+beacon is drawn as a dot and is otherwise internal. Everything below is unchanged for every part
+that stands on a host, which is every other part, and the whole chain hangs off the anchored one.
+
 Every non-root part stores four numbers plus a parent.
 
 | field | unit | range | meaning |
@@ -199,6 +206,9 @@ no family produces them. See [ADR 0005](adr/0005-one-parametric-body-of-revoluti
 **Rules.**
 
 - Strict tree over `parts`: single `root`, every other part has exactly one `parent`, no cycles.
+- `absolute` places a part that stands on nothing — the root, or one floating free — relative to the
+  BEACON at the ship's origin (ADR 0033). Every other part ignores it and is placed on its host's
+  surface by the four numbers of §3. RETIRED(ADR 0033): "read by nothing in Phase 1" (F9).
 - Part ids are **immutable once created** — regions, damage state and routing will reference them.
 - `kind` is `"primitive"` or `"component_instance"`. For an instance, `family` holds the component
   definition id and `params` is empty.

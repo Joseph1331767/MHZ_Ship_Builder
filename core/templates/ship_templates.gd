@@ -219,6 +219,12 @@ static func build(
 	root_part.scale = room_scale
 	root_part.role = ROLE_ROOM
 	root_part.display_name = _room_name(nodes[0], 0)
+	# Like every other part the template makes: no mirror twin. The arrangement already places
+	# every body, so a twin of this one is a second body nothing asked for. It did not matter while
+	# the root sat ON the mirror plane at the origin; centred on the beacon (ADR 0033) it takes a
+	# slot like any other and the plane would duplicate it - measured on helium, whose twin landed
+	# exactly on its other proton.
+	root_part.asymmetric = true
 	part_of_node[0] = doc.root
 	var nucleus_ids: PackedStringArray = PackedStringArray([doc.root])
 
@@ -308,7 +314,39 @@ static func build(
 		_hatch(doc, tunnel_id, room_id, hatch, data)
 	if nucleus_ids.size() > 1 and doc.root == nucleus_ids[0]:
 		part_of_node = _lift_nucleus(doc, nucleus_ids, part_of_node, _symbol_of(nodes))
+	_centre_on_the_beacon(doc, data, conf)
 	return doc
+
+
+## THE BEACON (ADR 0033): every class is built AROUND the ship's centre, not off its first module.
+## The nucleus is laid out on an arrangement with nothing at its middle (ADR 0017), so the root body
+## takes a slot like any other and the middle is empty - "the proper way would be to use a beacon or
+## reference node thats invisible but still there where things can grow away from that"
+## (2026-09-21). The whole ship is anchored by the root's [member ShipPart.absolute], so shifting
+## that by the nucleus' own centroid puts the centre of the core on the beacon and moves everything
+## with it. A class whose arrangement does hold a middle body simply lays that body over the beacon.
+static func _centre_on_the_beacon(doc: ShipDoc, data: ShipData, cfg: ShipConfig) -> void:
+	if doc == null or doc.root.is_empty() or not doc.parts.has(doc.root):
+		return
+	var xforms: Dictionary = ShipAttach.resolve_all(doc, data, cfg)
+	var centre: Vector3 = Vector3.ZERO
+	var count: int = 0
+	# The nucleus: the root module and, once it is the ship's root component (ADR 0024), the bodies
+	# expanded under it. Never the extremities - a pod hangs off the core, it is not part of it.
+	for key: Variant in xforms.keys():
+		var id: String = str(key)
+		if ShipSymmetry.is_twin_id(id):
+			continue
+		if id != doc.root and not id.begins_with(doc.root + "/"):
+			continue
+		centre += (xforms[id] as Transform3D).origin
+		count += 1
+	if count == 0:
+		return
+	var root_part: ShipPart = doc.parts[doc.root]
+	var anchored: Transform3D = root_part.absolute
+	anchored.origin -= centre / float(count)
+	root_part.absolute = anchored
 
 
 # --- node layout -------------------------------------------------------------------------

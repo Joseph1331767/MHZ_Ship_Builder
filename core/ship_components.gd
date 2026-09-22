@@ -346,6 +346,10 @@ static func _swap_in_instance(
 	var joints_before: Dictionary = _joint_records(doc)
 	doc.remove_part(head)
 	var part: ShipPart = ShipPart.from_dict(doc.new_part_id(), record)
+	# THE ANCHOR TRAVELS WITH THE HEAD (ADR 0033). The head's four attach numbers are copied above;
+	# its anchor to the beacon is the fifth thing that places it, and a root that lost it would move
+	# the whole ship to the centre the moment a selection became a component.
+	part.absolute = root_part.absolute
 	var added: String = doc.add_part(part)
 	if added == "":
 		added = part.id
@@ -832,6 +836,10 @@ static func dissolve(doc: ShipDoc, instance_id: String) -> PackedStringArray:
 			part.rot = instance.rot
 			part.offset = instance.offset
 			part.blend = instance.blend
+			# And its anchor to the beacon (ADR 0033), for when the instance was the ship's root,
+			# and whether the instance stood outside symmetry - a flag that belongs to the head.
+			part.absolute = instance.absolute
+			part.asymmetric = part.asymmetric or instance.asymmetric
 			if instance.display_name != "":
 				part.display_name = instance.display_name
 		else:

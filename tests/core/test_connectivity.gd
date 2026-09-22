@@ -50,9 +50,13 @@ func _zeroed(d: Dictionary) -> Dictionary:
 func before() -> void:
 	_data = ShipData.new()
 	var ok: bool = _data.load_all()
-	assert_bool(ok).append_failure_message(
-		"ShipData.load_all() failed, load_errors=%s" % [str(_data.load_errors)]
-	).is_true()
+	(
+		assert_bool(ok)
+		. append_failure_message(
+			"ShipData.load_all() failed, load_errors=%s" % [str(_data.load_errors)]
+		)
+		. is_true()
+	)
 
 	var found_sphere: bool = false
 	for family_id: String in _data.family_ids():
@@ -78,10 +82,16 @@ func before() -> void:
 		_radius = _sphere_shape.size.x * _sphere_scale.x
 		found_sphere = true
 
-	assert_bool(found_sphere).append_failure_message(
-		"no family in res://data resolves to a SPHERE base primitive with zeroed params -- " +
-		"cannot build the exact-radius spheres this connectivity test relies on"
-	).is_true()
+	(
+		assert_bool(found_sphere)
+		. append_failure_message(
+			(
+				"no family in res://data resolves to a SPHERE base primitive with zeroed params -- "
+				+ "cannot build the exact-radius spheres this connectivity test relies on"
+			)
+		)
+		. is_true()
+	)
 	assert_float(_radius).is_greater(0.0)
 
 
@@ -102,10 +112,13 @@ func _floating_sphere(doc: ShipDoc, center_x: float) -> String:
 	part.family = _sphere_family
 	part.manufacturer = _sphere_mfr
 	part.params = _sphere_params
+	# ANCHORED TO THE BEACON (ADR 0033): a part with no parent is placed by its own `absolute`, so
+	# the fixture puts each sphere at its centre distance instead of tracing it out of the origin.
 	part.yaw = 90.0
 	part.pitch = 0.0
 	part.rot = Vector3.ZERO
-	part.offset = center_x - _sphere_shape.mount_inset()
+	part.offset = 0.0
+	part.absolute = Transform3D(Basis.IDENTITY, Vector3(center_x, 0.0, 0.0))
 	part.scale = _sphere_scale
 	part.blend = 0.0
 	part.display_name = "floating " + part.id
@@ -136,26 +149,44 @@ func test_three_overlapping_plus_one_far_gives_two_islands_largest_holds_three()
 	var islands: Array[PackedStringArray] = result["islands"]
 	var largest: PackedStringArray = result["largest"]
 
-	assert_int(islands.size()).append_failure_message(
-		"expected exactly 2 islands (root+b+c connected, d isolated), got %d: %s"
-		% [islands.size(), islands]
-	).is_equal(2)
-	assert_int(largest.size()).append_failure_message(
-		"largest island should hold exactly the three overlapping parts, got %s" % [largest]
-	).is_equal(3)
+	(
+		assert_int(islands.size())
+		. append_failure_message(
+			(
+				"expected exactly 2 islands (root+b+c connected, d isolated), got %d: %s"
+				% [islands.size(), islands]
+			)
+		)
+		. is_equal(2)
+	)
+	(
+		assert_int(largest.size())
+		. append_failure_message(
+			"largest island should hold exactly the three overlapping parts, got %s" % [largest]
+		)
+		. is_equal(3)
+	)
 	assert_array(largest).contains(root_id, b_id, c_id)
 	assert_array(largest).not_contains(d_id)
 
 	var found_singleton: bool = false
 	for island: PackedStringArray in islands:
 		if island.has(d_id):
-			assert_int(island.size()).append_failure_message(
-				"the far-away part's island should contain only itself, got %s" % [island]
-			).is_equal(1)
+			(
+				assert_int(island.size())
+				. append_failure_message(
+					"the far-away part's island should contain only itself, got %s" % [island]
+				)
+				. is_equal(1)
+			)
 			found_singleton = true
-	assert_bool(found_singleton).append_failure_message(
-		"no island in %s contains the far-away part '%s'" % [islands, d_id]
-	).is_true()
+	(
+		assert_bool(found_singleton)
+		. append_failure_message(
+			"no island in %s contains the far-away part '%s'" % [islands, d_id]
+		)
+		. is_true()
+	)
 
 
 ## Symmetry off - see the note on the two-island test above.
@@ -169,10 +200,16 @@ func test_fully_connected_ship_gives_one_island() -> void:
 
 	var result: Dictionary = HullBake.connectivity(doc, _data, cfg)
 	var islands: Array[PackedStringArray] = result["islands"]
-	assert_int(islands.size()).append_failure_message(
-		"a ship connected end-to-end (root-b-c) should report a single island, got %d: %s"
-		% [islands.size(), islands]
-	).is_equal(1)
+	(
+		assert_int(islands.size())
+		. append_failure_message(
+			(
+				"a ship connected end-to-end (root-b-c) should report a single island, got %d: %s"
+				% [islands.size(), islands]
+			)
+		)
+		. is_equal(1)
+	)
 
 	var only: PackedStringArray = islands[0]
 	assert_int(only.size()).is_equal(3)
@@ -199,9 +236,13 @@ func test_island_order_is_deterministic_across_repeated_calls() -> void:
 	var second: Dictionary = HullBake.connectivity(doc, _data, cfg)
 	# var_to_str() serialises the full nested Array[PackedStringArray] structure in order, so an
 	# equal string covers both island membership and island/part ordering in one comparison.
-	assert_str(var_to_str(second)).append_failure_message(
-		"HullBake.connectivity() returned a different result on a second call over the same doc"
-	).is_equal(var_to_str(first))
+	(
+		assert_str(var_to_str(second))
+		. append_failure_message(
+			"HullBake.connectivity() returned a different result on a second call over the same doc"
+		)
+		. is_equal(var_to_str(first))
+	)
 
 
 func test_connectivity_never_blocks_a_disconnected_ship() -> void:
@@ -220,15 +261,28 @@ func test_connectivity_never_blocks_a_disconnected_ship() -> void:
 
 	var connectivity_result: Dictionary = HullBake.connectivity(doc, _data, cfg)
 	var islands: Array[PackedStringArray] = connectivity_result["islands"]
-	assert_int(islands.size()).append_failure_message(
-		"this doc is deliberately built as 2 islands (root+1 connected, 1 far away), got %d"
-		% islands.size()
-	).is_equal(2)
+	(
+		assert_int(islands.size())
+		. append_failure_message(
+			(
+				"this doc is deliberately built as 2 islands (root+1 connected, 1 far away), got %d"
+				% islands.size()
+			)
+		)
+		. is_equal(2)
+	)
 
 	var save_result: Dictionary = ShipGate.check_save(doc, _data, cfg)
-	assert_bool(bool(save_result["ok"])).append_failure_message(
-		(
-			"a disconnected ship must not be refused for being disconnected -- connectivity " +
-			"never blocks a save, got: %s"
-		) % [save_result]
-	).is_true()
+	(
+		assert_bool(bool(save_result["ok"]))
+		. append_failure_message(
+			(
+				(
+					"a disconnected ship must not be refused for being disconnected -- connectivity "
+					+ "never blocks a save, got: %s"
+				)
+				% [save_result]
+			)
+		)
+		. is_true()
+	)
