@@ -157,7 +157,7 @@ static func _unreachable_issue(doc: ShipDoc, id: String, part: ShipPart) -> Dict
 			+ "island. The bake report lists it under `floating`."
 		)
 		return _warn(CODE_FLOATING_PART, id, free_text % _label(doc, id))
-	if not doc.parts.has(part.parent):
+	if not doc.parts.has(part.parent) and not ShipComponents.inner_exists(doc, part.parent):
 		var missing_text: String = (
 			"%s names parent '%s', which is not in the document. It cannot be placed until it "
 			+ "is re-parented onto a part that exists."
@@ -441,9 +441,9 @@ static func _joint_endpoints_exist(
 	doc: ShipDoc, joint: ShipJoint, joint_id: String, out: Array[Dictionary]
 ) -> bool:
 	var missing: PackedStringArray = PackedStringArray()
-	if not doc.parts.has(joint.a):
+	if not doc.parts.has(joint.a) and not ShipComponents.inner_exists(doc, joint.a):
 		missing.append(joint.a)
-	if not doc.parts.has(joint.b):
+	if not doc.parts.has(joint.b) and not ShipComponents.inner_exists(doc, joint.b):
 		missing.append(joint.b)
 	if not missing.is_empty():
 		var text: String = (

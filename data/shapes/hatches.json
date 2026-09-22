@@ -1,57 +1,165 @@
 {
-  "_note": "Hatch families are fully authored here - label, description, and tunable params - but their SDF partition geometry (SPEC section 7) is not implemented until Phase 2. In Phase 1 every joint bakes as the open studio hull regardless of which hatch family or params are selected; the authoring UI and validity checks are real, the geometry is not.",
+  "_note": "Hatch families are presets: each names the SHAPE of its opening and the STYLE of its door, and carries tunable params (a radius or a width and height, a corner radius, a side count, a blade count). Since ADR 0029 the opening is bored through both modules' walls at the seam, capped and collared, with a door of the named style on each module; a joint may override the shape, the style and the size under its own hatch params, within the seam's room. Before ADR 0029 every joint baked as the open studio hull regardless of hatch selection.",
   "iris_round": {
     "label": "Iris Hatch",
     "description": "A ring of overlapping blade leaves that rotate closed around a central point - the hatch every spacefaring fiction agrees on, and for good reason: it seals a round opening without a single hinge swinging into the room. Leaf count sets how faceted the closed iris reads; more leaves look finer and more mechanical, fewer leaves look faster and more brutal.",
+    "shape": "circle",
+    "style": "iris",
     "params": {
-      "radius":         { "min": 0.20, "max": 3.00, "default": 0.90, "step": 0.05 },
-      "leaves":         { "min": 4, "max": 12, "default": 6, "step": 1 },
-      "blade_overlap":  { "min": 0.00, "max": 0.50, "default": 0.15, "step": 0.01 }
+      "radius": {
+        "min": 0.2,
+        "max": 3.0,
+        "default": 0.9,
+        "step": 0.05
+      },
+      "leaves": {
+        "min": 4,
+        "max": 12,
+        "default": 6,
+        "step": 1
+      },
+      "blade_overlap": {
+        "min": 0.0,
+        "max": 0.5,
+        "default": 0.15,
+        "step": 0.01
+      }
     }
   },
   "plug_square": {
     "label": "Square Plug Hatch",
     "description": "A flat rectangular plug on a bolted flange, pulled straight out of its frame rather than swung or slid - the hatch you use when you want a hole in the hull to be a hole in the hull and nothing more. Corner radius softens it from a raw cargo cutout toward a finished doorway; flange width reads as how seriously the joint takes pressure.",
+    "shape": "rect",
+    "style": "single",
     "params": {
-      "width":         { "min": 0.30, "max": 2.50, "default": 1.00, "step": 0.05 },
-      "height":        { "min": 0.30, "max": 2.50, "default": 1.00, "step": 0.05 },
-      "corner_radius": { "min": 0.00, "max": 0.30, "default": 0.05, "step": 0.01 },
-      "flange_width":  { "min": 0.02, "max": 0.30, "default": 0.08, "step": 0.01 }
+      "width": {
+        "min": 0.3,
+        "max": 2.5,
+        "default": 1.0,
+        "step": 0.05
+      },
+      "height": {
+        "min": 0.3,
+        "max": 2.5,
+        "default": 1.0,
+        "step": 0.05
+      },
+      "corner_radius": {
+        "min": 0.0,
+        "max": 0.3,
+        "default": 0.05,
+        "step": 0.01
+      },
+      "flange_width": {
+        "min": 0.02,
+        "max": 0.3,
+        "default": 0.08,
+        "step": 0.01
+      }
     }
   },
   "sliding_oval": {
     "label": "Sliding Oval Hatch",
     "description": "An oval leaf that retracts sideways into a pocket built into the hull, the standard personnel door on anything with a shirt-sleeve interior. No leaf ever swings into a corridor, which is the entire point; slide_travel is how much clear pocket the hull needs to build in behind the opening to make that promise true.",
+    "shape": "ellipse",
+    "style": "single",
     "params": {
-      "width":         { "min": 0.40, "max": 2.00, "default": 0.90, "step": 0.05 },
-      "height":        { "min": 0.60, "max": 3.00, "default": 1.80, "step": 0.05 },
-      "slide_travel":  { "min": 0.50, "max": 2.50, "default": 1.20, "step": 0.05 }
+      "width": {
+        "min": 0.4,
+        "max": 2.0,
+        "default": 0.9,
+        "step": 0.05
+      },
+      "height": {
+        "min": 0.6,
+        "max": 3.0,
+        "default": 1.8,
+        "step": 0.05
+      },
+      "slide_travel": {
+        "min": 0.5,
+        "max": 2.5,
+        "default": 1.2,
+        "step": 0.05
+      }
     }
   },
   "pressure_hex": {
     "label": "Hex Pressure Hatch",
     "description": "A hexagonal, through-bolted hatch built for a real pressure differential between the two sides - bulkhead crossings, tank service ports, anywhere a hull section needs to hold air against vacuum on its own. Bolt count is a legibility cue as much as an engineering one: more bolts reads as more dangerous on the other side. A small equalisation valve lets the crew bleed pressure before committing to the bolts.",
+    "shape": "polygon",
+    "style": "single",
     "params": {
-      "radius":          { "min": 0.30, "max": 2.00, "default": 0.80, "step": 0.05 },
-      "bolt_count":      { "min": 6, "max": 24, "default": 12, "step": 1 },
-      "valve_diameter":  { "min": 0.00, "max": 0.30, "default": 0.05, "step": 0.01 }
+      "radius": {
+        "min": 0.3,
+        "max": 2.0,
+        "default": 0.8,
+        "step": 0.05
+      },
+      "bolt_count": {
+        "min": 6,
+        "max": 24,
+        "default": 12,
+        "step": 1
+      },
+      "valve_diameter": {
+        "min": 0.0,
+        "max": 0.3,
+        "default": 0.05,
+        "step": 0.01
+      },
+      "sides": {
+        "min": 3,
+        "max": 12,
+        "default": 6,
+        "step": 1
+      }
     }
   },
   "crawlway_round": {
     "label": "Crawlway Hatch",
     "description": "A small round manhole cover sized for a body, not a doorway - maintenance crawlways, duct junctions, and the access panel nobody photographs for the brochure. Minimal hardware, a shallow rim, and a radius small enough that it reads as utilitarian at any hull scale.",
+    "shape": "circle",
+    "style": "single",
     "params": {
-      "radius":    { "min": 0.15, "max": 0.60, "default": 0.35, "step": 0.01 },
-      "rim_depth": { "min": 0.00, "max": 0.15, "default": 0.03, "step": 0.01 }
+      "radius": {
+        "min": 0.15,
+        "max": 0.6,
+        "default": 0.35,
+        "step": 0.01
+      },
+      "rim_depth": {
+        "min": 0.0,
+        "max": 0.15,
+        "default": 0.03,
+        "step": 0.01
+      }
     }
   },
   "petal_blast": {
     "label": "Petal Blast Hatch",
     "description": "A hatch built to fail on purpose: several triangular petals held together by explosive bolts, meant to blow outward in one motion rather than open in the conventional sense. Standard fit on escape pods, jettison bays, and anywhere the design brief says the hatch has less than a second to get out of the way. Petal flare sets how far the segments splay once they have blown, purely for read - the blown-open geometry itself is not implemented in Phase 1.",
+    "shape": "circle",
+    "style": "iris",
     "params": {
-      "radius":           { "min": 0.40, "max": 2.50, "default": 1.00, "step": 0.05 },
-      "petal_count":      { "min": 3, "max": 8, "default": 5, "step": 1 },
-      "petal_flare_deg":  { "min": 0.0, "max": 60.0, "default": 30.0, "step": 1.0 }
+      "radius": {
+        "min": 0.4,
+        "max": 2.5,
+        "default": 1.0,
+        "step": 0.05
+      },
+      "petal_count": {
+        "min": 3,
+        "max": 8,
+        "default": 5,
+        "step": 1
+      },
+      "petal_flare_deg": {
+        "min": 0.0,
+        "max": 60.0,
+        "default": 30.0,
+        "step": 1.0
+      }
     }
   }
 }

@@ -144,14 +144,12 @@ func _ready() -> void:
 		_make_row(
 			[
 				_make_button(
-					"MAKE ROOM",
-					_on_make_room,
-					"NAME THE SELECTED PART AS A ROOM - OR JOIN SEVERAL PARTS INTO ONE ROOM"
-				),
-				_make_button(
 					"LINK",
 					_on_link,
-					"SELECT TWO PARTS THAT MEET - CYCLES THE SEAM: WALL / DOORWAY / HATCH / OPEN"
+					(
+						"SELECT PARTS THAT MEET - CYCLES EVERY SEAM BETWEEN THEM: "
+						+ "WALL / DOORWAY / HATCH / OPEN. OPEN IS ONE ROOM."
+					)
 				),
 			]
 		)
@@ -225,7 +223,8 @@ func _rebuild(force: bool) -> void:
 func _add_item(root: TreeItem, doc: ShipDoc, part_id: String, part: ShipPart) -> void:
 	# part_order() is root-first depth-first, so a parent is always already in _items.
 	var parent_item: TreeItem = root
-	var found: Variant = _items.get(part.parent, null)
+	# A part hung off an inner part of a component sits under the component's row (ADR 0024).
+	var found: Variant = _items.get(ShipComponents.instance_of(part.parent), null)
 	if found is TreeItem:
 		parent_item = found
 	var item: TreeItem = _tree.create_item(parent_item)
@@ -246,7 +245,12 @@ func _text_for(doc: ShipDoc, part_id: String, part: ShipPart) -> String:
 		name = part.family
 	var text: String = "%s  %s" % [part_id, name.to_upper()]
 	if part.kind == ShipPart.KIND_COMPONENT_INSTANCE:
-		text = COMPONENT_MARK + text
+		# A component is one room of its parts (ADR 0024); the row says so.
+		var definition: Variant = doc.components.get(part.family, null)
+		var inner: int = 0
+		if definition is Dictionary:
+			inner = ((definition as Dictionary).get("parts", {}) as Dictionary).size()
+		text = COMPONENT_MARK + text + "  (%d PARTS)" % inner
 	if part.is_mirror():
 		text += MIRROR_SUFFIX
 	# Two different marks on purpose: (ASYM) is a break you can undo here, (ASYM^) is one
@@ -663,165 +667,81 @@ func _cost_of(doc: ShipDoc, part_id: String) -> float:
 # ---------------------------------------------------------------- rooms and hatches
 
 
-## "each and every primitave should by default be a room.. i should be able to add a hatch between
-## any 2 connected shapes.. not adding one obv keeps internal door, and combining multiple into the
-## same room removes all internal walls making it a component and defining it as a single room."
-## (2026-09-02)
-##
-## So MAKE ROOM classifies nothing any more: every part already is a room (`ShipPart.is_room()`,
-## the default). What it does is NAME one, or JOIN several. With one part selected it asks for the
-## name that part carries in the tree and in every LINK message. With several it lifts them
-## into a component whose instance is the room, exactly as MAKE COMP would, and the joints between
-## the joined parts go with the walls (ShipComponents re-seats the outside ones on the instance).
-##
-## A room is a PART - a primitive or an instance - with `role == "room"`, not a new document
-## field. `ShipPart.role` already round-trips through to_dict/from_dict and is already part of the
-## canonical form, so a room needs no new schema and no ruleset bump.
-##
-## RETIRED(2026-09-02): "SELECT ONE PART - A ROOM IS ONE MODULE, NOT SEVERAL." -> several parts
-## ARE one room, joined below. RETIRED(2026-09-02): LINK HATCH's "IS NOT A ROOM YET" refusal ->
-## any two parts that meet can be hatched (_on_link_hatch).
-func _on_make_room() -> void:
-	var doc: ShipDoc = _builder.get_doc()
-	var selected: PackedStringArray = _builder.get_selection()
-	if doc == null or selected.is_empty():
-		_refuse("MAKE ROOM", "SELECT A PART FIRST.")
-		return
-	if selected.size() > 1:
-		_builder.prompt(
-			"MAKE ROOM",
-			(
-				"NAME THIS ROOM. THE SELECTED PARTS BECOME ONE COMPONENT AND ONE ROOM: THE "
-				+ "WALLS BETWEEN THEM GO, AND IT HATCHES TO ITS NEIGHBOURS AS A WHOLE."
-			),
-			_room_suggestion(doc),
-			_make_room_joined
-		)
-		return
-	var part: ShipPart = doc.parts.get(ShipSymmetry.source_of_twin(selected[0]), null) as ShipPart
-	if part == null:
-		_refuse("MAKE ROOM", "THAT PART IS NOT IN THE DOCUMENT.")
-		return
-	_builder.prompt(
-		"MAKE ROOM",
-		"NAME THIS ROOM. EVERY PART IS A ROOM ALREADY - THE NAME IS HOW LINK REFERS TO IT.",
-		part.display_name if not part.display_name.is_empty() else _room_suggestion(doc),
-		_make_room_named
-	)
-
-
-func _make_room_named(entered: String) -> void:
-	var doc: ShipDoc = _builder.get_doc()
-	var selected: PackedStringArray = _builder.get_selection()
-	if doc == null or selected.size() != 1:
-		_refuse("MAKE ROOM", "THE SELECTION CHANGED - SELECT ONE PART AND RETRY.")
-		return
-	var label: String = entered.strip_edges()
-	if label == "":
-		_refuse("MAKE ROOM", "A ROOM NEEDS A NAME.")
-		return
-	var pid: String = ShipSymmetry.source_of_twin(selected[0])
-	var part: ShipPart = doc.parts.get(pid, null) as ShipPart
-	if part == null:
-		_refuse("MAKE ROOM", "THAT PART IS NOT IN THE DOCUMENT.")
-		return
-	_builder.begin_edit("make room")
-	part.role = ShipPart.ROLE_ROOM
-	part.display_name = label
-	_builder.commit_edit(PackedStringArray([pid]))
-	_set_status("ROOM NAMED %s" % label.to_upper())
-
-
-## Several selected parts become one room: lifted into a component, whose instance carries the
-## name. The lift is ShipComponents.make_component - the same call as MAKE COMP, the same complete-
-## subtree rule, the same refusal text - so a room made of parts and a component made of the same
-## parts are the same thing, which is what "making it a component and defining it as a single
-## room" asks for.
-func _make_room_joined(entered: String) -> void:
-	var doc: ShipDoc = _builder.get_doc()
-	var selected: PackedStringArray = _builder.get_selection()
-	if doc == null or selected.size() < 2:
-		_refuse("MAKE ROOM", "THE SELECTION CHANGED - SELECT THE PARTS TO JOIN AND RETRY.")
-		return
-	var label: String = entered.strip_edges()
-	if label == "":
-		_refuse("MAKE ROOM", "A ROOM NEEDS A NAME.")
-		return
-	_builder.begin_edit("make room")
-	var component_id: String = ShipComponents.make_component(doc, selected, label)
-	if component_id == "":
-		_refuse(
-			"MAKE ROOM",
-			(
-				"THE SELECTION IS NOT A COMPLETE SUBTREE, OR IT CROSSES A MIRROR LINK.\n"
-				+ "PRESS ALL CHILDREN AND TRY AGAIN."
-			)
-		)
-		return
-	var instance_id: String = _instance_of_definition(doc, component_id)
-	if instance_id != "":
-		var room: ShipPart = doc.parts[instance_id]
-		room.role = ShipPart.ROLE_ROOM
-		room.display_name = label
-	_builder.commit_edit(PackedStringArray())
-	if not _builder.get_doc().components.has(component_id):
-		_refuse("MAKE ROOM", "EDIT REFUSED AND ROLLED BACK - A BUDGET WOULD BE EXCEEDED.")
-		return
-	_set_status("%s IS NOW ONE ROOM - %d PARTS JOINED" % [label.to_upper(), selected.size()])
-
-
-## The instance a lift just made: the one part that points at `component_id`.
-func _instance_of_definition(doc: ShipDoc, component_id: String) -> String:
-	for pid: String in doc.parts:
-		var part: ShipPart = doc.parts[pid]
-		if part.kind == ShipPart.KIND_COMPONENT_INSTANCE and part.family == component_id:
-			return pid
-	return ""
-
-
 ## "i should be able to add a hatch between any 2 connected shapes" ... "it should have dynamic
-## options for how 2 rooms link." LINK steps the pair's seam round ShipBuilder.LINK_CYCLE (ADR
-## 0008): WALL - the default, a solid bulkhead - to DOORWAY, a plain centred opening, to HATCH,
-## the hatch family's opening, to OPEN, no wall at all and one room, and back to WALL. Any two
-## parts qualify: every part is a room, so there is nothing to declare first.
+## options for how 2 rooms link." LINK steps every seam inside the selection round
+## ShipBuilder.LINK_CYCLE (ADR 0008) together: WALL - the default, a solid bulkhead - to DOORWAY, a
+## plain centred opening, to HATCH, the hatch family opening, to OPEN, no wall at all and one room,
+## and back to WALL. Any parts that meet qualify; every part is a room, so there is nothing to
+## declare first.
+##
+## THIS IS ALSO WHAT MAKE ROOM WAS. "they shouldn't really be separate options, as when making a
+## room it defines open structures at their link" (2026-09-04). Select the parts and step them to
+## OPEN and they are one room, which is the whole of it. Naming one is a rename, done in the tree
+## row itself (_on_item_edited).
+##
+## RETIRED(2026-09-04): MAKE ROOM, _make_room_named, _make_room_joined, _room_suggestion,
+## _instance_of_definition. Its single-part branch renamed a part, which the row already does. Its
+## multi-part branch lifted the selection into a COMPONENT, which MAKE COMP already does - and it
+## did not open the seams between the joined parts. It could not: ShipComponents drops a joint whose
+## two ends are both inside the lift, and a dropped joint IS a wall (ShipSeams.mode_for returns
+## MODE_WALL when no record exists), so "combining multiple into the same room removes all internal
+## walls" did the exact opposite. Measured on a lithium class: 2 joints before the lift, 0 after,
+## none of them open.
 ## RETIRED(2026-09-02): LINK HATCH, which toggled hatched / nothing, and _is_hatched().
 ##
-## CONNECTED is checked before the seam is OPENED - stepping onto doorway, hatch or open - with
-## the sample the validator judges every joint by (ShipJoints.solid_pair_state): an opening
-## between parts that never meet does nothing, and one between parts that merely touch leads
-## into solid hull. Both are refused with the fix named. Stepping back to a WALL is never refused:
-## parts that have drifted apart since must still be closable.
+## CONNECTED is checked before a seam is OPENED - stepping onto doorway, hatch or open - with the
+## sample the validator judges every joint by (ShipJoints.solid_pair_state): an opening between
+## parts that never meet does nothing, and one between parts that merely touch leads into solid
+## hull. A pair that fails is named and the step is refused. Stepping back to a WALL is never
+## refused: parts that have drifted apart since must still be closable.
 ##
-## The joint is keyed over the unordered pair, which is what ShipDoc.joint_key_for() exists for, so
+## Each joint is keyed over the unordered pair, which is what ShipDoc.joint_key_for() exists for, so
 ## linking A to B and then B to A is one seam and not two.
 func _on_link() -> void:
 	var doc: ShipDoc = _builder.get_doc()
 	var selected: PackedStringArray = _builder.get_selection()
 	if doc == null:
 		return
-	if selected.size() != 2:
-		_refuse("LINK", "SELECT EXACTLY TWO PARTS.")
+	if selected.size() < 2:
+		_refuse("LINK", "SELECT TWO OR MORE PARTS THAT MEET.")
 		return
-	var a: String = ShipSymmetry.source_of_twin(selected[0])
-	var b: String = ShipSymmetry.source_of_twin(selected[1])
-	if a == b:
-		_refuse("LINK", "THOSE ARE THE SAME PART - A ROOM CANNOT LINK TO ITSELF.")
+	var pairs: Array[PackedStringArray] = ShipSeams.pairs_within(doc, selected)
+	if pairs.is_empty():
+		_refuse(
+			"LINK",
+			(
+				"NOTHING IN THE SELECTION IS JOINED TO ANYTHING ELSE IN IT.\n"
+				+ "SELECT A PART AND WHAT IT STANDS ON."
+			)
+		)
 		return
-	if not doc.parts.has(a) or not doc.parts.has(b):
-		_refuse("LINK", "A SELECTED PART IS NOT IN THE DOCUMENT.")
+	# OPEN steps back to WALL, which closes a seam and needs no contact; every other step opens one
+	# wider and does. Checked over the WHOLE group before anything is edited, so a selection with
+	# one bad pair in it does not half-apply.
+	var current: String = ShipSeams.shared_mode(doc, pairs)
+	if current != ShipSeams.MODE_OPEN:
+		for pair: PackedStringArray in pairs:
+			if not _meet_for_hatch(doc, pair[0], pair[1]):
+				return
+	var next: String = _builder.cycle_link(selected)
+	if next.is_empty():
+		_refuse("LINK", "THAT SELECTION COULD NOT BE LINKED.")
 		return
-	# OPEN steps back to WALL, which closes the seam and needs no contact; every other step opens
-	# it wider and does.
-	var current: String = ShipSeams.mode_for(doc, a, b)
-	if current != ShipSeams.MODE_OPEN and not _meet_for_hatch(doc, a, b):
-		return
-	var next: String = _builder.cycle_link(a, b)
 	_set_status(
 		(
-			"LINK %s <-> %s: %s"
+			"LINK %s: %s"
 			% [
-				_display_of(doc.parts[a], a).to_upper(),
-				_display_of(doc.parts[b], b).to_upper(),
+				(
+					(
+						"%s <-> %s"
+						% [
+							_display_of(doc.part_at(pairs[0][0]), pairs[0][0]).to_upper(),
+							_display_of(doc.part_at(pairs[0][1]), pairs[0][1]).to_upper(),
+						]
+					)
+					if pairs.size() == 1
+					else "%d SEAMS" % pairs.size()
+				),
 				_link_label(next),
 			]
 		)
@@ -858,7 +778,7 @@ func _meet_for_hatch(doc: ShipDoc, a: String, b: String) -> bool:
 	if bool(state["merges"]):
 		return true
 	var names: Array = [
-		_display_of(doc.parts[a], a).to_upper(), _display_of(doc.parts[b], b).to_upper()
+		_display_of(doc.part_at(a), a).to_upper(), _display_of(doc.part_at(b), b).to_upper()
 	]
 	if bool(state["overlaps"]):
 		_refuse(
@@ -879,20 +799,6 @@ func _meet_for_hatch(doc: ShipDoc, a: String, b: String) -> bool:
 
 func _display_of(part: ShipPart, pid: String) -> String:
 	return part.display_name if not part.display_name.is_empty() else pid
-
-
-## A default room name that is not already taken, so pressing MAKE ROOM twice does not produce two
-## rooms called the same thing and leave the player to tell them apart. Every part is a room, so
-## every name in the document is taken.
-func _room_suggestion(doc: ShipDoc) -> String:
-	var used: Dictionary = {}
-	for pid: String in doc.parts:
-		var part: ShipPart = doc.parts[pid]
-		used[part.display_name.to_upper()] = true
-	var n: int = 1
-	while used.has("ROOM %d" % n):
-		n += 1
-	return "ROOM %d" % n
 
 
 # ---------------------------------------------------------------- components

@@ -97,6 +97,13 @@ const SNAP_CHOICES: Array = [0.1, 0.5, 1.0, 5.0, 15.0, 0.0]
 const SNAP_LABELS: Array = ["0.100", "0.500", "1.000", "5.000", "15.000", "OFF"]
 const SNAP_DEFAULT_INDEX: int = 1
 
+## THE HATCH SECTION (ADR 0029): the shapes a hole may take and the doors a hatch may wear, in
+## the order the two selectors list them. "the user should be able to choose the general shape
+## of the door/hatch .. and the dimensions .. not exceeding max or min .. and the style".
+const HATCH_SHAPES: Array = ShipSeams.VALID_HOLE_KINDS
+const HATCH_STYLES: Array = [ShipSeams.DOOR_SINGLE, ShipSeams.DOOR_DOUBLE, ShipSeams.DOOR_IRIS]
+const HATCH_SIZE_STEP: float = 0.05
+
 var _builder: ShipBuilder = null
 var _ship_theme: ShipTheme = null
 ## The session's placement state machine. Non-null after ShipBuilder._ready().
@@ -141,6 +148,21 @@ var _snap_signature: String = ""
 var _symmetry_label: Label = null
 ## The MIRROR X / Y / Z / OFF row, in MIRROR_PLANES order.
 var _plane_buttons: Array[Button] = []
+
+## The HATCH section (ADR 0029): hidden unless the selection names one seam. The pair is
+## `[child, host]`; the family selector's ids run parallel to its items.
+var _hatch_section: VBoxContainer = null
+var _hatch_note: Label = null
+var _hatch_family: OptionButton = null
+var _hatch_family_ids: PackedStringArray = PackedStringArray()
+var _hatch_shape: OptionButton = null
+var _hatch_style: OptionButton = null
+var _hatch_w: NumericField = null
+var _hatch_h: NumericField = null
+var _hatch_sides: NumericField = null
+var _door_a: Button = null
+var _door_b: Button = null
+var _hatch_pair: PackedStringArray = PackedStringArray()
 
 ## The part the fields are pointed at: the first id in the selection, or the placement's.
 var _target_id: String = ""
@@ -189,6 +211,7 @@ func _ready() -> void:
 	_build_snap_section()
 	_build_scale_section()
 	_build_symmetry_section()
+	_build_hatch_section()
 	_build_param_section()
 
 
@@ -630,6 +653,7 @@ func _sync_from_doc() -> void:
 	_refresh_snap(doc, part)
 	_refresh_symmetry(doc, part)
 	_refresh_mirror_buttons(doc)
+	_refresh_hatch(doc, selected)
 	if part == null:
 		_set_fields_editable(false)
 		_rebuild_params(null)
@@ -1018,7 +1042,7 @@ func _commit_edit(changed: PackedStringArray, before: ShipDoc) -> bool:
 static func _part(doc: ShipDoc, part_id: String) -> ShipPart:
 	if doc == null or part_id == "":
 		return null
-	var value: Variant = doc.parts.get(part_id, null)
+	var value: Variant = doc.part_at(part_id)
 	if value is ShipPart:
 		return value
 	return null
@@ -1048,6 +1072,223 @@ func _apply_palette() -> void:
 		if is_instance_valid(label):
 			label.add_theme_color_override("font_color", _role_color("text"))
 	queue_redraw()
+
+
+# ---------------------------------------------------------------- hatch (ADR 0029)
+
+
+## FAMILY (the preset), SHAPE, STYLE, WIDTH and HEIGHT within what the seam takes, SIDES for a
+## polygon, and the two doors - one per module - to swing. Everything but the doors is a
+## document edit through ShipHatchEdit; the doors are view state.
+func _build_hatch_section() -> void:
+	_hatch_section = _make_section("HATCH")
+	_body.add_child(_hatch_section)
+	_hatch_note = _make_readout_label("HatchNote")
+	_hatch_note.clip_text = false
+	_hatch_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_hatch_section.add_child(_hatch_note)
+	_hatch_family = _make_hatch_option("FAMILY", "HatchFamily", _on_hatch_family)
+	_hatch_family.tooltip_text = "THE PRESET: ITS SHAPE, DOOR AND SIZE, UNTIL CHANGED BELOW"
+	_hatch_shape = _make_hatch_option("SHAPE", "HatchShape", _on_hatch_shape)
+	for kind: String in HATCH_SHAPES:
+		_hatch_shape.add_item(kind.to_upper())
+	_hatch_shape.tooltip_text = "THE OPENING'S OUTLINE, DRAWN INSIDE WIDTH X HEIGHT"
+	_hatch_style = _make_hatch_option("STYLE", "HatchStyle", _on_hatch_style)
+	for style: String in HATCH_STYLES:
+		_hatch_style.add_item(style.to_upper())
+	_hatch_style.tooltip_text = "ONE HINGED LEAF, TWO LEAVES, OR AN IRIS OF BLADES"
+	_hatch_w = _make_field("WIDTH", "M", 0.1, ShipHatchEdit.SIZE_CEILING_M)
+	_hatch_h = _make_field("HEIGHT", "M", 0.1, ShipHatchEdit.SIZE_CEILING_M)
+	for field: NumericField in [_hatch_w, _hatch_h]:
+		field.set_step(HATCH_SIZE_STEP)
+		field.tooltip_text = "CLEAR SIZE OF THE OPENING - FROM A PERSON'S SQUEEZE TO WHAT BOTH ROOMS TAKE"
+		_hatch_section.add_child(field)
+	_hatch_w.value_changed.connect(_on_hatch_size.bind(ShipHatchEdit.KEY_WIDTH))
+	_hatch_h.value_changed.connect(_on_hatch_size.bind(ShipHatchEdit.KEY_HEIGHT))
+	_hatch_sides = NumericField.new()
+	_hatch_sides.name = "FieldSides"
+	_hatch_sides.configure(
+		"SIDES", ShipSeams.POLYGON_MIN_SIDES, ShipSeams.POLYGON_MAX_SIDES, 1.0, true
+	)
+	_hatch_sides.tooltip_text = "A POLYGON'S SIDES"
+	_hatch_sides.value_changed.connect(_on_hatch_sides)
+	_hatch_section.add_child(_hatch_sides)
+	var row: HBoxContainer = HBoxContainer.new()
+	row.add_theme_constant_override("separation", 4)
+	_door_a = _make_door_button("DoorA", ShipDoors.SIDE_CHILD)
+	_door_b = _make_door_button("DoorB", ShipDoors.SIDE_HOST)
+	row.add_child(_door_a)
+	row.add_child(_door_b)
+	_hatch_section.add_child(row)
+	_hatch_section.visible = false
+
+
+func _make_hatch_option(tag_text: String, node_name: String, handler: Callable) -> OptionButton:
+	var row: HBoxContainer = HBoxContainer.new()
+	row.add_theme_constant_override("separation", 4)
+	_hatch_section.add_child(row)
+	var tag: Label = Label.new()
+	tag.text = tag_text
+	tag.custom_minimum_size = Vector2(ShipTheme.pxf(NumericField.LABEL_WIDTH), ShipTheme.pxf(0.0))
+	tag.add_theme_font_size_override("font_size", ShipTheme.font_small())
+	row.add_child(tag)
+	_section_labels.append(tag)
+	var option: OptionButton = OptionButton.new()
+	option.name = node_name
+	option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	option.focus_mode = Control.FOCUS_NONE
+	option.add_theme_font_size_override("font_size", ShipTheme.font_small())
+	option.item_selected.connect(handler)
+	row.add_child(option)
+	return option
+
+
+func _make_door_button(node_name: String, side: String) -> Button:
+	var button: Button = Button.new()
+	button.name = node_name
+	button.toggle_mode = true
+	button.focus_mode = Control.FOCUS_NONE
+	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	button.add_theme_font_size_override("font_size", ShipTheme.font_small())
+	button.tooltip_text = "SWING THIS MODULE'S DOOR OVER THE OPENING - EACH MODULE HAS ITS OWN"
+	button.toggled.connect(_on_door_toggled.bind(side))
+	return button
+
+
+## Model -> view for the section. Under `_binding`, like everything _sync_from_doc calls.
+func _refresh_hatch(doc: ShipDoc, selected: PackedStringArray) -> void:
+	if _hatch_section == null:
+		return
+	_hatch_pair = ShipHatchEdit.pair_for(doc, selected)
+	if _hatch_pair.is_empty() or _placement_active():
+		_hatch_section.visible = false
+		return
+	_hatch_section.visible = true
+	var child: String = _hatch_pair[0]
+	var host: String = _hatch_pair[1]
+	var names: Array = [_hatch_name(doc, child), _hatch_name(doc, host)]
+	_door_a.text = "DOOR: " + str(names[0])
+	_door_b.text = "DOOR: " + str(names[1])
+	var st: Dictionary = ShipHatchEdit.state(
+		doc, _builder.get_data(), _builder.get_config(), child, host
+	)
+	var mode: String = str(st[ShipHatchEdit.KEY_MODE])
+	var hatched: bool = mode == ShipSeams.MODE_HATCHED
+	var bounded: bool = ShipHatchEdit.is_bounded(mode)
+	_hatch_family.disabled = not hatched
+	_hatch_style.disabled = not hatched
+	_hatch_shape.disabled = not bounded
+	_hatch_w.set_editable(bounded)
+	_hatch_h.set_editable(bounded)
+	_hatch_sides.set_editable(bounded)
+	_door_a.disabled = not hatched
+	_door_b.disabled = not hatched
+	if not bounded:
+		_hatch_note.text = (
+			"%s <-> %s: %s. PRESS LINK IN THE TREE FOR A DOORWAY OR A HATCH."
+			% [str(names[0]), str(names[1]), "ONE ROOM" if mode == ShipSeams.MODE_OPEN else "WALL"]
+		)
+		_hatch_sides.visible = false
+		return
+	_fill_hatch_families(str(st[ShipHatchEdit.KEY_FAMILY]))
+	_hatch_shape.select(maxi(HATCH_SHAPES.find(str(st[ShipHatchEdit.KEY_SHAPE])), 0))
+	_hatch_style.select(maxi(HATCH_STYLES.find(str(st[ShipHatchEdit.KEY_STYLE])), 0))
+	var limits: Dictionary = st[ShipHatchEdit.KEY_LIMITS]
+	var lo: float = float(limits.get("min", 0.5))
+	var hi: Vector2 = Vector2(ShipHatchEdit.SIZE_CEILING_M, ShipHatchEdit.SIZE_CEILING_M)
+	var fits: bool = bool(limits.get("ok", false))
+	if fits:
+		hi = limits["max"]
+	_hatch_w.set_range(lo, maxf(hi.x, lo))
+	_hatch_h.set_range(lo, maxf(hi.y, lo))
+	_hatch_w.set_value(float(st[ShipHatchEdit.KEY_WIDTH]))
+	_hatch_h.set_value(float(st[ShipHatchEdit.KEY_HEIGHT]))
+	_hatch_sides.visible = str(st[ShipHatchEdit.KEY_SHAPE]) == ShipSeams.KIND_POLYGON
+	_hatch_sides.set_value(float(int(st[ShipHatchEdit.KEY_SIDES])))
+	var key: String = ShipHatchEdit.door_key(child, host)
+	var view: ShipView3D = _builder.get_view()
+	_door_a.set_pressed_no_signal(view != null and view.door_open(key, ShipDoors.SIDE_CHILD) > 0.5)
+	_door_b.set_pressed_no_signal(view != null and view.door_open(key, ShipDoors.SIDE_HOST) > 0.5)
+	var what: String = "HATCH" if hatched else "DOORWAY"
+	if not fits:
+		_hatch_note.text = (
+			"%s: %s - NO OPENING CAN BE BORED HERE." % [what, str(limits.get("reason", ""))]
+		)
+	elif bool(limits.get("tight", false)):
+		_hatch_note.text = (
+			"%s: TIGHT - UNDER THE %.2f M SQUEEZE. THE SEAM TAKES %.2f x %.2f M AT MOST."
+			% [what, lo, hi.x, hi.y]
+		)
+	else:
+		_hatch_note.text = "%s: THE SEAM TAKES %.2f x %.2f M AT MOST." % [what, hi.x, hi.y]
+
+
+func _fill_hatch_families(current: String) -> void:
+	_hatch_family.clear()
+	_hatch_family_ids = PackedStringArray()
+	var at: int = -1
+	for entry: Dictionary in ShipHatchEdit.families(_builder.get_data()):
+		_hatch_family_ids.append(str(entry["id"]))
+		_hatch_family.add_item(str(entry["label"]).to_upper())
+		if str(entry["id"]) == current:
+			at = _hatch_family_ids.size() - 1
+	if at >= 0:
+		_hatch_family.select(at)
+
+
+func _hatch_name(doc: ShipDoc, pid: String) -> String:
+	var part: ShipPart = _part(doc, pid)
+	if part == null:
+		return pid.to_upper()
+	var name: String = part.display_name if not part.display_name.is_empty() else part.family
+	return name.to_upper()
+
+
+func _on_hatch_family(index: int) -> void:
+	if index >= 0 and index < _hatch_family_ids.size():
+		_write_hatch({ShipHatchEdit.KEY_FAMILY: _hatch_family_ids[index]})
+
+
+func _on_hatch_shape(index: int) -> void:
+	if index >= 0 and index < HATCH_SHAPES.size():
+		_write_hatch({ShipHatchEdit.KEY_SHAPE: str(HATCH_SHAPES[index])})
+
+
+func _on_hatch_style(index: int) -> void:
+	if index >= 0 and index < HATCH_STYLES.size():
+		_write_hatch({ShipHatchEdit.KEY_STYLE: str(HATCH_STYLES[index])})
+
+
+func _on_hatch_size(value: float, key: String) -> void:
+	_write_hatch({key: value})
+
+
+func _on_hatch_sides(value: float) -> void:
+	_write_hatch({ShipHatchEdit.KEY_SIDES: int(round(value))})
+
+
+## One edit through the protocol; a refusal rolls back and resyncs like every other field.
+func _write_hatch(changes: Dictionary) -> void:
+	if _binding or _hatch_pair.size() != 2:
+		return
+	var doc: ShipDoc = _builder.get_doc()
+	if doc == null:
+		return
+	_builder.begin_edit("hatch")
+	if not ShipHatchEdit.write(doc, _hatch_pair[0], _hatch_pair[1], changes):
+		_set_note("THAT SEAM CARRIES NO HATCH - LINK IT FIRST")
+	_commit_edit(PackedStringArray([_hatch_pair[0]]), doc)
+
+
+func _on_door_toggled(pressed: bool, side: String) -> void:
+	if _binding or _hatch_pair.size() != 2:
+		return
+	var view: ShipView3D = _builder.get_view()
+	if view == null:
+		return
+	view.set_door_open(
+		ShipHatchEdit.door_key(_hatch_pair[0], _hatch_pair[1]), side, 1.0 if pressed else 0.0
+	)
 
 
 ## The only sanctioned colour lookup. Never an index (SPEC section 11).

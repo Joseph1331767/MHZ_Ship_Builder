@@ -34,6 +34,7 @@
   "attach_embed_max_fraction",
   "doorway_width_m",
   "doorway_height_m",
+  "hatch_min_m",
   "explode_gap_m",
   "explode_cells_per_axis",
   "template_volume_m3"
@@ -127,6 +128,9 @@
    "$ref": "#/$defs/lever_number"
   },
   "doorway_height_m": {
+   "$ref": "#/$defs/lever_number"
+  },
+  "hatch_min_m": {
    "$ref": "#/$defs/lever_number"
   },
   "explode_gap_m": {

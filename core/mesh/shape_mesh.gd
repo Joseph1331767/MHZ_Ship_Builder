@@ -50,12 +50,19 @@ const MIN_EXTENT_M: float = 0.0001
 ## Returns an empty mesh for a null or degenerate shape. The result is wound CCW-outward, the
 ## convention of [PolyMesh] and [MeshCsg]; the flip to Godot's clockwise front face happens once,
 ## in [method PolyMesh.to_array_mesh].
-static func build(shape: ResolvedShape, segments: int = RADIAL_SEGMENTS) -> PolyMesh:
+## [param phase] turns a lathe's rings by that fraction of one segment about its own axis. The
+## SHAPE is the same shape; only where its longitude lines fall moves. Two lathes on one axis with
+## one segment count otherwise share every longitude plane, and a BSP boolean between them - the
+## union that makes a room out of fused spheres - meets coplanar faces everywhere it splits. Each
+## part is built with its own phase so that never happens.
+static func build(
+	shape: ResolvedShape, segments: int = RADIAL_SEGMENTS, phase: float = 0.0
+) -> PolyMesh:
 	if shape == null or _collapsed(shape):
 		return PolyMesh.new()
 	var cols: int = maxi(segments, 3)
 	var twisted: bool = not is_zero_approx(shape.twist_deg)
-	var base: PolyMesh = _base_mesh(shape, cols, twisted)
+	var base: PolyMesh = _base_mesh(shape, cols, twisted, phase)
 	if base.is_empty():
 		return base
 	return _warped(base, shape, twisted)
@@ -140,21 +147,23 @@ static func _collapsed(shape: ResolvedShape) -> bool:
 
 
 ## The unwarped, unscaled primitive: what [method ResolvedShape.sdf] asks after the domain warps.
-static func _base_mesh(shape: ResolvedShape, cols: int, twisted: bool) -> PolyMesh:
+static func _base_mesh(
+	shape: ResolvedShape, cols: int, twisted: bool, phase: float = 0.0
+) -> PolyMesh:
 	var rows: int = TWIST_SLABS if twisted else 1
 	match shape.base:
 		ResolvedShape.Base.BOX:
 			return _box(shape.size, rows)
 		ResolvedShape.Base.SPHERE:
-			return _lathe(_sphere_profile(shape.size.x), cols, false)
+			return _lathe(_sphere_profile(shape.size.x), cols, false, phase)
 		ResolvedShape.Base.CYLINDER:
-			return _lathe(_cone_profile(shape, twisted), cols, false)
+			return _lathe(_cone_profile(shape, twisted), cols, false, phase)
 		ResolvedShape.Base.CONE:
-			return _lathe(_pointed_profile(shape.size.x, shape.size.y), cols, false)
+			return _lathe(_pointed_profile(shape.size.x, shape.size.y), cols, false, phase)
 		ResolvedShape.Base.CAPSULE:
-			return _lathe(_capsule_profile(shape.size.x, shape.size.y), cols, false)
+			return _lathe(_capsule_profile(shape.size.x, shape.size.y), cols, false, phase)
 		ResolvedShape.Base.TORUS:
-			return _lathe(_torus_profile(shape.size.x, shape.size.y), cols, true)
+			return _lathe(_torus_profile(shape.size.x, shape.size.y), cols, true, phase)
 	return _box(shape.size, rows)
 
 
@@ -215,18 +224,21 @@ static func _box(half: Vector3, rows: int) -> PolyMesh:
 ## than an open tube. An open profile is expected to start and end on the axis; a row at radius
 ## zero collapses its quads into triangles on its own, because [method PolyMesh.from_polygons]
 ## drops the repeated vertex.
-static func _lathe(profile: PackedVector2Array, cols: int, wrap: bool) -> PolyMesh:
+static func _lathe(
+	profile: PackedVector2Array, cols: int, wrap: bool, phase: float = 0.0
+) -> PolyMesh:
 	var rows: int = profile.size()
 	if rows < 2:
 		return PolyMesh.new()
 	var polys: Array = []
 	var last: int = rows if wrap else rows - 1
+	var turn: float = fmod(phase, 1.0)
 	for r: int in last:
 		var lo: Vector2 = profile[r]
 		var hi: Vector2 = profile[(r + 1) % rows]
 		for c: int in cols:
-			var a0: float = TAU * float(c) / float(cols)
-			var a1: float = TAU * float(c + 1) / float(cols)
+			var a0: float = TAU * (float(c) + turn) / float(cols)
+			var a1: float = TAU * (float(c + 1) + turn) / float(cols)
 			# Lower ring first, then up, then round: the right-hand normal points outward.
 			(
 				polys

@@ -1,4 +1,11 @@
 class_name ShipMeshBake
+## TWO EXECUTORS, ONE PLAN (ADR 0020). [method plan] is the truth here: pure data saying which
+## surfaces of which part are cut by which cutters. [method bake] carries it out with this file's
+## own polygon clipping - exact on planes, approximate on curves - and is the fallback for a
+## caller with no scene tree. The builder carries the SAME plan out with the engine's CSG
+## (ShipCsgBake, harness/), which is exact everywhere and is what the player sees. The paragraphs
+## below that describe a BSP union describe RETIRED machinery; the booleans are the engine's now.
+##
 ## The exact bake: every part tessellated into its own solid [PolyMesh], placed in ship space.
 ##
 ## ONE MESH PER PART, NOT ONE MESH PER SHIP, and that is a design decision rather than a stage on
@@ -57,7 +64,9 @@ class_name ShipMeshBake
 ## and every neighbour fattened, so it stops short of each seam face rather than opening onto it -
 ## "the hatch and seam surfaces remain solid". A module is therefore a closed shell with no way in.
 ##
-## Hatch and doorway OPENINGS are not bored here yet; that is the next piece of work.
+## RETIRED(ADR 0029, 2026-09-06): "Hatch and doorway OPENINGS are not bored here yet" -> they
+## are planned here ([ShipDoors], the "doors" of the plan) and bored by the engine executor;
+## this pure executor still keeps its walls at them (FOLLOWUPS F41).
 ##
 ## THE SDF IS STILL THE TRUTH LAYER. Attach, snapping, joints, metrics and the budget gates all
 ## read [ShipSdf] and are untouched; this replaces only how the visible mesh is produced. The two
@@ -67,6 +76,19 @@ class_name ShipMeshBake
 ##
 ## Pure data (SPEC §12): [ArrayMesh] is a [Resource], not a [Node], so returning one is inside the
 ## boundary. No [SceneTree], no signals, no [code]res://[/code]. Arguments are never mutated.
+
+## How far apart, as a fraction of one segment, consecutive parts' tessellations are turned about
+## their own axes - the golden ratio, so no two of any count land on one phase. See [method bake].
+const PHASE_STRIDE: float = 0.6180339887
+
+## How many cells a surface's longest extent is gridded into before it is clipped - the count of
+## segments a lathe already has round its waist, halved, since a lathe's polygons are that size.
+const CLIP_CELLS: int = 12
+
+## The three cutters a part offers, by name - see [method plan].
+const CUT_BODY: String = "body"
+const CUT_ROOM: String = "room"
+const CUT_GROWN: String = "grown"
 
 
 ## Bakes every placed part of [param doc].
@@ -94,9 +116,49 @@ static func bake(
 	doc: ShipDoc, data: ShipData, cfg: ShipConfig, segments: int = ShapeMesh.RADIAL_SEGMENTS
 ) -> Dictionary:
 	var t0: int = Time.get_ticks_msec()
-	var out: Dictionary = _empty(t0)
+	var plan: Dictionary = plan(doc, data, cfg, segments)
+	if plan.is_empty():
+		return _empty(t0)
+	var outer: Dictionary = plan["outer"]
+	var inner: Dictionary = plan["inner"]
+	var cutters: Dictionary = plan["cutters"]
+	var solids: Dictionary = {}
+	for id: String in plan["ids"]:
+		var cuts: Array = []
+		for cut: Dictionary in plan["cuts"].get(id, []) + plan["open_cuts"].get(id, []):
+			cuts.append({"outer": cutters[cut["outer"]], "inner": cutters[cut["inner"]]})
+		solids[id] = _carve(
+			outer[id],
+			inner.get(id, null),
+			cutters[_cutter_key(id, CUT_BODY)],
+			cutters.get(_cutter_key(id, CUT_ROOM), null),
+			cuts
+		)
+	return report(solids, plan, t0)
+
+
+## Everything a bake needs to know, and nothing it has yet done: every placed part's three
+## surfaces, and for each part the list of cuts its seams ask for, as
+##   { "ids": PackedStringArray (sorted), "outer": {id: PolyMesh}, "inner": {id: PolyMesh},
+##     "grown": {id: PolyMesh}, "cutters": {key: MeshClip.Cutter}, "cuts": {id: [ {"outer": key,
+##     "inner": key} ]} (the WALLED seams), "open_cuts": the same shape for the OPEN seams as the
+##     pure executor reads them, "rooms": [PackedStringArray] (every part in exactly one, members
+##     sorted), "split": {id: {"origin": Vector3, "normal": Vector3}} (the manufacturing plane
+##     the exploded view slices a module on), "open_seams": int, "pending_seams": int,
+##     "hull_thickness_m": float }
+## A cutter key is `_cutter_key(id, kind)` with kind one of CUT_BODY, CUT_ROOM, CUT_GROWN.
+##
+## THE PLAN IS PURE, THE EXECUTION IS NOT. Working out what each seam means for each part is a
+## question about the document and belongs here in core; carrying the cuts out is a question about
+## a boolean engine. This module carries them out with its own polygon clipping ([method _carve]),
+## which is exact where surfaces are planar and approximate where they curve; the builder carries
+## the same plan out with the engine's CSG nodes (ShipCsgBake), which is exact everywhere and is
+## what the player sees. One plan, two executors, no second reading of the seams.
+static func plan(
+	doc: ShipDoc, data: ShipData, cfg: ShipConfig, segments: int = ShapeMesh.RADIAL_SEGMENTS
+) -> Dictionary:
 	if doc == null or data == null or cfg == null:
-		return out
+		return {}
 
 	# Resolved ONCE and handed on, exactly as ShipSdf.build does it: shape generation is the
 	# expensive half of a rebuild and resolve_all() would repeat it internally.
@@ -109,49 +171,233 @@ static func bake(
 	var outer: Dictionary = {}
 	var inner: Dictionary = {}
 	var grown: Dictionary = {}
+	# Sorted, so the phase each part is tessellated at is a function of the DOCUMENT and not of
+	# dictionary order (AGENTS section 8b).
+	var ids: PackedStringArray = PackedStringArray()
 	for id: Variant in xforms.keys():
+		ids.append(str(id))
+	ids.sort()
+	for index: int in ids.size():
+		var id: String = ids[index]
 		var shape_v: Variant = shapes.get(id)
 		var xform_v: Variant = xforms.get(id)
 		if not (shape_v is ResolvedShape) or not (xform_v is Transform3D):
 			continue
 		var shape: ResolvedShape = shape_v
 		var xform: Transform3D = xform_v
-		var local: PolyMesh = ShapeMesh.build(shape, segments)
+		# EACH PART AT ITS OWN PHASE, so no two lathes ever share a longitude plane. Two spheres on
+		# one axis with one segment count do, and a boolean between them then meets coplanar
+		# faces at every split. The golden ratio spreads the phases so that no two parts of any
+		# count coincide; a part's outer and inner keep one phase, which is what makes them nest.
+		var phase: float = fmod(float(index) * PHASE_STRIDE, 1.0)
+		var local: PolyMesh = ShapeMesh.build(shape, segments, phase)
 		if local.is_empty():
 			continue
 		outer[id] = local.transformed(xform)
 		if thickness <= 0.0:
 			continue
-		var hollow: PolyMesh = ShapeMesh.build(ShapeMesh.inset(shape, thickness), segments)
+		var hollow: PolyMesh = ShapeMesh.build(ShapeMesh.inset(shape, thickness), segments, phase)
 		if not hollow.is_empty():
 			inner[id] = hollow.transformed(xform)
-		var fat: PolyMesh = ShapeMesh.build(ShapeMesh.inset(shape, -thickness), segments)
+		var fat: PolyMesh = ShapeMesh.build(ShapeMesh.inset(shape, -thickness), segments, phase)
 		grown[id] = fat.transformed(xform) if not fat.is_empty() else outer[id]
 
-	var seams: Array[Dictionary] = ShipSeams.seams(doc, shapes, xforms, cfg, data)
-	outer = _apply_seams(outer, outer, seams, shapes, xforms, 0.0)
-	if not inner.is_empty():
-		# The interior is cut by the SAME seams, every plane pushed in by the wall thickness and
-		# every neighbour fattened by it, so the cavity stops short of each seam face instead of
-		# opening onto it.
-		inner = _apply_seams(inner, grown, seams, shapes, xforms, thickness)
-
-	var solids: Dictionary = {}
-	var hollowed: int = 0
-	for id: Variant in outer:
-		var shell: PolyMesh = outer[id]
+	# ONE CUTTER PER SURFACE PER PART: its body, its room (the interior), and its body grown by a
+	# wall. A seam then names, for each of its two parts, which cutters take the part's outer and
+	# inner surfaces.
+	var cutters: Dictionary = {}
+	var placed: PackedStringArray = PackedStringArray()
+	for id: String in ids:
+		if not outer.has(id):
+			continue
+		placed.append(id)
+		var shape: ResolvedShape = shapes[id]
+		var xform: Transform3D = xforms[id]
+		cutters[_cutter_key(id, CUT_BODY)] = MeshClip.Cutter.of_shape(shape, xform, outer[id])
 		if inner.has(id):
-			var carved: PolyMesh = _cut(shell, inner[id])
-			if carved != shell:
-				hollowed += 1
-			shell = carved
-		solids[id] = shell
+			cutters[_cutter_key(id, CUT_ROOM)] = MeshClip.Cutter.of_shape(
+				ShapeMesh.inset(shape, thickness), xform, inner[id]
+			)
+		if grown.has(id):
+			cutters[_cutter_key(id, CUT_GROWN)] = MeshClip.Cutter.of_shape(
+				ShapeMesh.inset(shape, -thickness), xform, grown[id]
+			)
 
+	var seams: Array[Dictionary] = ShipSeams.seams(doc, shapes, xforms, cfg, data)
+	var cuts: Dictionary = {}
+	var open_cuts: Dictionary = {}
+	var room_of: Dictionary = {}
+	var bounded_seams: int = 0
+	var open_seams: int = 0
+	var door_entries: Array[Dictionary] = []
+	for seam: Dictionary in seams:
+		var child_id: String = str(seam.get(ShipSeams.SEAM_CHILD, ""))
+		var host_id: String = str(seam.get(ShipSeams.SEAM_HOST, ""))
+		if not outer.has(child_id) or not outer.has(host_id):
+			continue
+		var mode: String = str(seam.get(ShipSeams.SEAM_MODE, ShipSeams.MODE_WALL))
+		var bounded: bool = mode == ShipSeams.MODE_DOORWAY or mode == ShipSeams.MODE_HATCHED
+		if bounded:
+			bounded_seams += 1
+		var style: String = str(seam.get(ShipSeams.SEAM_STYLE, ShipSeams.STYLE_FLAT))
+		var big_indents: bool = ShipJoint.indent_of(style) == ShipJoint.INDENT_BIG
+		var child_is_big: bool = MeshFlange.first_is_larger(outer[child_id], outer[host_id])
+		var big_id: String = child_id if child_is_big else host_id
+		var small_id: String = host_id if child_is_big else child_id
+		var indented: String = small_id if big_indents else big_id
+		var indenter: String = big_id if big_indents else small_id
+		if mode == ShipSeams.MODE_OPEN and inner.has(indented) and inner.has(indenter):
+			# ONE ROOM. Two answers, for two executors. For the engine (ShipCsgBake): the pair are
+			# members of one ROOM, and a room is built whole - the union of its members' bodies
+			# less the union of their interiors - and then cut back into pieces along the members'
+			# original bodies, so no member keeps any hull inside another's walls. "union all
+			# proton chunks .. down sizing them slightly, unioning all those smaller chunks ..
+			# subtracting .. then we re cut the single mesh using orignal data" (2026-09-05). For
+			# the pure executor, which has no union: the per-part rule - the indented part loses
+			# the indenter's body on both surfaces, the indenter loses the indented part's room.
+			open_seams += 1
+			_join_rooms(room_of, indented, indenter)
+			_add_cut(
+				open_cuts,
+				indented,
+				_cutter_key(indenter, CUT_BODY),
+				_cutter_key(indenter, CUT_BODY)
+			)
+			_add_cut(
+				open_cuts,
+				indenter,
+				_cutter_key(indented, CUT_ROOM),
+				_cutter_key(indented, CUT_ROOM)
+			)
+		else:
+			# A WALL. The indented part gets a socket the indenter's body punches through its
+			# outer surface only; its inner surface retreats from the indenter's body GROWN by a
+			# wall, so the wall follows the socket at its own thickness and the room stays sealed.
+			# The indenter is untouched: its end sits in the socket. This is the native linkage
+			# surface for every style for now - see FOLLOWUPS F32 for the flat ones.
+			var deep: String = (
+				_cutter_key(indenter, CUT_GROWN)
+				if cutters.has(_cutter_key(indenter, CUT_GROWN))
+				else _cutter_key(indenter, CUT_BODY)
+			)
+			_add_cut(cuts, indented, _cutter_key(indenter, CUT_BODY), deep)
+			# A DOOR (ADR 0029): a bounded opening is a wall with a hole bored through both
+			# sides of it, planned by ShipDoors on the two modules' fields once every socket is
+			# known. Two modules without rooms have no cavities to open into.
+			if bounded and inner.has(child_id) and inner.has(host_id):
+				# Each field calibrated to the mesh the engine builds (F34): a tessellation
+				# sits inside its field by a constant, and the doors go on the tessellation.
+				(
+					door_entries
+					. append(
+						{
+							ShipDoors.ENTRY_SEAM: seam,
+							ShipDoors.ENTRY_INDENTER: indenter,
+							ShipDoors.ENTRY_CHILD_BODY:
+							ShipDoors.field_of(
+								cutters[_cutter_key(child_id, CUT_BODY)], outer[child_id]
+							),
+							ShipDoors.ENTRY_CHILD_ROOM:
+							ShipDoors.field_of(
+								cutters[_cutter_key(child_id, CUT_ROOM)], inner[child_id]
+							),
+							ShipDoors.ENTRY_HOST_BODY:
+							ShipDoors.field_of(
+								cutters[_cutter_key(host_id, CUT_BODY)], outer[host_id]
+							),
+							ShipDoors.ENTRY_HOST_ROOM:
+							ShipDoors.field_of(
+								cutters[_cutter_key(host_id, CUT_ROOM)], inner[host_id]
+							),
+						}
+					)
+				)
+
+	var members: Dictionary = {}
+	for id: String in placed:
+		var room: String = _room_root(room_of, id) if room_of.has(id) else id
+		var list: PackedStringArray = members.get(room, PackedStringArray())
+		list.append(id)
+		members[room] = list
+	var rooms: Array = []
+	var keys: PackedStringArray = PackedStringArray()
+	for room: Variant in members.keys():
+		keys.append(str(room))
+	keys.sort()
+	for room: String in keys:
+		var list: PackedStringArray = members[room]
+		list.sort()
+		rooms.append(list)
+
+	# THE SPLIT. "for any module .. need to get sliced down the middle in the explode group. (in
+	# manufacturing they are made in 2 pieces)" (2026-09-05). The plane through the part's own
+	# origin with its local Z as normal - so a tunnel or a hull comes apart lengthways, as a
+	# clamshell, and never across its bore.
+	var split: Dictionary = {}
+	for id: String in placed:
+		var xform: Transform3D = xforms[id]
+		var normal: Vector3 = xform.basis.z
+		if normal.length_squared() <= 1.0e-12:
+			normal = Vector3.FORWARD
+		split[id] = {"origin": xform.origin, "normal": normal.normalized()}
+
+	# THE DOORS (ADR 0029): one record per bounded seam both of whose modules have a cavity -
+	# its gasket plane, its collar halves, its clearing prisms and its bore, and the door leaves
+	# a view builds from it. A seam nothing can be bored for is PENDING: reported, not hidden.
+	var doors: Dictionary = ShipDoors.plan(door_entries, thickness, cfg.hatch_min_m, segments)
+	var door_list: Array = doors["doors"]
+
+	return {
+		"ids": placed,
+		"outer": outer,
+		"inner": inner,
+		"grown": grown,
+		"cutters": cutters,
+		"cuts": cuts,
+		"open_cuts": open_cuts,
+		"rooms": rooms,
+		"split": split,
+		"open_seams": open_seams,
+		"pending_seams": bounded_seams - door_list.size(),
+		"doors": door_list,
+		"door_misfits": doors["misfits"],
+		"hull_thickness_m": thickness,
+	}
+
+
+## Union-find over the open seams: [param a] and [param b] are in one room.
+static func _join_rooms(room_of: Dictionary, a: String, b: String) -> void:
+	var ra: String = _room_root(room_of, a)
+	var rb: String = _room_root(room_of, b)
+	if ra != rb:
+		room_of[ra] = rb
+
+
+static func _room_root(room_of: Dictionary, id: String) -> String:
+	if not room_of.has(id):
+		room_of[id] = id
+	var walk: String = id
+	var guard: int = 64
+	while str(room_of[walk]) != walk and guard > 0:
+		guard -= 1
+		walk = room_of[walk]
+	return walk
+
+
+## The bake report over [param solids] carried out from [param plan] - the same shape whichever
+## executor made them.
+static func report(solids: Dictionary, plan: Dictionary, t0: int) -> Dictionary:
+	var out: Dictionary = _empty(t0)
+	var inner: Dictionary = plan.get("inner", {})
+	var hollowed: int = 0
+	for id: String in plan.get("ids", PackedStringArray()):
+		if inner.has(id) and solids.has(id) and not (solids[id] as PolyMesh).is_empty():
+			hollowed += 1
 	var order: PackedStringArray = PackedStringArray()
 	for id: Variant in solids.keys():
 		order.append(id)
 	# Sorted, because determinism is a gate in this project and a Dictionary is not ordered by
-	# anything a caller can rely on (AGENTS §8b).
+	# anything a caller can rely on (AGENTS section 8b).
 	order.sort()
 
 	var meshes: Dictionary = {}
@@ -202,135 +448,189 @@ static func bake(
 	out["verts"] = verts
 	out["area_m2"] = area
 	out["parts_volume_m3"] = volume
-	out["hull_thickness_m"] = thickness
+	out["hull_thickness_m"] = float(plan.get("hull_thickness_m", 0.0))
 	out["hollowed_parts"] = hollowed
+	out["open_seams"] = int(plan.get("open_seams", 0))
+	out["pending_seams"] = int(plan.get("pending_seams", 0))
+	# The doors as planned (ADR 0029). Which pieces were actually bored is the executor's to
+	# say: the engine fills `bored`; the pure executor keeps its walls (FOLLOWUPS F41).
+	out["doors"] = plan.get("doors", [])
+	out["door_misfits"] = plan.get("door_misfits", [])
+	out["bored"] = PackedStringArray()
+	out["absorbed"] = PackedStringArray()
 	out["aabb"] = bounds
 	out["open_parts"] = open_parts
 	out["ms"] = Time.get_ticks_msec() - t0
 	return out
 
 
-## [param solids] with every seam of [param seams] resolved by its style, then tidied back into
-## n-gons.
+## One name for one surface of one part, in [method plan].
+static func _cutter_key(id: String, kind: String) -> String:
+	return id + "\u0001" + kind
+
+
+## Records that [param id]'s outer surface is cut by [param outer_cutter] and its inner surface by
+## [param inner_cutter]. The two are the same cutter for an open seam and body-then-grown for a
+## walled one, and [method _carve] reads the difference.
+static func _add_cut(cuts: Dictionary, id: String, outer_key: String, inner_key: String) -> void:
+	var list: Array = cuts.get(id, [])
+	list.append({"outer": outer_key, "inner": inner_key})
+	cuts[id] = list
+
+
+## One part's finished piece: its two surfaces, each less what any cutter took, plus the faces the
+## cutters left exposed, as one closed solid.
 ##
-## Order-independent by construction: every cut is taken against [param solids] as they arrived,
-## while the results accumulate separately. A part that is the child of one seam and the host of
-## another therefore gets both cuts, and gets the same two whichever seam is visited first.
-static func _apply_seams(
-	solids: Dictionary,
-	cutters: Dictionary,
-	seams: Array[Dictionary],
-	shapes: Dictionary,
-	xforms: Dictionary,
-	inset: float
-) -> Dictionary:
-	if solids.is_empty() or seams.is_empty():
-		return solids
-	var out: Dictionary = {}
-	for id: Variant in solids:
-		out[id] = solids[id]
-	var touched: Dictionary = {}
+## THE PIECE IS A SET, AND ITS BOUNDARY IS READ OFF THAT SET. With O the outer cutters and I the
+## inner ones (O_c inside I_c for every cut c):
+##   body B     = inside(outer) and outside every O_c
+##   cavity C   = inside(inner) and outside every I_c
+##   piece      = B and not C
+## so its boundary is (boundary of B, outside C) together with (boundary of C, inside B, turned
+## inside out). Boundary of B is the outer surface outside every O_c, plus each O_c's own surface
+## where it lies inside the outer and outside the other O's. Boundary of C is the inner surface
+## outside every I_c, plus each I_c's own surface where it lies inside the inner and outside the
+## other I's. Every term is a polygon list clipped by a distance function, and every clip commutes
+## with every other, so the order the seams arrive in cannot change the piece.
+##
+## Orientation: the outer surface and the I-surfaces face out of the piece as built; the inner
+## surface and the O-surfaces face into it and are turned round.
+##
+## Where two of these surfaces meet, each boundary was found by bisection on its own edges, and
+## they agree only to the sagitta of a segment; the assembled piece is welded and its T-junctions
+## repaired, and what is still open is reported by the caller rather than hidden.
+static func _carve(
+	outer: PolyMesh,
+	inner: PolyMesh,
+	own_body: MeshClip.Cutter,
+	own_room: MeshClip.Cutter,
+	cuts: Array
+) -> PolyMesh:
+	if cuts.is_empty():
+		if inner == null or inner.is_empty():
+			return outer
+		return _nest(outer, inner)
+	var hollow: bool = inner != null and not inner.is_empty() and own_room != null
 
-	for seam: Dictionary in seams:
-		var child_id: String = str(seam.get(ShipSeams.SEAM_CHILD, ""))
-		var host_id: String = str(seam.get(ShipSeams.SEAM_HOST, ""))
-		if not solids.has(child_id) or not solids.has(host_id):
-			continue
-		var frame: Transform3D = seam.get(ShipSeams.SEAM_FRAME, Transform3D.IDENTITY)
-		var normal: Vector3 = frame.basis.z.normalized()
-		if normal == Vector3.ZERO:
-			continue
-		var style: String = str(seam.get(ShipSeams.SEAM_STYLE, ShipSeams.STYLE_FLAT))
-
-		# TWO AXES, NOT SIX NAMES (ADR 0013): which solid indents the other, and what the linkage
-		# surface is. Both are read off the style id rather than the attach tree - a small part is
-		# perfectly able to be the parent of a large one, and which presses into which is a fact
-		# about the shapes.
-		var big_indents: bool = ShipJoint.indent_of(style) == ShipJoint.INDENT_BIG
-		var surface: String = ShipJoint.surface_of(style)
-
-		if surface == ShipJoint.SURFACE_NATIVE:
-			# NATIVE: no flattening. The interface is the indenting solid's real surface, which
-			# fits any shape exactly, so this is a plain subtraction the other way about.
-			var child_is_big: bool = (
-				(out[child_id] as PolyMesh).volume() >= (out[host_id] as PolyMesh).volume()
+	# Every surface that meets a cutter is gridded first, to the cell a lathe already has: see
+	# MeshClip.subdivided for why a cutter inside one big face is otherwise invisible. Gridded ONCE,
+	# and the same polygons serve both as the surface to clip and as the planes the other side's
+	# crossings snap onto, so the two sides of every seam agree by construction.
+	var cell: float = _cell_for(outer)
+	var my_outer: Array = MeshClip.subdivided(outer.polygons(), cell)
+	var my_inner: Array = []
+	if hollow:
+		my_inner = MeshClip.subdivided(inner.polygons(), cell)
+	var outers: Array = []
+	var inners: Array = []
+	var o_polys: Array = []
+	var i_polys: Array = []
+	for cut: Dictionary in cuts:
+		var o: MeshClip.Cutter = cut["outer"]
+		var i: MeshClip.Cutter = cut["inner"]
+		outers.append(o)
+		inners.append(i)
+		o_polys.append(
+			(
+				MeshClip.subdivided(o.surface.polygons(), _cell_for(o.surface))
+				if o.surface != null
+				else []
 			)
-			var big_id: String = child_id if child_is_big else host_id
-			var small_id: String = host_id if child_is_big else child_id
-			var loser: String = small_id if big_indents else big_id
-			var cutter: String = big_id if big_indents else small_id
-			if cutters.has(cutter):
-				out[loser] = _cut(out[loser], cutters[cutter])
-				touched[loser] = true
-		else:
-			# A FLAT linkage surface (ADR 0012). The plane comes from where the two surfaces
-			# actually cross, so the anchor frame is used only for the DIRECTION to measure along.
-			var child_shape: Variant = shapes.get(child_id)
-			var host_shape: Variant = shapes.get(host_id)
-			if not (child_shape is ResolvedShape) or not (host_shape is ResolvedShape):
-				continue
-			# The big indenting the small is the OUTERMOST crossing; the small indenting the
-			# big is the deepest. A CUTOFF takes the plane straight through the other solid; an
-			# INSERT lets in only the indenting solid's own cross-section.
-			var flanged: Dictionary = MeshFlange.resolve(
-				MeshFlange.Piece.make(out[child_id], child_shape, xforms[child_id]),
-				MeshFlange.Piece.make(out[host_id], host_shape, xforms[host_id]),
-				normal,
-				frame.origin,
-				big_indents,
-				surface == ShipJoint.SURFACE_FLAT_CUTOFF,
-				inset
+		)
+		i_polys.append(
+			(
+				MeshClip.subdivided(i.surface.polygons(), _cell_for(i.surface))
+				if i.surface != null and i != o
+				else o_polys[o_polys.size() - 1]
 			)
-			# An empty result means the two never cross, so there is no joint to flatten and
-			# both keep the shape they had.
-			if flanged.is_empty():
-				continue
-			out[child_id] = flanged["a"]
-			out[host_id] = flanged["b"]
-			touched[child_id] = true
-			touched[host_id] = true
+		)
 
-	assert(touched.size() >= 0)
-	return out
+	# What each side snaps onto: my outer onto every O-surface, my inner onto every I-surface, an
+	# O-surface onto my outer (and the other O's), an I-surface onto my inner (and the other I's).
+	var all_o: Array = []
+	var all_i: Array = []
+	for c: int in cuts.size():
+		all_o.append_array(o_polys[c])
+		all_i.append_array(i_polys[c])
+	var polys: Array = MeshClip.clip_all(
+		my_outer, MeshClip.outside_all(outers), MeshClip.PlaneFinder.make(all_o)
+	)
+	if hollow:
+		polys.append_array(
+			MeshClip.flipped(
+				MeshClip.clip_all(
+					my_inner, MeshClip.outside_all(inners), MeshClip.PlaneFinder.make(all_i)
+				)
+			)
+		)
+
+	for c: int in cuts.size():
+		var o: MeshClip.Cutter = cuts[c]["outer"]
+		var i: MeshClip.Cutter = cuts[c]["inner"]
+		var other_o: Array = []
+		var other_i: Array = []
+		var onto_o: Array = my_outer.duplicate()
+		var onto_i: Array = my_inner.duplicate()
+		for d: int in cuts.size():
+			if d != c:
+				other_o.append(cuts[d]["outer"])
+				other_i.append(cuts[d]["inner"])
+				onto_o.append_array(o_polys[d])
+				onto_i.append_array(i_polys[d])
+		# The O-surface: inside the outer, clear of the other O's, and not in the cavity - which
+		# it is unless it is outside the inner or strictly inside some I.
+		var not_in_cavity: Callable = MeshClip.everything()
+		if hollow:
+			not_in_cavity = MeshClip.either(
+				func(p: Vector3) -> float: return own_room.distance(p), MeshClip.strictly_inside(i)
+			)
+			for d: int in cuts.size():
+				not_in_cavity = MeshClip.either(
+					not_in_cavity, MeshClip.strictly_inside(cuts[d]["inner"])
+				)
+			onto_o.append_array(my_inner)
+		var keep_o: Callable = MeshClip.both(
+			MeshClip.both(MeshClip.inside(own_body), MeshClip.outside_all(other_o)), not_in_cavity
+		)
+		polys.append_array(
+			MeshClip.flipped(
+				MeshClip.clip_all(o_polys[c], keep_o, MeshClip.PlaneFinder.make(onto_o))
+			)
+		)
+		# The I-surface, only where it differs from the O: inside the inner, clear of the other I's.
+		if hollow and i != o and i.surface != null:
+			var keep_i: Callable = MeshClip.both(
+				MeshClip.inside(own_room), MeshClip.outside_all(other_i)
+			)
+			polys.append_array(
+				MeshClip.clip_all(i_polys[c], keep_i, MeshClip.PlaneFinder.make(onto_i))
+			)
+	if polys.is_empty():
+		return PolyMesh.new()
+	return MeshMerge.merge(PolyMesh.from_polygons(polys))
 
 
-## [param target] with [param cutter] taken out of it, or [param target] UNCHANGED when that
-## cannot be done without opening it.
+## The grid cell a surface is cut into before clipping: its longest extent over CLIP_CELLS, so a
+## box face is gridded to about what a lathe's polygons already are, and a lathe is left alone.
+static func _cell_for(mesh: PolyMesh) -> float:
+	var size: Vector3 = mesh.aabb().size
+	return maxf(maxf(size.x, maxf(size.y, size.z)) / float(CLIP_CELLS), 0.05)
+
+
+## A shell: [param outer] and [param inner] as ONE closed solid with a cavity - the outer surface
+## as it is and the inner surface turned inside out. Nothing is computed.
 ##
-## THE SAME RULE AS THE OUT-BUMP UNION, and for the same reason: a part can be the host of many
-## seams - a carbon nucleus carries nine children - and each cut is taken against the result of the
-## last. One failure that is kept feeds the next boolean a broken mesh, and the damage compounds
-## instead of staying put. Measured before this guard: `small_native` on a carbon class left the
-## nucleus centre open, because its four tunnels each subtract from the same root in turn.
+## THIS IS HOW A SHELL IS MADE, AND IT IS NOT A BOOLEAN. "if i had to make a shell... i would make
+## a copy of the part, downsize or upsize slightly, then sub one from the other" (2026-09-05) - and
+## the subtraction is the step that is not needed: the inner surface lies strictly inside the outer
+## by construction, so the two surfaces together already bound exactly the solid the subtraction
+## would produce. Blender's Solidify modifier is this operation.
 ##
-## Refusing costs a cut that does not happen - two parts overlap where they would have met flush -
-## which is a gap the author has allowed for, and is a far better answer than an open hull.
-static func _cut(target: PolyMesh, cutter: PolyMesh) -> PolyMesh:
-	var carved: PolyMesh = MeshCsg.subtract(target, cutter)
-	if carved.truncated:
-		return target
-	var tidied: PolyMesh = MeshMerge.merge(carved)
-	if tidied.open_edges() == 0:
-		return tidied
-	if carved.open_edges() == 0:
-		return carved
-	return target
-
-
-## One boolean result, tidied back into n-gons before anything else is done to it.
-##
-## MERGING AFTER EVERY OPERATION IS NOT AN OPTIMISATION, IT IS WHAT STOPS THE BAKE HANGING. A BSP
-## shreds both operands into fragments, and a hub is host to as many seams as it has branches - the
-## `argon` template has EIGHT on one box. Leaving the merge until the end means collar two is
-## unioned into the shredded result of collar one, collar three into the shredding of that, and the
-## face count compounds: measured, each of those unions costs 50 ms and its merge 100 ms on their
-## own, and the same sixteen seams left unmerged in between did not finish in sixteen MINUTES.
-##
-## Tidying between operations keeps every operand at the few dozen faces the shape actually has,
-## which is the size at which this is fast — and it is why the boolean cost stays proportional to
-## the number of seams rather than exploding with them.
-static func _tidy(mesh: PolyMesh) -> PolyMesh:
-	return MeshMerge.merge(mesh)
+## RETIRED(ADR 0019, 2026-09-05): `_cut(outer, inner)` through the BSP. On two concentric spheres of
+## one tessellation it returned 742 open edges and the wrong volume, the guard refused it, and the
+## module stayed SOLID - silently, on every sphere pod, for six rounds of "fixed".
+static func _nest(outer: PolyMesh, inner: PolyMesh) -> PolyMesh:
+	return PolyMesh.from_polygons(outer.polygons() + MeshClip.flipped(inner.polygons()))
 
 
 ## One part, tessellated and placed, or null when [param id] is not a placed part.
@@ -368,5 +668,8 @@ static func _empty(t0: int) -> Dictionary:
 		"parts_volume_m3": 0.0,
 		"aabb": AABB(),
 		"open_parts": PackedStringArray(),
+		"open_seams": 0,
+		"pending_seams": 0,
+		"absorbed": PackedStringArray(),
 		"ms": Time.get_ticks_msec() - t0,
 	}

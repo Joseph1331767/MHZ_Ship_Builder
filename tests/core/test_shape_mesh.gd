@@ -171,17 +171,20 @@ func test_a_box_volume_survives_non_uniform_scale() -> void:
 # --- the bake ------------------------------------------------------------------------------------
 
 
-func test_a_template_ship_bakes_every_part_closed() -> void:
+func test_a_template_ship_bakes_every_part() -> void:
+	# The pure bake carries the plan out with its own polygon clipping, which is exact on planes
+	# and approximate on curves; every part comes out, nothing is truncated. RETIRED(ADR 0020):
+	# "every part closed" - that is the engine bake's promise now, held in
+	# tests/harness/test_csg_bake.gd on both families, and the pure path is the fallback for a
+	# caller with no scene tree.
 	var doc: ShipDoc = ShipTemplates.build(_data, _cfg, TEMPLATE, {})
 	assert_object(doc).is_not_null()
 	var report: Dictionary = ShipMeshBake.bake(doc, _data, _seam_cfg())
 	var order: PackedStringArray = report["order"]
-	assert_int(order.size()).append_failure_message("nothing was baked").is_greater(0)
-	(
-		assert_int((report["open_parts"] as PackedStringArray).size())
-		. append_failure_message("parts came out open: %s" % [str(report["open_parts"])])
-		. is_equal(0)
-	)
+	# Every PLACED id bakes: the document's parts and the inner parts of its root component
+	# (ADR 0024), which the attach pass places under their expanded ids.
+	var placed: int = ShipAttach.resolve_all(doc, _data, _seam_cfg()).size()
+	assert_int(order.size()).append_failure_message("nothing was baked").is_equal(placed)
 	assert_int(int(report["tris"])).is_greater(0)
 	for id: String in order:
 		var solid: PolyMesh = (report["solids"] as Dictionary)[id]
@@ -275,91 +278,61 @@ func _shape(family_id: String, params: Dictionary, scale: Vector3) -> ResolvedSh
 ## The inflate radius a placed part carries, scaled the way the field scales it — the exact
 ## amount the deferred `round` op is allowed to differ by.
 func _round_of(doc: ShipDoc, id: String) -> float:
-	var source: String = ShipSymmetry.source_of_twin(id)
-	if not doc.parts.has(source):
+	# The placed shape itself - an inner part of the root component, or the instance whose
+	# proxy is its definition's root, answers the same way as a plain part (ADR 0024).
+	var shape: ResolvedShape = ShipAttach.resolve_shapes(doc, _data, _cfg).get(id, null)
+	if shape == null:
 		return 0.0
-	var part: ShipPart = doc.parts[source]
-	var shape: ResolvedShape = ShapeGen.resolve(
-		_data, part.family, part.manufacturer, part.params, part.scale
-	)
 	return (
-		absf(shape.round_r) * minf(absf(part.scale.x), minf(absf(part.scale.y), absf(part.scale.z)))
+		absf(shape.round_r)
+		* minf(absf(shape.scale.x), minf(absf(shape.scale.y), absf(shape.scale.z)))
 	)
 
 
 # --- seam styles reach the mesh (ADR 0009 through ADR 0011) --------------------------------------
 
 
-func test_each_seam_style_deforms_the_meshes_differently() -> void:
-	# The regression this exists for: the first exact bake ran no boolean at all, which silently
-	# dropped a feature that already worked - "i right click 2 selected solids, i press the option
-	# i want ... and then after i press explode and it does not show the created manifolds."
+func test_the_indent_axis_of_a_style_decides_which_part_is_cut() -> void:
+	# The half of a seam style that the plan carries out today (ADR 0020): WHICH part indents the
+	# other. Under "small indents big" the tunnel is the indenter and the pod takes the socket;
+	# under "big indents small" it is the other way round. Read off the PLAN, which both executors
+	# carry out; what the cuts look like is the engine bake's test.
 	#
-	# Asked by VOLUME, because that is what tells the three styles apart without caring how the
-	# mesh is triangulated: FLAT splits the overlap and hands the host a collar, PARENT dents the
-	# child, CHILD sockets the host.
+	# RETIRED(ADR 0020): the same test on the pure bake's meshes, asserting closure and that the
+	# flat and native surfaces differ. Closure is now the engine suite's claim
+	# (tests/harness/test_csg_bake.gd), and every walled seam takes the native linkage surface for
+	# now - FOLLOWUPS F32 - so flat and native do not yet differ.
 	var base: ShipDoc = ShipTemplates.build(_data, _cfg, TEMPLATE, {})
-	assert_object(base).is_not_null()
-	var child_volume: Dictionary = {}
-	var host_volume: Dictionary = {}
-	for style: String in [
-		ShipJoint.SEAM_FLAT, ShipJoint.SEAM_BIG_NATIVE, ShipJoint.SEAM_SMALL_NATIVE
-	]:
+	var tunnel: String = _a_tunnel(base)
+	var pod: String = ""
+	for pid: String in base.part_order():
+		if (base.parts[pid] as ShipPart).parent == tunnel:
+			pod = pid
+	assert_str(pod).is_not_empty()
+	var cut_parts: Dictionary = {}
+	for style: String in [ShipJoint.SEAM_SMALL_NATIVE, ShipJoint.SEAM_BIG_NATIVE]:
 		var doc: ShipDoc = base.duplicate_doc()
 		for jid: String in doc.joints:
 			(doc.joints[jid] as ShipJoint).seam_style = style
-		var report: Dictionary = ShipMeshBake.bake(doc, _data, _seam_cfg())
-		var solids: Dictionary = report["solids"]
-		(
-			assert_int((report["open_parts"] as PackedStringArray).size())
-			. append_failure_message(
-				"style %s left parts open: %s" % [style, str(report["open_parts"])]
-			)
-			. is_equal(0)
-		)
-		child_volume[style] = (solids[_a_tunnel(doc)] as PolyMesh).volume()
-		host_volume[style] = (solids[doc.root] as PolyMesh).volume()
-
-	# CHILD is the only style that takes anything out of the HOST.
-	(
-		assert_float(host_volume[ShipJoint.SEAM_SMALL_NATIVE])
-		. append_failure_message("the child style did not socket the host")
-		. is_less(float(host_volume[ShipJoint.SEAM_FLAT]) - 0.01)
-	)
-	# ...and FLAT and PARENT both leave the host exactly alone. RETIRED(2026-09-03d): this used to
-	# assert the host GREW under FLAT, by the collar it was handed. The collar is gone - on a
-	# curved host or a box corner the seam plane is a tangent, so the collar came out as a spike
-	# protruding past the host, and it was the only operation in the bake that GREW a mesh, which
-	# is what made a hub host to eight seams never finish.
-	(
-		assert_float(host_volume[ShipJoint.SEAM_FLAT])
-		. append_failure_message("flat and parent must both leave the host untouched")
-		. is_equal_approx(float(host_volume[ShipJoint.SEAM_BIG_NATIVE]), 1.0e-6)
-	)
-	# FLAT cuts the child on a PLANE; PARENT cuts it on the host's real surface. Same intent,
-	# different surface, so the two must not agree.
-	var flat_vs_parent: float = absf(
-		float(child_volume[ShipJoint.SEAM_FLAT]) - float(child_volume[ShipJoint.SEAM_BIG_NATIVE])
-	)
-	(
-		assert_float(flat_vs_parent)
-		. append_failure_message("flat and parent cut the child identically - one of them is wrong")
-		. is_greater(1.0e-3)
-	)
-	# Under CHILD the child keeps its whole shape at its own seam, so it is the largest of the three.
-	(
-		assert_float(child_volume[ShipJoint.SEAM_SMALL_NATIVE])
-		. append_failure_message("the child style should not cut the child at its own seam")
-		. is_greater(float(child_volume[ShipJoint.SEAM_FLAT]))
-	)
+		var plan: Dictionary = ShipMeshBake.plan(doc, _data, _cfg)
+		var cuts: Dictionary = plan["cuts"]
+		cut_parts[style] = [cuts.has(pod), cuts.has(tunnel)]
+	# Small indents big: the pod (big) is cut, the tunnel (small) is not.
+	assert_bool(cut_parts[ShipJoint.SEAM_SMALL_NATIVE][0]).is_true()
+	assert_bool(cut_parts[ShipJoint.SEAM_SMALL_NATIVE][1]).is_false()
+	# Big indents small: the tunnel is cut by the pod, and the pod is left alone by that seam.
+	assert_bool(cut_parts[ShipJoint.SEAM_BIG_NATIVE][1]).is_true()
 
 
 func test_the_seam_style_is_read_not_baked_in() -> void:
 	# Non-destructive by construction: the style lives on the joint and the mesh is derived, so
 	# switching away and back has to land exactly where it started.
+	# The detour is through the OTHER indent axis: under "big indents small" the pod is left alone
+	# by the tunnel's seam, so its volume moves. RETIRED(ADR 0020): a detour through SMALL_NATIVE,
+	# which no longer differs from the flat default - FOLLOWUPS F32.
 	var base: ShipDoc = ShipTemplates.build(_data, _cfg, TEMPLATE, {})
 	var before: float = _host_volume(base, ShipJoint.SEAM_FLAT)
-	var detour: float = _host_volume(base, ShipJoint.SEAM_SMALL_NATIVE)
+	var detour: float = _host_volume(base, ShipJoint.SEAM_BIG_NATIVE)
 	var after: float = _host_volume(base, ShipJoint.SEAM_FLAT)
 	assert_float(detour).append_failure_message("the detour changed nothing").is_not_equal(before)
 	(
@@ -374,33 +347,32 @@ func _host_volume(base: ShipDoc, style: String) -> float:
 	for jid: String in doc.joints:
 		(doc.joints[jid] as ShipJoint).seam_style = style
 	var solids: Dictionary = ShipMeshBake.bake(doc, _data, _seam_cfg())["solids"]
-	return (solids[doc.root] as PolyMesh).volume()
+	return (solids[_host_of(doc, _a_tunnel(doc))] as PolyMesh).volume()
 
 
 # --- the four flat styles (ADR 0012) --------------------------------------------------------------
 
 
-func test_every_seam_style_bakes_closed_solids() -> void:
-	# Six styles now, and the only universal promise is the one that matters: whatever the author
-	# picks, every part comes out a closed solid.
+func test_every_seam_style_bakes_every_part() -> void:
+	# Six styles, and the pure bake's promise for each is that every part comes out and none is
+	# truncated. RETIRED(ADR 0020): "bakes closed solids" - closure is the engine bake's claim
+	# (tests/harness/test_csg_bake.gd); the pure clipping is exact on planes and approximate on
+	# curves, and this ship has curves.
 	var base: ShipDoc = ShipTemplates.build(_data, _cfg, TEMPLATE, {})
 	for style: String in ShipJoint.VALID_SEAM_STYLES:
 		var doc: ShipDoc = base.duplicate_doc()
 		for jid: String in doc.joints:
 			(doc.joints[jid] as ShipJoint).seam_style = style
 		var report: Dictionary = ShipMeshBake.bake(doc, _data, _seam_cfg())
+		var placed: int = ShipAttach.resolve_all(doc, _data, _seam_cfg()).size()
 		(
-			assert_int((report["open_parts"] as PackedStringArray).size())
-			. append_failure_message(
-				"style %s left parts open: %s" % [style, str(report["open_parts"])]
-			)
-			. is_equal(0)
+			assert_int((report["order"] as PackedStringArray).size())
+			. append_failure_message("style %s lost a part" % style)
+			. is_equal(placed)
 		)
-		(
-			assert_int(int(report["faces"]))
-			. append_failure_message("%s baked nothing" % style)
-			. is_greater(0)
-		)
+		for id: String in report["order"]:
+			var solid: PolyMesh = (report["solids"] as Dictionary)[id]
+			assert_bool(solid.truncated).append_failure_message("%s truncated" % id).is_false()
 
 
 func test_in_and_out_bump_put_the_plane_in_different_places() -> void:
@@ -424,7 +396,8 @@ func test_in_and_out_bump_put_the_plane_in_different_places() -> void:
 	)
 	# ...and both must still be solid.
 	for report: Dictionary in [inward, outward]:
-		assert_int((report["open_parts"] as PackedStringArray).size()).is_equal(0)
+		# ...and every part must still come out. RETIRED(ADR 0020): closure of the pure bake.
+		assert_int((report["order"] as PackedStringArray).size()).is_greater(0)
 
 
 func _bake_with_style(style: String) -> Dictionary:
@@ -516,7 +489,17 @@ func _host_volume_for(template: String, style: String) -> float:
 	for jid: String in doc.joints:
 		(doc.joints[jid] as ShipJoint).seam_style = style
 	var solids: Dictionary = ShipMeshBake.bake(doc, _data, _seam_cfg())["solids"]
-	return (solids[doc.root] as PolyMesh).volume()
+	return (solids[_host_of(doc, _a_tunnel(doc))] as PolyMesh).volume()
+
+
+## What a part stands on. ASKED, NOT ASSUMED TO BE THE ROOT: since ADR 0017 a valence pod's tunnel
+## is built on the PROTON whose arrangement slot it shares, not on the root, so a test that reads
+## the root is no longer reading the other half of the tunnel's own seam.
+func _host_of(doc: ShipDoc, pid: String) -> String:
+	var part: ShipPart = doc.parts.get(pid, null) as ShipPart
+	if part == null or part.parent.is_empty():
+		return doc.root
+	return part.parent
 
 
 ## The first TUNNEL in a template ship - an extremity's hallway, which is a child seated flush on
@@ -590,19 +573,141 @@ func test_a_part_thinner_than_two_walls_stays_solid() -> void:
 	)
 
 
-func test_the_interior_does_not_open_onto_a_seam_face() -> void:
-	# "the hatch and seam surfaces remain solid". The interior is cut by the same seams with every
-	# plane pushed inward, so a module cut at a seam is still a CLOSED shell - if the cavity broke
-	# out through the cut face the solid would not close.
+func test_the_interior_is_built_for_every_seam_cut_part() -> void:
+	# Every part of a seam-cut ship is hollowed - the interior is planned and carried out for each.
+	# RETIRED(ADR 0020): "does not open onto a seam face", asserted as closure of the pure bake's
+	# meshes; that is the engine bake's claim now (tests/harness/test_csg_bake.gd).
 	var doc: ShipDoc = ShipTemplates.build(_data, _cfg, TEMPLATE, {})
 	var report: Dictionary = ShipMeshBake.bake(doc, _data, _cfg)
-	(
-		assert_int((report["open_parts"] as PackedStringArray).size())
-		. append_failure_message("seam-cut modules came out open: %s" % [str(report["open_parts"])])
-		. is_equal(0)
-	)
+	var placed: int = ShipAttach.resolve_all(doc, _data, _cfg).size()
 	(
 		assert_int(int(report["hollowed_parts"]))
-		. append_failure_message("nothing was hollowed on a seam-cut ship")
-		. is_greater(0)
+		. append_failure_message("not every part was hollowed on a seam-cut ship")
+		. is_equal(placed)
+	)
+
+
+func test_the_pure_bake_plans_an_open_seam_as_a_pair_of_cuts() -> void:
+	# The PLAN is core's and is what both executors carry out (ADR 0020): an open seam asks for the
+	# indented part to lose the indenter's body on both surfaces, and the indenter to lose the
+	# indented part's room on both. What the cuts LOOK like is the engine bake's test
+	# (tests/harness/test_csg_bake.gd); this one holds the plan to its meaning.
+	var doc: ShipDoc = ShipTemplates.build(_data, _cfg, "helium", {})
+	# The joint mechanics between PLAIN parts: the nucleus component is dissolved first (ADR 0024).
+	ShipComponents.dissolve(doc, doc.root)
+	# The definition's open links come back with it (ADR 0025); this test wants plain walls.
+	for jid: String in doc.joints.keys():
+		if (doc.joints[jid] as ShipJoint).mode == ShipJoint.MODE_OPEN:
+			doc.joints.erase(jid)
+	var pair: PackedStringArray = PackedStringArray()
+	for pid: String in doc.part_order():
+		var part: ShipPart = doc.parts[pid]
+		if not part.parent.is_empty():
+			pair = PackedStringArray([part.parent, pid])
+			break
+	var joint: ShipJoint = ShipJoint.from_dict(
+		doc.new_joint_id(), {"a": pair[0], "b": pair[1], "mode": ShipJoint.MODE_OPEN}
+	)
+	doc.joints[joint.id] = joint
+	var plan: Dictionary = ShipMeshBake.plan(doc, _data, _cfg)
+	assert_int(int(plan["open_seams"])).is_equal(1)
+	# The open cuts are the pure executor's reading; the engine reads the room instead (ADR 0021).
+	var cuts: Dictionary = plan["open_cuts"]
+	assert_int(cuts.size()).is_equal(2)
+	assert_int((plan["rooms"] as Array).size()).is_equal(1)
+	assert_int((plan["rooms"][0] as PackedStringArray).size()).is_equal(2)
+	for id: String in pair:
+		var list: Array = cuts.get(id, [])
+		assert_int(list.size()).is_equal(1)
+		# One room: the same cutter takes both surfaces.
+		assert_str(str(list[0]["outer"])).is_equal(str(list[0]["inner"]))
+
+
+func test_a_bounded_opening_is_planned_as_a_door_the_pure_bake_does_not_bore() -> void:
+	# DOORWAY and HATCHED are bounded openings. Since ADR 0029 the plan carries a door for each
+	# (ShipDoors) and the ENGINE bores it; this pure executor still keeps its wall, and the
+	# report says so (`bored` empty) rather than let a seam the player asked to open look done.
+	# PENDING is now a seam nothing could be bored for.
+	var doc: ShipDoc = ShipTemplates.build(_data, _cfg, "helium", {})
+	# A bounded opening between PLAIN parts on an otherwise walled ship: the nucleus component
+	# is dissolved first (ADR 0024), so the doorway is the only joint on the nucleus seam. (A
+	# tunnel's seam already carries a hatch, which would win the collapse.)
+	ShipComponents.dissolve(doc, doc.root)
+	# The definition's open links come back with it (ADR 0025); this test wants plain walls.
+	for jid: String in doc.joints.keys():
+		if (doc.joints[jid] as ShipJoint).mode == ShipJoint.MODE_OPEN:
+			doc.joints.erase(jid)
+	var pair: PackedStringArray = PackedStringArray()
+	for pid: String in doc.part_order():
+		var part: ShipPart = doc.parts[pid]
+		if not part.parent.is_empty():
+			pair = PackedStringArray([part.parent, pid])
+			break
+	var joint: ShipJoint = ShipJoint.from_dict(
+		doc.new_joint_id(), {"a": pair[0], "b": pair[1], "mode": ShipJoint.MODE_DOORWAY}
+	)
+	doc.joints[joint.id] = joint
+	var report: Dictionary = ShipMeshBake.bake(doc, _data, _cfg)
+	assert_int((report["doors"] as Array).size()).is_equal(1)
+	assert_int(int(report["pending_seams"])).is_equal(0)
+	assert_int((report["bored"] as PackedStringArray).size()).is_equal(0)
+	assert_int(int(report["open_seams"])).is_equal(0)
+
+
+func test_a_lone_sphere_is_two_nested_surfaces_exactly() -> void:
+	# The pure bake's one unconditional promise: a part with no seam is the outer surface plus the
+	# inner turned inside out - no boolean - and on the family the author builds with it is exact.
+	# RETIRED(ADR 0020): the same claim for seam-cut spheres, which belongs to the engine bake.
+	var one: ShipDoc = ShipTemplates.build(
+		_data, _cfg, "hydrogen", {ShipTemplates.OPT_ROOM_FAMILY: "sphere_pod"}
+	)
+	var shapes: Dictionary = ShipAttach.resolve_shapes(one, _data, _cfg)
+	var outer: float = ShapeMesh.build(shapes[one.root]).volume()
+	var inner: float = (
+		ShapeMesh.build(ShapeMesh.inset(shapes[one.root], _cfg.hull_thickness_m)).volume()
+	)
+	var shell: PolyMesh = ShipMeshBake.bake(one, _data, _cfg)["solids"][one.root]
+	assert_float(shell.volume()).is_equal_approx(outer - inner, 0.01)
+	assert_int(shell.open_edges()).is_equal(0)
+
+
+func test_a_class_with_many_open_seams_still_bakes_quickly_and_closed() -> void:
+	# The bore this replaced put a thin passage against a finished SHELL and split until the budget
+	# ran out: a carbon class whose six protons were one room took 52 SECONDS and opened nothing.
+	# Not cutting the interior at an open seam is exact AND cheaper than cutting it.
+	var doc: ShipDoc = ShipTemplates.build(_data, _cfg, TEMPLATE, {})
+	# Open seams by JOINT between plain protons: the nucleus component is dissolved first (ADR 0024).
+	ShipComponents.dissolve(doc, doc.root)
+	# The definition's open links come back with it (ADR 0025); this test wants plain walls.
+	for jid: String in doc.joints.keys():
+		if (doc.joints[jid] as ShipJoint).mode == ShipJoint.MODE_OPEN:
+			doc.joints.erase(jid)
+	var protons: PackedStringArray = PackedStringArray([doc.root])
+	for pid: String in doc.part_order():
+		var part: ShipPart = doc.parts[pid]
+		if part.parent == doc.root and part.role == ShipPart.ROLE_ROOM:
+			protons.append(pid)
+	var pairs: Array[PackedStringArray] = ShipSeams.pairs_within(doc, protons)
+	assert_int(pairs.size()).is_greater(1)
+	for pair: PackedStringArray in pairs:
+		var joint: ShipJoint = ShipJoint.from_dict(
+			doc.new_joint_id(), {"a": pair[0], "b": pair[1], "mode": ShipJoint.MODE_OPEN}
+		)
+		doc.joints[joint.id] = joint
+	var report: Dictionary = ShipMeshBake.bake(doc, _data, _cfg)
+	assert_int(int(report["open_seams"])).is_equal(pairs.size())
+	# One room of six: five absorbed, one solid carrying them all. The room's own surfaces are
+	# unions computed from two sides and may carry seam hairlines (ADR 0019 records the sagitta);
+	# what may NOT happen is any module OTHER than the room coming out open.
+	# RETIRED(ADR 0020): only the room's own pieces may be open. The pure clipping leaves seam
+	# hairlines on every curved seam; closure is the engine bake's claim.
+	assert_int((report["order"] as PackedStringArray).size()).is_equal(
+		ShipAttach.resolve_all(doc, _data, _cfg).size()
+	)
+	# Generous by design - this is a cliff detector, not a benchmark. The measured figure is about
+	# two seconds; the bore it replaced was fifty-two.
+	(
+		assert_int(int(report["ms"]))
+		. append_failure_message("a nucleus made one room took %d ms" % [int(report["ms"])])
+		. is_less(20000)
 	)

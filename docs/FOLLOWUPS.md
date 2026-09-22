@@ -850,3 +850,549 @@ ADR 0015.
    reads the shipped defaults on purpose.
 5. **Hatch and doorway openings are still not cut**, so a module is a sealed shell. That is the
    next piece of work, and it is what the interior was built for.
+
+
+## F28 — Additive contract extensions of 2026-09-04d: LINK over a selection — OPEN, DELIBERATE
+
+ADR 0016.
+
+- **`ShipSeams.pairs_within(doc, ids)`** and **`ShipSeams.shared_mode(doc, pairs)`** (new, static,
+  public). Which seams a selection contains, and what they currently are.
+- **`ShipSeams.EXPLODE_RELAX_PASSES`** (new const) and `explode_offsets()` now separates SIBLINGS
+  as well as clearing each module from its host. Same signature.
+- **`ShipBuilder.cycle_link()` CHANGED SHAPE**: `(a: String, b: String)` -> `(ids:
+  PackedStringArray)`. Not in `API_CONTRACT.md`; recorded in F-notes only, and the public-method
+  count is unchanged at 30 (gdlint's cap).
+- **`ShipMeshBake.bake()` report** gains `open_seams` and `pending_seams`.
+- **REMOVED from `PartTreePanel`**: `_on_make_room`, `_make_room_named`, `_make_room_joined`,
+  `_room_suggestion`, `_instance_of_definition`, and the MAKE ROOM button. LINK does the joining;
+  the tree row does the naming.
+- **REMOVED from `ship_visual_check.gd`**: `_rooms_name_one`, `_rooms_join_three`; added
+  `_rooms_link_group` and `_sink_until_meeting`.
+
+**No hash moves.** Measured: `5536787c6c35d236` either side.
+
+**Known limits, recorded rather than hidden.**
+
+1. **Fused modules were never walled from each other.** Of argon's 23 seams, 14 are between nucleus
+   bodies whose interiors already interpenetrate by 97-159 m3 - `FUSE_OVERLAP` is 0.34 of the span
+   - so LINK OPEN correctly does nothing to them. ADR 0015's "a module is a sealed shell" holds
+   PER MODULE (every one closes) but not BETWEEN two fused ones. This belongs with the hatch work.
+2. **One seam in one class is a genuine miss**: lithium's tunnel-to-nucleus joint. Its plates come
+   to 0.2 and 1.1 m3 and lie outside both shells - the interiors barely reach each other, the same
+   marginal case the ADR 0015 tuning triple was built around.
+3. **DOORWAY and HATCHED still resolve as WALL.** Reported as `pending_seams` rather than silently
+   treated as done. Cutting a bounded opening and welding its frame is the next piece of work.
+4. **`ShipComponents` still drops joints internal to a lift**, which walls them. MAKE COMP is the
+   only caller now, and a component definition has nowhere to keep a joint (`{label, root, parts}`
+   - adding one is a schema change and a ruleset bump). Making a room no longer goes through it.
+5. **The bake roughly doubles again when everything is open**: an argon class 7.6 s -> 13.5 s. A
+   ship with no open seam pays nothing - the extra surfaces are built only when one exists.
+
+
+## F29 — Additive contract extensions of 2026-09-04e: the nucleus layout — OPEN, DELIBERATE
+
+ADR 0017.
+
+- **`ShipTemplates.root_slot(dirs)`** (new, static, public) and `_layout(data, element)` (private,
+  the one place the whole arrangement is worked out). `nucleus_dirs()` and `extremity_dirs()` keep
+  their signatures and are now views onto it.
+- **`ShipMeshBake._apply_seams()`** gained a trailing `keep_open: bool`; `_pierce()` is new. The
+  ADR 0016 bore - `_open_seams`, `_wall_between`, `_slab`, `seam_key` - is GONE.
+- **`MeshFlange._footprint_cutter()`** gained a trailing optional `drop`.
+- **`ShipSeams._descends_from()`** (private) - the explode relaxation's chain rule.
+
+**No hash moves.** Measured: `5536787c6c35d236` either side. Template CONTENT does move - every
+class above helium is laid out differently - but a template is a factory for documents, not a
+document, and nothing about how one is read or hashed changed.
+
+**Known limits, recorded rather than hidden.**
+
+1. **DOORWAY and HATCHED still resolve as WALL**, reported as `pending_seams`. Cutting a bounded
+   opening and welding its frame is the next piece of work, and it is now the only piece left
+   between here and a hull a crew could walk through.
+2. **A tunnel is still too thin to hollow at some sizes.** Argon now hollows 24 of 24 where ADR
+   0015 measured 20 of 24, but the rule has not changed: a part thinner than two walls stays solid,
+   and a seam between two such parts cannot be opened. It is reported, not silently skipped.
+3. **`_apply_seams` is not order-independent for the FLAT styles**, whatever its docstring says: it
+   flanges against `out[...]`, the accumulating result, not against `solids` as they arrived. On a
+   nucleus where several bodies are the same size this decides which of a pair gets cut, and the
+   answer depends on seam order. It has always been so; ADR 0017 did not introduce it and does not
+   fix it. Worth a look before the hatch work leans on it.
+4. **The arrangement for a given count is chosen by NAME order among equals.** Four slots resolves
+   to `square` rather than `tetrahedral` because "s" sorts first. Deterministic, and arbitrary.
+5. **Bake cost, measured across all 22 classes**: outer only 0-525 ms, shelled 13 ms - 3.9 s
+   (`molecule:hydrogen_peroxide` is the slowest, argon 3.0 s). Every one closes.
+
+
+## F30 — Additive contract extensions of 2026-09-04f: native open seams — OPEN, DELIBERATE
+
+ADR 0018.
+
+- **`MeshFlange.first_is_larger(a, b)`** (new, static, public) and **`MeshFlange.TIE_REL`**. The one
+  tie rule; the flange, the native branch and the pierce all use it.
+- **`ShipTemplates._hang_direction()`** (private). `nucleus_dirs()` unchanged in signature; a
+  carbon rim now hangs 30 degrees below level, not 45.
+- **`ShipMeshBake._pierce()`** re-shaped: `(solids, seams, shapes, xforms, thickness, segments)`,
+  resolves every overlapping pair within a room (union-find over the open seams), natively and
+  asymmetrically. `_join_rooms`, `_room_root`, `_pair_key` (private) are new.
+  **`ShipMeshBake.OPEN_SEAM_CLEARANCE_M`** (new const, held at 0 - see below).
+- **`ShipMeshBake._apply_seams()`** now skips an OPEN seam in BOTH passes.
+
+**No hash moves.** Measured: `5536787c6c35d236` either side.
+
+**Known limits, recorded rather than hidden.**
+
+1. **Two of a carbon nucleus's sibling cuts are refused.** Same-size boxes centred on each other's
+   faces put faces on exactly the same planes, and once a target carries faces from an earlier cut
+   on those planes the BSP's coplanar path fails the guard. Measured: in isolation every cut is
+   right; accumulated, two of six rim protons keep their skin standing (30 m3) in the room beside
+   them. **Robust coplanar handling in `MeshCsg` is the next piece of work**, and the only thing
+   left between this and a nucleus that comes out entirely right.
+2. **A clearance does not help; both directions were measured.** 1 mm and 1 cm (body grown, room
+   shrunk) put the cutter near-coplanar and the bake did not finish in 400 s; the other way leaves
+   a sliver the merge welds open. `OPEN_SEAM_CLEARANCE_M` is held at 0 and kept as the knob.
+3. **`MeshCsg.intersect` can return more than one of its operands** on a heavily carved shell (252
+   m3 from a 37 m3 solid with zero open edges). The probe flags it; the intrusion metric is not
+   to be read on such a shell. Same root as limit 1.
+4. **Sibling overlaps on a WALLED nucleus are still unresolved** - the attach tree has no seam
+   between them, and joints are only over pairs the player links. ADR 0017 limit, unchanged.
+5. **DOORWAY and HATCHED still resolve as WALL**, reported as `pending_seams`.
+
+
+## F31 — Additive contract extensions of 2026-09-05: nested shells and surface unions — OPEN, DELIBERATE
+
+ADR 0019.
+
+- **`ShapeMesh.build()`** gained a trailing optional `phase`; `_base_mesh` and `_lathe` carry it.
+- **`ShipMeshBake`**: `_nest()`, `_room_surface()`, `_clip_outside()`, `_zero_crossing()` are new
+  (private); `PHASE_STRIDE` is a new const. GONE: `_pierce`, `_pair_key`, `OPEN_SEAM_CLEARANCE_M`,
+  and the `_cut(outer, inner)` hollowing. The report gains **`absorbed: PackedStringArray`**.
+- **`ShipExplodeView._bake_module`**: a solid that is present but EMPTY draws nothing (an absorbed
+  room member); only a part absent from the solids falls back to the field.
+- Tests: two per-part open-seam tests replaced by a room test and a sphere-shell test that builds
+  every class on `sphere_pod`. Suite still 275.
+
+**No hash moves.** Measured: `5536787c6c35d236` either side.
+
+**Known limits, recorded rather than hidden.**
+
+1. **A room's seams are hairlines that do not close.** Each side of a two-member seam is bisected on
+   its own edges, so the two boundaries agree only to a segment's sagitta - about 6 cm on a 9 m
+   sphere at 24 segments. Carbon's six-proton room reports 464 open edges; it renders as a faint
+   lip. Stitching both sides to one shared curve (insert each side's crossing points into the
+   other's boundary, then T-junction repair) is the next piece of work.
+2. **A room does not resolve its WALLED seams to the outside differently from a part**: each member
+   is seam-cut as a part before the union, which is right for flat cuts and untested for the native
+   styles on a room.
+3. **The BSP is still used** for the flat footprint and the native walled styles. Same-axis lathes
+   no longer share planes (the phase), which removes its worst case, not its brittleness.
+4. **`MeshCsg.intersect` is unreliable on a heavily carved shell** (F30 limit 3, unchanged); probes
+   flag it rather than read it.
+5. **Every probe before this one measured boxes.** `ShipTemplates.build(..., {})` is a box; the
+   author builds with `sphere_pod`. Recorded in memory so it does not happen again.
+
+
+## F32 — Additive contract extensions of 2026-09-05b: the engine does the booleans — OPEN, DELIBERATE
+
+ADR 0020.
+
+- **`ShipCsgBake`** (new class, `harness/builder/ship_csg_bake.gd`, static): `bake(host, doc, data,
+  cfg)` is a coroutine - callers `await` it - and returns the same report as `ShipMeshBake.bake`.
+  `READ_WELD_M`, `READY_FRAMES`.
+- **`ShipMeshBake.plan()`** and **`ShipMeshBake.report()`** (new, static, public); `bake()` is now
+  `plan` + `_carve` + `report`. `CUT_BODY`, `CUT_ROOM`, `CUT_GROWN` name a part's cutters.
+- **`MeshClip`** (new class, `core/mesh/mesh_clip.gd`): `Cutter`, `PlaneFinder`, `clip`,
+  `clip_all`, `subdivided`, `seam_split`, `take` and the field combinators. The pure executor's
+  primitive; `seam_split` is kept for the record and is NOT on the bake path.
+- **`ShipBuilder._explode_baking`** (private var); `_set_exploded` is a coroutine. The visual check
+  waits on the flag.
+- **`ShipTemplates._local_direction()`** (private); a pod node carries `"world": true`.
+- **`ShipConfig.hull_thickness_m`** default 0.20 -> **0.10**.
+- **RETIRED**: `ShipMeshBake._pierce`, `_room_surface`, `_fuse`, `_open_seams`, `_cut`, `_tidy`,
+  `_apply_seams`, `OPEN_SEAM_CLEARANCE_M`; the report's `absorbed` is always empty now.
+- Tests: `tests/harness/test_csg_bake.gd` (new, 3 tests, builds on `sphere_pod` AND `box_hull`);
+  five `test_shape_mesh` tests re-scoped to what the pure path promises. Suite **278/278**.
+
+**No hash moves.** Measured: `5536787c6c35d236` either side.
+
+**Known limits, recorded rather than hidden.**
+
+1. **Flat and native styles are one surface for now.** Every walled seam takes the native socket.
+   The plane cut (a box beyond the plane) and the footprint prism (the flange builds it already)
+   are straightforward CSG operands; the plan needs to name them as cutters. Next piece of work.
+2. **The engine bake is asynchronous** and needs a scene tree. Headless tools that want the exact
+   meshes must run as a SceneTree script and await frames; `tools/ship_selfcheck.gd` and the data
+   validator do not need it. The pure `ShipMeshBake.bake()` is the tree-less fallback and is
+   approximate on curved seams (open edges on every seam-cut sphere piece).
+3. **Merging the engine's triangles into n-gons can tear an edge**; such a piece is drawn as its
+   triangles (its wireframe shows them). Cosmetic; the solid is closed.
+4. **Argon-sized ships bake in about 4 s** on spheres; the walk over 24 parts is per-part combiners
+   with no sharing. Fine for EXPLODE; not for anything per frame.
+5. **`MeshClip.seam_split`** does not yet make the two sides agree either (sockets 0 of 4 on the
+   pure path with it on); kept off the path, kept in the file for the record.
+
+
+## F33 — Additive contract extensions of 2026-09-05c: rooms built whole — OPEN, DELIBERATE
+
+ADR 0021.
+
+- **`ShipMeshBake.plan()`** gains `rooms: Array[PackedStringArray]` (every part in exactly one,
+  members sorted) and `open_cuts` (the per-part reading of open seams, for the pure executor);
+  `cuts` is now the WALLED seams only. `_join_rooms`, `_room_root` (private) return.
+- **`ShipCsgBake.bake()`** is two engine passes: room shells, then pieces; `_less_cuts`,
+  `_engine_mesh`, `_add_engine_mesh`, `_until_ready`, `_read_combiner` (private).
+- Tests: `test_no_room_piece_keeps_hull_inside_another_member` (engine-measured, both families).
+  Suite **279/279**.
+
+**No hash moves.** Measured: `5536787c6c35d236` either side.
+
+**Known limits.** F32's stand: flat and native styles are still one surface; the pure executor
+still reads open seams per part and is approximate on curves. Bake time for a sphere nucleus made
+one room is about 4.7 s (two passes); fine for EXPLODE.
+
+
+## F34 — Additive contract extensions of 2026-09-05d: halves, rooms whole, the interior view — OPEN, DELIBERATE
+
+ADR 0022.
+
+- **`ShipMeshBake.plan()`** gains `split: {id: {"origin", "normal"}}`.
+- **`PolyMesh.to_array_mesh_grouped(group_of, names)`** (new, public): named surfaces.
+- **`ShipCsgBake`**: a third pass; the report gains `halves`, `half_meshes`, `split`, `rooms`,
+  `room_shells`, `room_meshes`, `room_half_meshes`, and `meshes` now carries three named surfaces
+  (`SURFACE_EXTERIOR`, `SURFACE_INTERIOR`, `SURFACE_CUT`). `ON_SURFACE_M`, `CALIBRATION_SAMPLES`.
+- **`ShipSceneBuilder.DisplayMode.INSIDE`** and **`inside_materials(selected)`** (new, public).
+- **`ShipExplodeView`**: `Module` holds `solids`/`wires`/`bodies` (halves) with `solid`/`wire`/
+  `body` as the first of each; `set_rooms_whole(on)`; `show_modules` accepts the whole report;
+  `module_nodes()` returns every half. `HALF_GAP_FRACTION`.
+- **`ShipView3D.set_rooms_whole(on)`** (new, public). **`ShipBuilder`**: `ROOMS: PIECES/WHOLE`
+  button, `INTERIOR` in the mode dropdown (private handlers; the public count stays at the cap).
+- Tests: `test_every_piece_is_sliced_into_two_closed_halves`,
+  `test_every_drawn_mesh_names_its_exterior_and_interior`. Suite **281/281**.
+
+**No hash moves.** Measured: `5536787c6c35d236` either side.
+
+**Known limits, recorded rather than hidden.**
+
+1. **The box tessellation sits inside its own distance field by the fillet**: `ShapeMesh` builds
+   the box at `size - round_r`, the field is the rounded envelope, and every point of the mesh
+   reads a constant `-round_r * scale` (-0.200 m on a carbon box). The classifier calibrates to it;
+   nothing else has noticed yet because nothing else compared a box mesh to its field at a
+   millimetre. Building the fillet, or building the sharp box at `size`, is the honest fix.
+2. **The third pass roughly doubles a bake** (carbon: 9 s / 12 s on spheres). Fine for EXPLODE.
+3. **The assembled preview cannot separate interior from exterior** - its parts are one surface -
+   so INTERIOR there is the exterior's two passes only. Use it exploded.
+4. **A room shown WHOLE keeps only its first member's pick body**; clicking it selects that part.
+5. F32/F33 stand: flat and native styles are one surface; the pure executor is approximate.
+
+
+## F35 — Additive contract extensions of 2026-09-06: the baked view, its update, the ghost — OPEN, DELIBERATE
+
+ADR 0023.
+
+- **`ShipTemplates.build`** now emits an open joint per meeting pair of nucleus bodies
+  (`_open_nucleus`). A template's `joints` are no longer empty on a multi-body nucleus.
+- **`ShipCsgBake.bake(host, doc, data, cfg, progress: Callable = Callable())`** — a trailing
+  optional; `progress.call(fraction, label)` at each pass. `_tick`.
+- **`ShipExplodeView.show_modules(..., assembled: bool = false)`**, `is_assembled()`.
+- **`ShipView3D.set_baked(on, sdf, selected, report)`**, `is_baked()`, `set_meshes_stale(on)`,
+  `get_ghost_view()` (public count 24 of 30).
+- **`ShipGhostView`** (new, `harness/builder/ship_ghost_view.gd`) and
+  **`shaders/ship_ghost.gdshader`** (new): `show_doc`, `set_ghosting`, `set_color`, `part_count`,
+  `fade`; `MAX_PARTS = 32`.
+- **`ShipBuilder`**: `UPDATE MESHES` button, `AUTO` toggle, `BakeProgress` bar in the status row;
+  private `_update_meshes` (coroutine), `_show_bake`, `_set_baked`, `_mark_meshes_stale`,
+  `_drop_bake`, `_schedule_update`, `_on_update_pressed`, `_on_auto_toggled`,
+  `_on_bake_progress`, `_refresh_update_button`, `_show_progress`, `_hide_progress`;
+  `_set_exploded(false)` lands in the baked view. Read-backs: `_baked`, `_meshes_stale`,
+  `_auto_update`, `_last_bake`. The file is at 1923 of 2000 lines.
+- **`ShipCheckViews.failures()`, `module_count(doc)`, `check_update_finish(...)`,
+  `check_ghost_up(vp, path)`**; the visual check gains an UPDATE MESHES stage and turns AUTO off
+  at setup (the mode captures assert about the primitives).
+- Tests: `test_the_nucleus_is_one_open_room_by_default`,
+  `test_the_bake_reports_progress_in_order`. Suite **281/281**.
+
+**No hash moves.** Measured: `5536787c6c35d236` either side.
+
+**Known limits, recorded rather than hidden.**
+
+1. **The ghost knows no walls, no hatches, no seam styles** — it is the union shell. Where a
+   wall stands, the ghost shows an opening until the update lands. By design; the update is the
+   truth.
+2. **The ghost carries a ship's first 32 parts** (a uniform array is fixed-length). A bigger
+   ship ghosts partially. Raising `MAX_PARTS` is a two-line change (shader + node) at a per-pixel
+   cost proportional to it.
+3. **The ghost's inset is `d + thickness` in the scaled metric** — for a non-uniformly scaled
+   part the wall reads slightly thinner along the stretched axis than the bake's. Invisible at
+   the ghost's alpha.
+4. **AUTO re-bakes on EVERY commit**, including a parameter nudge: a carbon of spheres costs
+   9–12 s per edit while it is on. The bar says so; the toggle is there for the heavy sessions.
+5. **A placement leaves the baked view** (the handles live on the primitives) and the commit
+   after it re-bakes. The preview flashes between. Handles on the baked pieces would remove it.
+6. **A packed array handed to a function is shared, one read out of a container is a copy** —
+   see ADR 0023 and the memory note; `ShipCheckViews.failures()` exists for reading only.
+
+
+## F36 — Additive contract extensions of 2026-09-06b: components are rooms, the nucleus is the root component — OPEN, DELIBERATE
+
+ADR 0024.
+
+- **Attach model (SPEC §3)**: a part's `parent` may be an inner part of a component instance,
+  `"<instance>/<inner>"` (nested: `"<instance>/<inner>/<deeper>"`). `ShipAttach` expands an
+  instance the moment it is placed; `_can_place` waits for an expanded parent.
+- **`ShipDoc`**: `part_at(id)`, `store_inner(id)`, `drop_inner_cache()`; `_children_index`,
+  `children_of`, `ancestors_of` and the dead-joint sweep see a child of `"<instance>/<inner>"`
+  as the instance's.
+- **`ShipComponents`**: `inner_part`, `store_inner_part`, `inner_exists`, `inner_host_key`,
+  `import_from(doc, other, ship_label)`, `dissolve(doc, instance_id)`.
+- **`ShipValidate`**: an inner part is a legal parent and joint end. **`ShipSeams`**: inner
+  seams of every instance, OPEN; `_joint_for` collapses stored ends too.
+- **`ShipMeshBake.plan`**: members of one instance join one room by membership.
+- **`ShipTemplates.build`**: the nucleus lifted into the root instance (`_lift_nucleus`,
+  `_symbol_of`); `_open_nucleus` of ADR 0023 removed; `_hatch` may name an inner host.
+- **`ShipSceneBuilder`**: `set_isolated(instance_id, washed)`; `inside_materials` = interior
+  fronts + exterior backs + cuts, no wire. `_resolve_pick` inside isolation returns the inner id.
+- **`ShipExplodeView`**: every exactly baked piece is its own module (inner pieces included);
+  `set_isolated(instance_id, washed)`; `_is_selected` lights a piece of a selected instance.
+- **`ShipView3D`**: `part_double_clicked(part_id)` signal, `set_isolated(instance_id)`,
+  `_pid_under`, `WASHED_ALPHA`; the ghost is gone.
+- **`ShipBuilder`**: `_isolate`, `_leave_isolation`, `_on_part_double_clicked`,
+  `_on_import_pressed`, `_import_named`; `cancel_placement` (ESC) closes an isolation; AUTO,
+  `_schedule_update`, `_on_auto_toggled` removed; `commit_edit` stores inner edits.
+- **`PartPalettePanel`**: `IMPORT COMPONENTS` button (calls the builder's private handler by
+  name — the facade is at its public cap).
+- **Removed**: `harness/builder/ship_ghost_view.gd`, `shaders/ship_ghost.gdshader`.
+- Visual check: an isolation stage (a shallow subtree lifted, opened, picked inside, closed).
+  Tests: nucleus root component and one room; `import_from`; `dissolve`; `part_at`; the
+  component's inner seam is open; a component's inner parts pair and read open. Suite
+  **287/287**.
+
+**No hash moves.** Measured: `5536787c6c35d236` either side.
+
+**Known limits, recorded rather than hidden.**
+
+1. **A drag-placement onto a component attaches to the instance**, not to the inner part under
+   the cursor (`ShipPlacement` checks `doc.parts.has(parent)` throughout). The model allows it
+   (a template does it); the interaction does not yet.
+2. **A component shown WHOLE with rooms whole** draws under its instance's proxy id; the other
+   pieces wait unseen, as any room's do.
+3. **Inner parts are edited through a cache** (`ShipDoc.part_at`) written back at
+   `commit_edit`; an edit that never commits is dropped at the next document swap.
+4. **A dissolved component keeps its definition** in the palette; nothing removes an unused
+   definition yet.
+5. **Imported joints are dropped**: a ship brought in as a component is one open room, walls and
+   hatches included. By the rule of this ADR; a walled import would need joints inside
+   definitions, which the model does not hold.
+6. **The INTERIOR mode has no wire**, by the ask; a wire toggle would be a mode of its own.
+7. **The culled faceted variants are made by string edit of the authored shader**
+   (`ShipSceneBuilder._faceted_shader`): a rename of `cull_disabled` in
+   `shaders/part_faceted.gdshader` silently returns the mode to both-sided. The visual check
+   saves `reports/visual_interior.png` from the baked view to catch exactly that.
+8. **`ShipSeams.pairs_within` now pairs inner parts** (`inner_host_key`), and `mode_for` reads
+   OPEN within one instance without a joint (`within_one_instance`). Callers that stored a
+   joint between two inner parts of one instance would find it ignored - by design.
+
+
+## F37 — Additive contract extensions of 2026-09-06d: a component's links live in its definition — OPEN, DELIBERATE
+
+ADR 0025 (withdraws ADR 0024's membership rule).
+
+- **Definition record**: `doc.components[id].joints` (optional) - joint records keyed by id,
+  ends as inner ids.
+- **`ShipComponents`**: `inner_pair`, `definition_of`, `inner_joint_for`, `set_inner_joint`;
+  `make_component` moves inside joints into the definition (`_move_inside_joints`,
+  `_inner_id_map`); `dissolve` brings them back; `import_from` carries the ship's joints
+  (`_imported_end`).
+- **`ShipSeams`**: `within_one_instance(doc, a, b)` (now takes the doc); `_joint_for` reads the
+  definition for an inner pair; the inner seams take their mode/hole/style from it.
+- **`ShipMeshBake.plan`**: the membership join is gone; rooms are OPEN seams, as before 0024.
+- **`ShipTemplates._lift_nucleus`**: OPEN joints into the nucleus definition.
+- **`ShipBuilder`**: `_set_link` / `_apply_seam_style` write inner joints; `_is_part_alive`;
+  the LINK refusal removed; import through **`ShipComponentImport`** (new: `sources`,
+  `source_doc`, `label_of`, `template_options`, `CLASS_PREFIX`); the button/bar through
+  **`ShipBakeHud`** (new: `style_bar`, `refresh_button`, `show_progress`, `hide_progress`).
+- **`PartTreePanel`**: the LINK refusal removed; `_meet_for_hatch` names inner parts; the
+  instance row reads `(N PARTS)`.
+- Tests: the nucleus definition's open joints; inner pairs read/erase/set their definition's
+  joint; the lift moves the inside joint in; dissolve returns the open links; the imported ship
+  keeps its joints. Suite **287/287**.
+
+**No hash moves.** Measured: `5536787c6c35d236` either side.
+
+**Known limits, recorded rather than hidden.**
+
+1. **A dissolved nucleus with its open links back baked 8 open pieces** in the walled fixture
+   (`test_every_piece_is_sliced_into_two_closed_halves`, before the fixture stripped them). The
+   same links bake closed through the component. Not on the player's path - `dissolve` has no
+   verb - and not understood; measure before giving it one.
+2. **A part placed inside an open component still goes into the document**, attached to the
+   instance; SketchUp would put it into the definition. F36 item 1 stands.
+3. **A definition's joints are shared by every instance** (as its parts are); MAKE UNIQUE
+   copies them with the definition.
+4. **Nested pairs across a definition boundary** (a nested instance's inner part against its
+   host's part) are the nested instance's seam on its host, not a link of their own.
+5. **The bake HUD is constructed twice** because the status row is built before the toolbar; a
+   layout change that reorders them must keep the second construction after both exist.
+
+
+## F38 — Additive contract extensions of 2026-09-06e: a definition's root is a primitive; imports at the host's size — OPEN, DELIBERATE
+
+ADR 0026.
+
+- **`ShipComponents.make_component`** refuses a head that is an instance ("" with a warning).
+- **`ShipComponents.import_from`** flattens a source whose root is an instance (dissolved on a
+  copy), lifts every ARM off the root (`_subtree_signature` dedupes; `_definition_from` builds a
+  definition with its joints; `_imported_end`), then the ship. A carbon yields three: nucleus,
+  `<SHIP> ARM 1`, `<SHIP>`.
+- **`ShipComponentImport.template_options(doc, data)`** derives room family/manufacturer/span
+  and hall family/manufacturer/bore/length from the host's resolved shapes (`_widest`).
+- Tests: the import's three definitions, primitive root and full expansion; the refused
+  instance head; the host-derived options (`test_an_imported_class_is_built_at_the_host_ships_
+  dimensions`, in the CSG suite because the helper is harness). Suite **289/289**.
+
+**No hash moves.** Measured: `5536787c6c35d236` either side.
+
+**Known limits, recorded rather than hidden.**
+
+1. **A placed instance mirrors part by part** across the symmetry plane (a nucleus placed
+   off-centre grows twins of its off-plane protons). The rule predates components; a
+   component-as-a-unit twin needs `_add_symmetry_twins` to treat an instance's expansion as
+   one body when the instance itself is off-plane.
+2. **Arms are deduplicated by structure**, so a class's four identical arms are one entry; two
+   arms that differ only in a pod's name are still one. Names are not structure, by choice.
+3. **The freeze was not reproduced in core** (every step under 0.5 s headlessly); it followed
+   the shapeless whole-ship instance into the builder. If placement of a large component still
+   stalls, `ShipPlacement`'s per-frame trial documents are the next suspect (F36 item 1).
+4. **The import reads the host's first tunnel** for bore and length; a ship with tunnels of
+   several sizes lends its first in tree order.
+
+
+## F39 — Additive contract extensions of 2026-09-06f: default hatches, inner-safe LINK — OPEN, DELIBERATE
+
+ADR 0027.
+
+- **`ShipSeams.default_link_for(doc, a, b)`** and **`role_of(doc, id)`** (new, public).
+- **`ShipBuilder._default_link_for_placed`**, called from `_on_placement_committed`; the seam
+  menu's `_seam_pairs` come from `ShipSeams.pairs_within`.
+- **`PartTreePanel._on_link`** reads its pair through `part_at`.
+- Tests: `test_a_tunnel_meeting_a_module_is_hatched_by_default` and the inner-pairs test now
+  live in `tests/core/test_components.gd` (the seams suite is at the 30-method cap). Suite
+  **290/290**.
+
+**No hash moves.** Measured: `5536787c6c35d236` either side.
+
+**Known limits, recorded rather than hidden.**
+
+1. **"Electron clusters" do not exist in the templates** - every electron is one tunnel and
+   one pod. When a class places pods together, write open joints into their definition as the
+   nucleus does (`_lift_nucleus`).
+2. **The default hatch is applied at placement commit as its own undo step**; UNDO takes the
+   hatch first, the part second. A single step would need the placement to hand the builder its
+   commit before it happens.
+3. **A hatch by default does not check that the interiors meet** (`_meet_for_hatch` is the
+   tree's, for a hand-made link). A flush-placed tunnel's hatch is declared and reported pending
+   by the bake, as any hatch is until openings are built.
+4. **Every harness lookup fed by a selection must go through `ShipDoc.part_at`**; the
+   remaining `doc.parts[...]` in `ShipPlacement` and `ShipReseat` are guarded by
+   `parts.has` and simply skip inner parts, which is why a drag inside an open component does
+   nothing (F36 item 1).
+5. The Phase One Hull Review artifact (2026-09-06) ranks the next work: bake by room with a
+   cache, one interaction contract rendered as tooltips/hints/help, twin the instance not its
+   parts, a checked-in baseline ship for the budgets, reserved identities for later phases.
+
+
+## F40 — Additive contract extensions of 2026-09-06g: a ship arrives resolved; the interior is its own mesh — OPEN, DELIBERATE
+
+ADR 0028.
+
+- **`ShipBuilder._resolve_on_load`**, `_resolve_on_load_enabled` (the visual check sets it
+  false); `_update_meshes` queues one more request during a bake and discards a bake of a
+  replaced document; the placement starts no longer leave the baked view.
+- **`ShipSceneBuilder.set_exploded(on, covered)`**, `_is_covered`, `_covered`;
+  `set_depth_range(near, far, cut_plane)`, `NO_CUT`, `_cut_plane`; `INTERIOR_AMBIENT`,
+  `INTERIOR_CAVITY_AMBIENT`, `INTERIOR_DEPTH_STRENGTH`; `inside_materials` = exterior
+  `cull_back`, interior `cull_front`, cut both - Godot's front face is clockwise.
+- **`ShipExplodeView._split_interior`**: every placed piece is two nodes (exterior+cut,
+  interior); `module_nodes()` returns both.
+- **`shaders/part_faceted.gdshader`**: `uniform vec4 cut_plane` (default: no cut).
+- **`tools/ship_resolve_check.gd`** (new, windowed): the user's scenario, three frames.
+- No test count change. Suite **290/290**.
+
+**No hash moves.** Measured: `5536787c6c35d236` either side.
+
+**Known limits, recorded rather than hidden.**
+
+1. **The load costs a whole bake** (9-12 s on a carbon of spheres). The phase-one review's
+   room-keyed bake cache is the fix; until then the bar is the answer.
+2. **A part moved after the bake keeps showing its stale piece** (its id is still covered);
+   a part ADDED shows as a primitive beside the pieces. Deliberate: the button lights either
+   way, and UPDATE MESHES is the only thing that moves a baked piece.
+3. **The cut plane is plumbed and unused** (`NO_CUT`); a SECTION mode would push a plane
+   through the orbit focus - built, measured, and withdrawn because it hid half the ship.
+4. **Godot's clockwise front face** means every baked mesh presents back faces from the side
+   its normal points to; any future material that culls must be written against that, not
+   against the normals. The faceted shader's `cull_disabled` + `FRONT_FACING` hides it
+   everywhere else.
+5. **`tools/ship_resolve_check.gd` dismisses the start chooser and the tutorial through their
+   private handlers**, as the main check does; a rename there breaks both.
+
+
+## F41 — Additive contract extensions of 2026-09-06h: openings capped, collared and doored — OPEN, DELIBERATE
+
+ADR 0029.
+
+- **`core/bake/ship_doors.gd`** (new, `ShipDoors`): `plan(entries, thickness, min_clear_m,
+  segments)` -> `{doors, misfits}`; `limits(doc, data, cfg, child, host)` for a panel;
+  `leaves(door, side, open)` -> the leaves as closed solids; `prism`, `field_of`,
+  `mesh_crossing`, `indenter_for`; the `Field` class (a cutter calibrated to its own mesh,
+  F34); the DOOR_* / MISFIT_* / ENTRY_* record keys.
+- **`ShipSeams`**: `KIND_SQUARE`, `KIND_TRIANGLE`, `KIND_POLYGON`, `VALID_HOLE_KINDS`,
+  `HOLE_SIDES`, `HOLE_STYLE`, `HOLE_BLADES`, `DOOR_NONE/SINGLE/DOUBLE/IRIS`, `VALID_DOORS`, the
+  `PARAM_*` override keys, `HOLE_SEGMENTS`, `CORNER_SEGMENTS`; `hole_profile(hole, segments)`,
+  `hole_scaled(hole, scale)`, `polygon_distance(outline, uv)`; `_hatch_hole` resolves shape,
+  style, size and sides from the joint over the family; `_doorway_hole` takes a shape and size.
+- **`ShipMeshBake.plan`**: `"doors"`, `"door_misfits"`; `"pending_seams"` now means bounded
+  seams nothing could be bored for. `report`: `"doors"`, `"door_misfits"`, `"bored"`.
+- **`ShipConfig.hatch_min_m`** (0.5), in `data/tuning.json` and its schema.
+- **`data/shapes/hatches.json`**: every family names `shape` and `style`; `pressure_hex` gains
+  `sides`; the `_note` and `hatches.schema.json` say what a family is now.
+- **`ShipCsgBake`**: the DOORS pass (`_door_work`, `_with_doors`); `report["bored"]`,
+  `report["door_failed"]`; `_read` keeps a merge only when its volume matches the triangles
+  (`READ_VOLUME_REL`).
+- **`harness/builder/ship_hatch_edit.gd`** (new, `ShipHatchEdit`): `pair_for`, `state`,
+  `write`, `joint_for`, `families`, `door_key`, `is_bounded`.
+- **`ShipExplodeView`**: `set_door_open(key, side, amount, animate)`, `set_doors_open(states)`,
+  `door_amount`, `door_nodes`; `Module.doors` / `door_wires`; `DOOR_TWEEN_S`, `DOOR_SHADE`.
+- **`ShipView3D`**: `set_door_open(key, side, amount)`, `door_open(key, side)`; the amounts
+  survive a rebake.
+- **`InspectorPanel`**: the HATCH section (`_build_hatch_section`, `_refresh_hatch`,
+  `_write_hatch`, `_on_door_toggled`); `HATCH_SHAPES`, `HATCH_STYLES`.
+- **`tools/ship_resolve_check.gd`**: a doors stage and `reports/visual_resolved_doors.png`.
+- Tests: `tests/core/test_doors.gd` (9), one in `test_csg_bake.gd`; the pending test in
+  `test_shape_mesh.gd` says what pending means now. Suite **300/300**.
+
+**No hash moves.** Measured: `5536787c6c35d236` either side.
+
+**Known limits, recorded rather than hidden.**
+
+1. **The pure executor (`ShipMeshBake.bake`) does not bore.** It carries the door records and
+   reports `bored` empty; the engine is what the player sees. Boring on the BSP path is a
+   separate piece of work if anything headless ever needs it.
+2. **A door on a curved wall is a flat gasket, always.** The author allowed "steady topologies"
+   to shape the door to the surface; every door here takes the collar. A conformal leaf on a
+   uniform curve is a follow-up.
+3. **The iris is a shutter of straight-cut wedges**, withdrawn radially as the aperture grows.
+   Real iris blades pivot; a pivoting blade needs a housing wider than the frame, which the
+   hull's wall does not give it.
+4. **"Double hung" is read as two leaves meeting at the centre**, hinged on opposite edges -
+   the ship's double door - not the vertical sash the term means in a window catalogue.
+5. **Door leaves are not pickable and carry no collider**; the HATCH section reaches them
+   through the seam's parts.
+6. **The door material is a copy** of the module's with its ramp darkened and no depth cue; the
+   cue's camera range does not follow into a copy, so it is switched off there.
+7. **`MeshMerge` mis-bridges annular faces** (three of twelve bored pieces on a box carbon);
+   those pieces fall back to the engine's triangles and show them in WIRE. The merge itself is
+   the follow-up.
+8. **The fit is measured on twelve rim samples** and marched at half a wall; a cavity thinner
+   than that, or a rim feature between samples, is missed. The bore margin (`BORE_MARGIN_M`)
+   covers the ordinary case.

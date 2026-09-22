@@ -204,6 +204,15 @@ func _build_component_section() -> void:
 	_component_list.allow_reselect = true
 	_component_list.item_selected.connect(_on_component_selected)
 	add_child(_component_list)
+	# IMPORT: the components of another saved ship, and that ship as one (ADR 0024).
+	var import_button: Button = Button.new()
+	import_button.name = "ImportComponents"
+	import_button.text = "IMPORT COMPONENTS"
+	import_button.tooltip_text = "BRING THE COMPONENTS OF ANOTHER SAVED SHIP HERE, AND THE SHIP AS ONE"
+	import_button.focus_mode = Control.FOCUS_NONE
+	import_button.add_theme_font_size_override("font_size", ShipTheme.font_small())
+	import_button.pressed.connect(_on_import_pressed)
+	add_child(import_button)
 	_refresh_components()
 
 
@@ -235,6 +244,13 @@ func _refresh_components() -> void:
 	var empty: bool = _component_ids.is_empty()
 	_component_caption.text = "COMPONENTS" if not empty else "COMPONENTS  (NONE YET)"
 	_component_list.visible = not empty
+
+
+## The builder lists the saved ships and imports the chosen one. Its handler is private - the
+## facade is at its public-method budget - so the Callable is made by name, on purpose.
+func _on_import_pressed() -> void:
+	if _builder != null and _builder.has_method("_on_import_pressed"):
+		Callable(_builder, "_on_import_pressed").call()
 
 
 func _on_component_selected(index: int) -> void:
@@ -356,9 +372,7 @@ func _refresh_cells() -> void:
 		cell.disabled = family_id == ""
 		cell.tooltip_text = _tooltip_for(family_id)
 		cell.queue_redraw()
-	_page_label.text = (
-		"PAGE %d/%d  (%d PARTS)" % [_page + 1, _page_count(), families.size()]
-	)
+	_page_label.text = ("PAGE %d/%d  (%d PARTS)" % [_page + 1, _page_count(), families.size()])
 	_prev_button.disabled = _page <= 0
 	_next_button.disabled = _page + 1 >= _page_count()
 	if families.is_empty():
@@ -685,9 +699,7 @@ static func _draw_cone(target: CanvasItem, rect: Rect2, tint: Color) -> void:
 	target.draw_line(Vector2(cx + rx, base_y), apex, tint, GLYPH_WIDTH)
 
 
-static func _draw_capsule(
-	target: CanvasItem, rect: Rect2, radius: float, tint: Color
-) -> void:
+static func _draw_capsule(target: CanvasItem, rect: Rect2, radius: float, tint: Color) -> void:
 	var r: float = minf(rect.size.x * 0.5, radius)
 	var top: Vector2 = Vector2(rect.get_center().x, rect.position.y + r)
 	var bottom: Vector2 = Vector2(rect.get_center().x, rect.end.y - r)

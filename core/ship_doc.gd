@@ -88,7 +88,6 @@ var _next_part: int = 1
 ## Next joint number to hand out. Only ever increases.
 var _next_joint: int = 1
 
-
 ## A one-part ship: a single root primitive of [param family_id] / [param manufacturer_id]
 ## with that combination's default params and no attach values (the root has no parent to attach
 ## to).
@@ -97,6 +96,11 @@ var _next_joint: int = 1
 ## empty params and the shipped snap defaults, which keeps this callable from a test that
 ## has no data packs loaded.
 ##
+
+## Inner parts handed out by [method part_at], keyed by expanded id. Never serialised.
+var _inner_cache: Dictionary = {}
+
+
 ## [param span_m] is the widest bounding-box axis the root is scaled to; 0 or less leaves it at
 ## unit scale, which is what every pre-existing call site gets. A trailing optional parameter,
 ## for the reason FOLLOWUPS F1 gives: the API contract is frozen, and an additive optional
@@ -409,7 +413,10 @@ func remove_part(id: String) -> PackedStringArray:
 		if not (value is ShipJoint):
 			continue
 		var j: ShipJoint = value
-		if removed.has(j.a) or removed.has(j.b):
+		if (
+			removed.has(ShipComponents.instance_of(j.a))
+			or removed.has(ShipComponents.instance_of(j.b))
+		):
 			dead_joints.append(str(key))
 	var dead_count: int = dead_joints.size()
 	for i: int in dead_count:
@@ -422,6 +429,38 @@ func remove_part(id: String) -> PackedStringArray:
 
 
 ## Direct children of [param id], sorted by id.
+## The part at [param id] - a document part, or an inner part of a component instance when the
+## id is expanded ("<instance>/<inner>", ADR 0024). Inner parts are built from the definition's
+## record and CACHED, so an edit made through this object survives until [method store_inner]
+## writes it back; null for an id that names neither. Twins are not parts.
+func part_at(id: String) -> ShipPart:
+	var direct: Variant = parts.get(id, null)
+	if direct is ShipPart:
+		return direct
+	if not ShipComponents.is_expanded_id(id):
+		return null
+	var cached: Variant = _inner_cache.get(id, null)
+	if cached is ShipPart:
+		return cached
+	var inner: ShipPart = ShipComponents.inner_part(self, id)
+	if inner != null:
+		_inner_cache[id] = inner
+	return inner
+
+
+## Write the cached inner part at [param id] back into its definition (every instance of the
+## definition sees the edit at its next rebuild - SketchUp semantics). No-op for a document part.
+func store_inner(id: String) -> void:
+	var cached: Variant = _inner_cache.get(id, null)
+	if cached is ShipPart:
+		ShipComponents.store_inner_part(self, id, cached)
+
+
+## Forget every cached inner part (the definitions changed underneath them).
+func drop_inner_cache() -> void:
+	_inner_cache = {}
+
+
 func children_of(id: String) -> PackedStringArray:
 	var out: PackedStringArray = PackedStringArray()
 	for key: Variant in parts:
@@ -432,7 +471,7 @@ func children_of(id: String) -> PackedStringArray:
 		if not (value is ShipPart):
 			continue
 		var p: ShipPart = value
-		if p.parent == id:
+		if ShipComponents.instance_of(p.parent) == id:
 			out.append(part_id)
 	out.sort()
 	return out
@@ -461,7 +500,7 @@ func ancestors_of(id: String) -> PackedStringArray:
 		if not (value is ShipPart):
 			break
 		var p: ShipPart = value
-		var parent_id: String = p.parent
+		var parent_id: String = ShipComponents.instance_of(p.parent)
 		if parent_id.is_empty() or seen.has(parent_id) or not parts.has(parent_id):
 			break
 		out.append(parent_id)
@@ -572,11 +611,14 @@ func _children_index() -> Dictionary:
 		if not (value is ShipPart):
 			continue
 		var p: ShipPart = value
-		if p.parent.is_empty() or p.parent == part_id:
+		# A part hung off an inner part of an instance ("<instance>/<inner>", ADR 0024) is the
+		# INSTANCE's child for every walk: the tree, the cascade, the order.
+		var parent: String = ShipComponents.instance_of(p.parent)
+		if parent.is_empty() or parent == part_id:
 			continue
-		if not index.has(p.parent):
-			index[p.parent] = []
-		var bucket: Array = index[p.parent]
+		if not index.has(parent):
+			index[parent] = []
+		var bucket: Array = index[parent]
 		bucket.append(part_id)
 	for key: Variant in index:
 		var bucket: Array = index[key]

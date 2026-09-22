@@ -80,6 +80,7 @@ var _release_pid: String = ""
 var _release_family: String = ""
 ## The explode stage's step, and what it expects the field to explode into.
 var _explode_step: int = 0
+var _update_step: int = 0
 var _explode_expected: int = 0
 var _explode_seams: int = 0
 
@@ -138,6 +139,15 @@ func _process(_delta: float) -> bool:
 		# Frame-driven: the exploded view bakes one module per frame.
 		if _check_explode():
 			_stage += 1
+			_frames = 0
+	elif _stage - 8 == MODE_NAMES.size():
+		# Frame-driven: the engine bakes over frames and the view places a module a frame.
+		if _check_update_meshes():
+			_stage += 1
+	elif _stage - 9 == MODE_NAMES.size():
+		# Last, because it lifts a part into a component and leaves it so.
+		_views.check_isolation()
+		_stage += 1
 	else:
 		_report()
 		done = true
@@ -153,6 +163,9 @@ func _setup() -> bool:
 		quit(1)
 		return true
 	_record_palette()
+	# The mode captures assert about the primitives; a ship that resolves itself would swap
+	# them for baked pieces mid-capture. tools/ship_resolve_check.gd covers the resolve.
+	_builder.set("_resolve_on_load_enabled", false)
 	_build_demo_ship()
 	_stage = 1
 	_frames = 0
@@ -921,12 +934,16 @@ func _release_view() -> Object:
 ## origins), a click on an inner mesh must resolve to the instance, selecting the instance must
 ## highlight all of it, and undo must restore the original ids.
 func _check_make_component() -> void:
+	_check_make_component_body()
+
+
+func _check_make_component_body() -> bool:
 	var doc: ShipDoc = _builder.call("get_doc")
 	var scene: Object = _builder.call("get_view").call("get_scene_builder")
 	var head: String = _make_component_subtree(doc)
 	if head == "":
 		_failures.append("make component: could not build a two-deep subtree to lift")
-		return
+		return false
 	var ids: PackedStringArray = PackedStringArray([head])
 	ids.append_array(doc.descendants_of(head))
 	var before: Dictionary = _visual_origins(scene)
@@ -937,7 +954,7 @@ func _check_make_component() -> void:
 	var comp_id: String = ShipComponents.make_component(doc, ids, "GATE ARM")
 	if comp_id == "":
 		_failures.append("make component: ShipComponents.make_component refused %s" % [ids])
-		return
+		return false
 	_builder.call("commit_edit", PackedStringArray())
 	doc = _builder.call("get_doc")
 	var instance_id: String = ""
@@ -946,7 +963,7 @@ func _check_make_component() -> void:
 			instance_id = pid
 	if instance_id == "" or not doc.components.has(comp_id):
 		_failures.append("make component: the edit did not leave an instance in the document")
-		return
+		return false
 
 	var after: Dictionary = _visual_origins(scene)
 	var inner: int = 0
@@ -998,6 +1015,7 @@ func _check_make_component() -> void:
 	if restored_keys != before_keys:
 		_failures.append("make component: undo drew %s, expected %s" % [restored_keys, before_keys])
 	_assert_same_origins(before, restored, "make component undo")
+	return true
 
 
 ## A head part with a child and a grandchild, built from what the demo ship left behind so the
@@ -1027,8 +1045,8 @@ func _make_component_subtree(doc: ShipDoc) -> String:
 	return head
 
 
-## Every part is a room, any two parts that meet can be hatched, and several parts pressed into
-## one room with MAKE ROOM stay on screen and keep their hatch to the outside (2026-09-02).
+## Every part is a room, any two parts that meet can be hatched, and several parts linked together
+## step every seam between them at once and stay on screen (2026-09-02, 2026-09-04).
 ##
 ## This gate exists because the opposite shipped: "when trying to link my tunnel with my sphere
 ## it sys 'tunnel isnt a room yet'". Everything below is driven through the tree panel's own
@@ -1052,11 +1070,10 @@ func _check_rooms_and_hatches() -> void:
 	var far: String = _rooms_refuse_far_pair(tree, root, tunnel)
 	if far == "":
 		return
-	_rooms_name_one(tree, far)
-	_rooms_join_three(tree, root, tunnel)
+	_rooms_link_group(tree, root, tunnel)
 
 
-## A tunnel dropped on the hull links to it - no MAKE ROOM first - and LINK cycles the seam
+## A tunnel dropped on the hull links to it - nothing declared first - and LINK cycles the seam
 ## WALL -> DOORWAY -> HATCH -> OPEN -> WALL (ADR 0008). Returns the tunnel's id, or "" when
 ## nothing could be added. RETIRED(2026-09-02): LINK HATCH toggling hatched / nothing.
 func _rooms_toggle_hatch(tree: Object, root: String) -> String:
@@ -1134,108 +1151,109 @@ func _rooms_refuse_far_pair(tree: Object, root: String, tunnel: String) -> Strin
 	return far
 
 
-## MAKE ROOM on one part names it; the part was a room already.
-func _rooms_name_one(tree: Object, pid: String) -> void:
-	_builder.call("set_selection", PackedStringArray([pid]))
-	tree.call("_on_make_room")
-	if _dialog_title() != "MAKE ROOM":
-		_failures.append(
-			"rooms: MAKE ROOM on one part opened no prompt (dialog '%s')" % _dialog_title()
-		)
-		return
-	(_builder.get("_dialog_input") as LineEdit).text = "AFT POD"
-	_builder.call("_on_dialog_ok")
+## Sinks [param pid] into its host until their interiors meet, by the same test the panel refuses
+## on. Returns false - having recorded the failure - when no reachable depth does it.
+##
+## Offsets are NEGATIVE inward (ShipAttach.default_offset), and the placement is affine in the
+## offset, so stepping down by a fraction of the part own height walks it straight in.
+func _sink_until_meeting(pid: String) -> bool:
 	var doc: ShipDoc = _builder.call("get_doc")
-	var name: String = (doc.parts[pid] as ShipPart).display_name
-	if name != "AFT POD":
-		_failures.append("rooms: MAKE ROOM did not name the part (name '%s')" % name)
+	var data: ShipData = _builder.call("get_data")
+	var cfg: ShipConfig = _builder.call("get_config")
+	var part: ShipPart = doc.parts[pid]
+	var host: String = part.parent
+	var step: float = maxf(cfg.attach_embed_m, 0.25)
+	for i: int in 8:
+		var shapes: Dictionary = ShipAttach.resolve_shapes(doc, data, cfg)
+		var xforms: Dictionary = ShipAttach.resolve_all_from_shapes(doc, shapes, cfg)
+		if shapes.has(pid) and shapes.has(host):
+			var state: Dictionary = ShipJoints.solid_pair_state(
+				shapes[pid],
+				xforms[pid],
+				shapes[host],
+				xforms[host],
+				maxf(cfg.hull_thickness_m, 0.0)
+			)
+			if bool(state["merges"]):
+				return true
+		_builder.call("begin_edit", "sink")
+		(doc.parts[pid] as ShipPart).offset -= step
+		_builder.call("commit_edit", PackedStringArray([pid]))
+		doc = _builder.call("get_doc")
+	_failures.append("rooms: could not sink %s into %s deep enough to link" % [pid, host])
+	return false
 
 
-## MAKE ROOM on several parts: the tunnel, a child of it and a grandchild become one room that
-## keeps every mesh where it stood, carries the tunnel's hatch to the hull, hatches as a whole,
-## and comes apart again under undo.
-func _rooms_join_three(tree: Object, root: String, tunnel: String) -> void:
+## LINK ON SEVERAL PARTS steps every seam inside the selection together - which is what making
+## them one room now is. A chain of three under the tunnel goes WALL -> DOORWAY -> HATCH -> OPEN
+## -> WALL as a unit, every part stays a part of its own, nothing on screen moves, and undo walks
+## it back one press at a time.
+##
+## RETIRED(2026-09-04): _rooms_name_one and _rooms_join_three, which drove MAKE ROOM. Naming is the
+## tree row own edit; joining is this. The old join lifted the selection into a COMPONENT and left
+## the seams between the joined parts WALLED, which is the opposite of what it promised - a dropped
+## joint record IS a wall.
+func _rooms_link_group(tree: Object, root: String, tunnel: String) -> void:
 	var scene: Object = _builder.call("get_view").call("get_scene_builder")
 	var families: PackedStringArray = (_builder.call("get_data") as ShipData).family_ids()
 	var child: String = _builder.call("add_part", families[0], "", tunnel)
-	var grandchild: String = _builder.call("add_part", families[families.size() - 1], "", child)
+	# A POD on the end, not whatever family sorts last: a part thinner than two hull walls has no
+	# interior at all (ADR 0015), and two solids whose interiors do not exist can never be linked
+	# however deep one is sunk into the other.
+	var grandchild: String = _builder.call(
+		"add_part", _family_or(families, "sphere_pod"), "", child
+	)
 	if child == "" or grandchild == "":
-		_failures.append("rooms: could not grow a chain under the tunnel to join")
+		_failures.append("rooms: could not grow a chain under the tunnel to link")
 		return
-	var doc: ShipDoc = _builder.call("get_doc")
+	# A part dropped at its default embed can end up merely TOUCHING its host - the two solids
+	# overlap but their interiors do not, at the hull thickness - and LINK rightly refuses to open
+	# an opening that would lead into solid hull. That refusal has its own gate above; here the
+	# chain has to be a chain, so each one is sunk until it really is.
+	if not (_sink_until_meeting(child) and _sink_until_meeting(grandchild)):
+		return
+	# The scene builder rebuilds on the frame AFTER a commit and the sinking above just committed,
+	# so the baseline is forced current rather than read one frame behind the document.
+	_builder.call("get_view").call(
+		"rebuild", _builder.call("get_doc"), _builder.call("get_data"), _builder.call("get_config")
+	)
 	var before: Dictionary = _visual_origins(scene)
 	var before_keys: PackedStringArray = _sorted_keys(before)
 	var members: PackedStringArray = PackedStringArray([tunnel, child, grandchild])
-	_builder.call("set_selection", members)
-	tree.call("_on_make_room")
-	if _dialog_title() != "MAKE ROOM":
-		_failures.append(
-			"rooms: MAKE ROOM on three parts opened no prompt (dialog '%s')" % _dialog_title()
-		)
-		return
-	(_builder.get("_dialog_input") as LineEdit).text = "GATE ROOM"
-	_builder.call("_on_dialog_ok")
-	_expect_no_dialog("rooms: MAKE ROOM on three parts")
-	doc = _builder.call("get_doc")
-	var room_id: String = ""
-	for pid: String in doc.parts:
-		var part: ShipPart = doc.parts[pid]
-		if part.kind == ShipPart.KIND_COMPONENT_INSTANCE and part.display_name == "GATE ROOM":
-			room_id = pid
-	if room_id == "":
-		_failures.append("rooms: MAKE ROOM on three parts left no instance named GATE ROOM")
-		return
-	if not (doc.parts[room_id] as ShipPart).is_room():
-		_failures.append("rooms: the joined component is not a room")
-	for pid: String in members:
-		if doc.parts.has(pid):
-			_failures.append("rooms: %s is still a part of its own after being joined" % pid)
-	if not _hatched(doc, root, room_id):
-		_failures.append("rooms: the hull-to-tunnel hatch did not follow the tunnel into the room")
-	if doc.joints.size() != 1:
-		_failures.append(
-			(
-				"rooms: %d joints after the join, expected the one to the hull: %s"
-				% [doc.joints.size(), doc.joints.keys()]
-			)
-		)
-	var after: Dictionary = _visual_origins(scene)
-	_assert_same_origins(before, after, "make room")
-	_check_scene_matches_attach(doc, scene, "make room")
+	var inner: Array = [[child, tunnel], [grandchild, child]]
 
-	# The room links to its neighbours as a whole: LINK on the hull and the room steps the carried
-	# hatch on round the cycle - OPEN, then WALL (record gone), then DOORWAY, then HATCH again.
-	_builder.call("set_selection", PackedStringArray([root, room_id]))
-	var steps: Array = ["open", "wall", "doorway", "hatched"]
+	_builder.call("set_selection", members)
+	var steps: Array = ["doorway", "hatched", "open", "wall"]
 	for i: int in steps.size():
 		tree.call("_on_link")
-		_expect_no_dialog("rooms: LINK press %d on the hull and the joined room" % (i + 1))
-		if _link_mode(root, room_id) != steps[i]:
-			_failures.append(
-				(
-					"rooms: LINK press %d on the joined room left the seam %s, expected %s"
-					% [i + 1, _link_mode(root, room_id), steps[i]]
+		_expect_no_dialog("rooms: LINK press %d on a chain of three" % (i + 1))
+		for pair: Array in inner:
+			var mode: String = _link_mode(str(pair[0]), str(pair[1]))
+			if mode != steps[i]:
+				_failures.append(
+					(
+						"rooms: LINK press %d left %s<->%s at %s, expected %s"
+						% [i + 1, pair[0], pair[1], mode, steps[i]]
+					)
 				)
-			)
-	doc = _builder.call("get_doc")
-	if _joint_between(doc, root, room_id) == null or not _hatched(doc, root, room_id):
-		_failures.append("rooms: the cycle did not bring the joined room's hatch back")
 
-	# Five edits back - the join and four link steps: the parts, their meshes and the tunnel's
-	# own hatch return.
-	_builder.call("undo")
-	_builder.call("undo")
-	_builder.call("undo")
-	_builder.call("undo")
-	_builder.call("undo")
-	doc = _builder.call("get_doc")
+	var doc: ShipDoc = _builder.call("get_doc")
 	for pid: String in members:
 		if not doc.parts.has(pid):
-			_failures.append("rooms: undo did not bring %s back" % pid)
-	if doc.parts.has(room_id):
-		_failures.append("rooms: undo left the joined room in the document")
-	if not _hatched(doc, root, tunnel):
-		_failures.append("rooms: undo did not bring the hatch between the hull and the tunnel back")
+			_failures.append("rooms: %s stopped being a part of its own after LINK" % pid)
+	if _joint_between(doc, root, tunnel) == null:
+		_failures.append("rooms: linking the group inside disturbed the seam to the hull")
+	_assert_same_origins(before, _visual_origins(scene), "link group")
+	_check_scene_matches_attach(doc, scene, "link group")
+
+	# One press, one edit: four steps back and every seam is where it started, with the parts still
+	# on screen where the sinking left them.
+	for _i: int in steps.size():
+		_builder.call("undo")
+	doc = _builder.call("get_doc")
+	for pair: Array in inner:
+		if _link_mode(str(pair[0]), str(pair[1])) != "wall":
+			_failures.append("rooms: undo left %s<->%s linked" % [pair[0], pair[1]])
 	var restored_keys: PackedStringArray = _sorted_keys(_visual_origins(scene))
 	if restored_keys != before_keys:
 		_failures.append("rooms: undo drew %s, expected %s" % [restored_keys, before_keys])
@@ -1243,10 +1261,10 @@ func _rooms_join_three(tree: Object, root: String, tunnel: String) -> void:
 		(
 			(
 				"  rooms: %d parts all rooms; seam cycled WALL/DOORWAY/HATCH/OPEN on hull+tunnel; "
-				+ "far pair refused; "
-				+ "3 parts joined into %s with the hatch carried; undo restored %d meshes"
+				+ "far pair refused; %d seams inside a 3-part selection cycled as one; "
+				+ "undo restored %d meshes"
 			)
-			% [doc.parts.size(), room_id, restored_keys.size()]
+			% [doc.parts.size(), inner.size(), restored_keys.size()]
 		)
 	)
 
@@ -1282,10 +1300,7 @@ func _explode_begin() -> void:
 	var data: ShipData = _builder.call("get_data")
 	var cfg: ShipConfig = _builder.call("get_config")
 	var sdf: ShipSdf = ShipSdf.build(doc, data, cfg)
-	var modules: Dictionary = {}
-	for i: int in sdf.part_count():
-		modules[ShipSeams.module_of(sdf.part_id_at(i))] = true
-	_explode_expected = modules.size()
+	_explode_expected = _views.module_count(doc)
 	_explode_seams = sdf.seam_count()
 	_builder.call("_set_exploded", true)
 	_frames = 0
@@ -1299,7 +1314,9 @@ func _explode_begin() -> void:
 ## Wait for the last module to bake, then read the exploded scene back. Returns true only when
 ## the stage must abort.
 func _explode_wait(scene: Object, explode: Object) -> bool:
-	if bool(explode.call("is_busy")):
+	# Two waits: the engine bake the builder awaits before it hands modules to the view (ADR
+	# 0020), and then the view placing them a module a frame.
+	if bool(_builder.get("_explode_baking")) or bool(explode.call("is_busy")):
 		if _frames <= EXPLODE_MAX_FRAMES:
 			return false
 		_failures.append("explode: still baking after %d frames" % _frames)
@@ -1335,8 +1352,22 @@ func _explode_finish(scene: Object, explode: Object) -> void:
 	_builder.call("_set_exploded", false)
 	if bool(_builder.get("_exploded")):
 		_failures.append("explode: _set_exploded(false) did not take")
+	# ASSEMBLE lands in the BAKED view (ADR 0023): the same bake, the pieces where they stand,
+	# the primitives still hidden. Leaving that view is what brings the primitives back.
+	if not bool(_builder.get("_baked")) or not bool(explode.call("is_assembled")):
+		_failures.append("explode: ASSEMBLE did not land in the baked assembled view")
+	# The view places a module a frame, so on this frame the baked view is either still placing
+	# or already full.
+	if not bool(explode.call("is_busy")) and int(explode.call("module_count")) != _explode_expected:
+		_failures.append(
+			(
+				"explode: %d module meshes after ASSEMBLE, the field has %d modules"
+				% [int(explode.call("module_count")), _explode_expected]
+			)
+		)
+	_builder.call("_set_baked", false)
 	if int(explode.call("module_count")) != 0:
-		_failures.append("explode: module meshes left behind after ASSEMBLE")
+		_failures.append("explode: module meshes left behind after leaving the baked view")
 	var visuals: Dictionary = scene.get("_visuals")
 	var shown: int = 0
 	for key: Variant in visuals.keys():
@@ -1344,12 +1375,12 @@ func _explode_finish(scene: Object, explode: Object) -> void:
 		if solid != null and solid.visible:
 			shown += 1
 	if shown == 0:
-		_failures.append("explode: no part visual came back after ASSEMBLE")
+		_failures.append("explode: no part visual came back after leaving the baked view")
 	print(
 		(
 			(
-				"  explode: %d modules baked from %d seams, parts hidden meanwhile, "
-				+ "%d visuals back after ASSEMBLE"
+				"  explode: %d modules baked from %d seams, parts hidden meanwhile, ASSEMBLE "
+				+ "landed baked, %d visuals back after leaving it"
 			)
 			% [_explode_expected, _explode_seams, shown]
 		)
@@ -1896,3 +1927,73 @@ func _find_builder(n: Node) -> Node:
 		if r != null:
 			return r
 	return null
+
+
+## UPDATE MESHES bakes the exact pieces and shows them ASSEMBLED in place of the preview
+## primitives (ADR 0023; the ghost that once stood in meanwhile is gone, ADR 0024). "so when
+## the renderer needs to update because changes were made a button highlighted at top should say
+## update meshes .. a loading bar so the user knows the renderer isnt frozen". Frame-driven;
+## returns true when done. The read-back is ShipCheckViews.check_update_finish.
+func _check_update_meshes() -> bool:
+	var view: Object = _builder.call("get_view")
+	var scene: Object = view.call("get_scene_builder") if view != null else null
+	var explode: Object = view.call("get_explode_view") if view != null else null
+	var done: bool = false
+	if view == null or scene == null or explode == null:
+		_failures.append("update: cannot reach the view, scene or explode view")
+		done = true
+	elif _update_step == 0:
+		_update_begin()
+	elif _update_step == 1:
+		done = _update_wait(explode)
+	elif _update_step == 2 and _frames >= MODE_FRAMES:
+		_views.save_frame(_app_viewport(_host), "%s/visual_update.png" % OUT_DIR, "the baked frame")
+		# INTERIOR on the baked pieces: interior fronts, exterior backs (ADR 0024). A frame for
+		# the human's eyes, and the mode put back for the read-back.
+		_builder.call("set_display_mode", ShipSceneBuilder.DisplayMode.INSIDE)
+		_update_step = 3
+		_frames = 0
+	elif _update_step == 3 and _frames >= MODE_FRAMES:
+		_views.save_frame(
+			_app_viewport(_host), "%s/visual_interior.png" % OUT_DIR, "the interior frame"
+		)
+		_builder.call("set_display_mode", ShipSceneBuilder.DisplayMode.SHADED_WIRE)
+		_views.check_update_finish(view, scene, explode, _explode_expected)
+		done = true
+	return done
+
+
+## In the baked view (the explode stage left a fresh bake), an edit: the button must light and
+## nothing must bake by itself; then press the button.
+func _update_begin() -> void:
+	_builder.call("_set_baked", true)
+	if not bool(_builder.get("_baked")):
+		_failures.append("update: _set_baked(true) did not take on a fresh bake")
+	var doc: ShipDoc = _builder.call("get_doc")
+	var pid: String = doc.part_order()[doc.part_order().size() - 1]
+	_builder.call("begin_edit", "nudge")
+	(doc.parts[pid] as ShipPart).yaw += 1.0
+	_builder.call("commit_edit", PackedStringArray([pid]))
+	_explode_expected = _views.module_count(doc)
+	var button: Button = _builder.get("_update_button")
+	if button == null or not button.text.ends_with("*"):
+		_failures.append("update: the button did not light after an edit")
+	_builder.call("_on_update_pressed")
+	_update_step = 1
+	_frames = 0
+
+
+## The bar must show while the engine bakes; wait for the bake and the placement. Returns true
+## only when the stage must abort.
+func _update_wait(explode: Object) -> bool:
+	var bar: ProgressBar = _builder.get("_progress")
+	if _frames == 2 and (bar == null or not bar.visible):
+		_failures.append("update: no progress bar while the engine bakes")
+	if bool(_builder.get("_explode_baking")) or bool(explode.call("is_busy")):
+		if _frames <= EXPLODE_MAX_FRAMES:
+			return false
+		_failures.append("update: still baking after %d frames" % _frames)
+		return true
+	_update_step = 2
+	_frames = 0
+	return false

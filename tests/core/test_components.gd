@@ -5,6 +5,7 @@ class_name TestComponents
 extends GdUnitTestSuite
 
 var _data: ShipData
+var _cfg: ShipConfig = ShipConfig.defaults()
 var _family_id: String
 var _manufacturer_id: String
 
@@ -12,18 +13,26 @@ var _manufacturer_id: String
 func before() -> void:
 	_data = ShipData.new()
 	var ok: bool = _data.load_all()
-	assert_bool(ok).append_failure_message(
-		"ShipData.load_all() failed, load_errors=%s" % [str(_data.load_errors)]
-	).is_true()
+	(
+		assert_bool(ok)
+		. append_failure_message(
+			"ShipData.load_all() failed, load_errors=%s" % [str(_data.load_errors)]
+		)
+		. is_true()
+	)
 	var families: PackedStringArray = _data.family_ids()
-	assert_array(families).append_failure_message(
-		"no families loaded from res://data"
-	).is_not_empty()
+	(
+		assert_array(families)
+		. append_failure_message("no families loaded from res://data")
+		. is_not_empty()
+	)
 	_family_id = families[0]
 	var mfrs: PackedStringArray = _data.manufacturers_for(_family_id)
-	assert_array(mfrs).append_failure_message(
-		"no manufacturers for family '%s'" % _family_id
-	).is_not_empty()
+	(
+		assert_array(mfrs)
+		. append_failure_message("no manufacturers for family '%s'" % _family_id)
+		. is_not_empty()
+	)
 	_manufacturer_id = mfrs[0]
 
 
@@ -72,9 +81,7 @@ func _instance_dict(component_id: String) -> Dictionary:
 func test_make_component_creates_a_definition() -> void:
 	var doc: ShipDoc = ShipDoc.create_new(_family_id, _manufacturer_id, _data)
 	var child: ShipPart = _add_child(doc, doc.root)
-	var comp_id: String = ShipComponents.make_component(
-		doc, PackedStringArray([child.id]), "Wing"
-	)
+	var comp_id: String = ShipComponents.make_component(doc, PackedStringArray([child.id]), "Wing")
 	assert_str(comp_id).is_not_empty()
 	assert_bool(doc.components.has(comp_id)).is_true()
 	var def_dict: Dictionary = doc.components[comp_id] as Dictionary
@@ -84,9 +91,7 @@ func test_make_component_creates_a_definition() -> void:
 func test_instantiate_creates_a_component_instance_part() -> void:
 	var doc: ShipDoc = ShipDoc.create_new(_family_id, _manufacturer_id, _data)
 	var child: ShipPart = _add_child(doc, doc.root)
-	var comp_id: String = ShipComponents.make_component(
-		doc, PackedStringArray([child.id]), "Wing"
-	)
+	var comp_id: String = ShipComponents.make_component(doc, PackedStringArray([child.id]), "Wing")
 	var instance_id: String = ShipComponents.instantiate(doc, comp_id, doc.root)
 	assert_str(instance_id).is_not_empty()
 	assert_bool(doc.parts.has(instance_id)).is_true()
@@ -99,9 +104,7 @@ func test_instantiate_creates_a_component_instance_part() -> void:
 func test_make_unique_detaches_one_instance_from_definition_edits() -> void:
 	var doc: ShipDoc = ShipDoc.create_new(_family_id, _manufacturer_id, _data)
 	var child: ShipPart = _add_child(doc, doc.root)
-	var comp_id: String = ShipComponents.make_component(
-		doc, PackedStringArray([child.id]), "Wing"
-	)
+	var comp_id: String = ShipComponents.make_component(doc, PackedStringArray([child.id]), "Wing")
 	var instance_a_id: String = ShipComponents.instantiate(doc, comp_id, doc.root)
 	var instance_b_id: String = ShipComponents.instantiate(doc, comp_id, doc.root)
 
@@ -111,12 +114,18 @@ func test_make_unique_detaches_one_instance_from_definition_edits() -> void:
 
 	var part_a: ShipPart = doc.parts[instance_a_id] as ShipPart
 	var part_b: ShipPart = doc.parts[instance_b_id] as ShipPart
-	assert_str(part_a.family).append_failure_message(
-		"make_unique() repointed an instance it was not asked to touch"
-	).is_equal(comp_id)
-	assert_str(part_b.family).append_failure_message(
-		"make_unique() did not repoint the target instance to its cloned definition"
-	).is_equal(new_def_id)
+	(
+		assert_str(part_a.family)
+		. append_failure_message("make_unique() repointed an instance it was not asked to touch")
+		. is_equal(comp_id)
+	)
+	(
+		assert_str(part_b.family)
+		. append_failure_message(
+			"make_unique() did not repoint the target instance to its cloned definition"
+		)
+		. is_equal(new_def_id)
+	)
 
 	var original_def: Dictionary = doc.components[comp_id] as Dictionary
 	original_def["label"] = "Wing Mk2"
@@ -124,9 +133,13 @@ func test_make_unique_detaches_one_instance_from_definition_edits() -> void:
 	var relabeled: String = String((doc.components[comp_id] as Dictionary).get("label", ""))
 	var clone_label: String = String((doc.components[new_def_id] as Dictionary).get("label", ""))
 	assert_str(relabeled).is_equal("Wing Mk2")
-	assert_str(clone_label).append_failure_message(
-		"editing the original definition leaked into the made-unique clone"
-	).is_not_equal("Wing Mk2")
+	(
+		assert_str(clone_label)
+		. append_failure_message(
+			"editing the original definition leaked into the made-unique clone"
+		)
+		. is_not_equal("Wing Mk2")
+	)
 
 
 func test_check_cycles_detects_transitive_self_containment() -> void:
@@ -146,9 +159,13 @@ func test_check_cycles_detects_transitive_self_containment() -> void:
 			flagged_a = true
 		if id == "comp_b":
 			flagged_b = true
-	assert_bool(flagged_a or flagged_b).append_failure_message(
-		"check_cycles() did not flag either component in the cycle, got: %s" % [str(cycles)]
-	).is_true()
+	(
+		assert_bool(flagged_a or flagged_b)
+		. append_failure_message(
+			"check_cycles() did not flag either component in the cycle, got: %s" % [str(cycles)]
+		)
+		. is_true()
+	)
 
 
 func test_check_cycles_is_empty_for_an_acyclic_doc() -> void:
@@ -159,9 +176,7 @@ func test_check_cycles_is_empty_for_an_acyclic_doc() -> void:
 func test_expand_flattens_component_instances() -> void:
 	var doc: ShipDoc = ShipDoc.create_new(_family_id, _manufacturer_id, _data)
 	var child: ShipPart = _add_child(doc, doc.root)
-	var comp_id: String = ShipComponents.make_component(
-		doc, PackedStringArray([child.id]), "Wing"
-	)
+	var comp_id: String = ShipComponents.make_component(doc, PackedStringArray([child.id]), "Wing")
 	var instance_id: String = ShipComponents.instantiate(doc, comp_id, doc.root)
 	var cfg: ShipConfig = ShipConfig.defaults()
 	var expanded: Dictionary = ShipComponents.expand(doc, _data, cfg)
@@ -174,7 +189,223 @@ func test_expand_flattens_component_instances() -> void:
 			var entry: Dictionary = expanded[key] as Dictionary
 			assert_bool(entry.has("shape")).is_true()
 			assert_bool(entry.has("xform")).is_true()
-	assert_bool(found_prefixed_key).append_failure_message(
-		"expand() produced no 'instance_id/inner_id' entry for instance '%s', got keys: %s" %
-		[instance_id, str(expanded.keys())]
-	).is_true()
+	(
+		assert_bool(found_prefixed_key)
+		. append_failure_message(
+			(
+				"expand() produced no 'instance_id/inner_id' entry for instance '%s', got keys: %s"
+				% [instance_id, str(expanded.keys())]
+			)
+		)
+		. is_true()
+	)
+
+
+func _carbon_doc() -> ShipDoc:
+	var data: ShipData = ShipData.new()
+	assert_bool(data.load_all()).is_true()
+	return ShipTemplates.build(data, ShipConfig.defaults(), "carbon", {})
+
+
+## IMPORT COMPONENTS (ADR 0024/0026): every definition of another ship comes across under a
+## fresh id, then every ARM off its root (a class's four identical tunnel+pod arms once), then
+## the ship itself with a PRIMITIVE root - its nucleus instance dissolved into it - so an
+## instance of the ship has a proxy shape and expands whole.
+func test_import_from_brings_every_definition_the_arms_and_the_ship_itself() -> void:
+	var data: ShipData = ShipData.new()
+	assert_bool(data.load_all()).is_true()
+	var cfg: ShipConfig = ShipConfig.defaults()
+	var other: ShipDoc = ShipTemplates.build(data, cfg, "carbon", {})
+	var other_parts: int = other.parts.size()
+	var doc: ShipDoc = ShipTemplates.build(data, cfg, "hydrogen", {})
+	var before: int = doc.components.size()
+	var added: PackedStringArray = ShipComponents.import_from(doc, other, "CARBON")
+	# The nucleus, one arm, the ship.
+	assert_int(added.size()).append_failure_message(str(added)).is_equal(
+		other.components.size() + 2
+	)
+	assert_int(doc.components.size()).is_equal(before + added.size())
+	assert_int(other.parts.size()).is_equal(other_parts)
+	var arm: Dictionary = doc.components[added[added.size() - 2]]
+	assert_str(str(arm["label"])).is_equal("CARBON ARM 1")
+	assert_int((arm["parts"] as Dictionary).size()).is_equal(2)
+	var ship_id: String = added[added.size() - 1]
+	var ship: Dictionary = doc.components[ship_id]
+	var ship_parts: Dictionary = ship["parts"]
+	# Nine document parts, less the nucleus instance, plus its six protons.
+	assert_int(ship_parts.size()).is_equal(other_parts - 1 + 6)
+	assert_str(str((ship_parts[str(ship["root"])] as Dictionary).get("kind", ""))).is_equal(
+		ShipPart.KIND_PRIMITIVE
+	)
+	for inner_id: String in ship_parts:
+		assert_str(str((ship_parts[inner_id] as Dictionary).get("kind", ""))).is_not_equal(
+			ShipComponents.KIND_INSTANCE
+		)
+	# The ship's joints travel with it, their ends inside it (ADR 0025).
+	var ship_joints: Dictionary = ship.get("joints", {})
+	assert_int(ship_joints.size()).is_greater_equal(other.joints.size())
+	for jid: String in ship_joints:
+		var record: Dictionary = ship_joints[jid]
+		(
+			assert_bool(
+				(
+					ship_parts.has(str(record.get("a", "")))
+					and ship_parts.has(str(record.get("b", "")))
+				)
+			)
+			. append_failure_message("joint %s names something outside the ship" % jid)
+			. is_true()
+		)
+	assert_int(ShipComponents.check_cycles(doc).size()).is_equal(0)
+	var instance: String = ShipComponents.instantiate(doc, ship_id, doc.root)
+	assert_str(instance).is_not_empty()
+	var shapes: Dictionary = ShipAttach.resolve_shapes(doc, data, cfg)
+	(
+		assert_bool(shapes.has(instance))
+		. append_failure_message("the ship instance has no proxy")
+		. is_true()
+	)
+	var xforms: Dictionary = ShipAttach.resolve_all_from_shapes(doc, shapes, cfg)
+	var expanded: int = 0
+	for key: Variant in xforms:
+		if str(key).begins_with(instance + "/") and not ShipSymmetry.is_twin_id(str(key)):
+			expanded += 1
+	assert_int(expanded).append_failure_message(str(xforms.keys())).is_equal(ship_parts.size() - 1)
+
+
+## MAKE COMP refuses a head that is an instance: a definition's root is its proxy shape, and an
+## instance has none (ADR 0026).
+func test_make_component_refuses_an_instance_head() -> void:
+	var doc: ShipDoc = _carbon_doc()
+	var ids: PackedStringArray = doc.part_order()
+	assert_str(ShipComponents.make_component(doc, ids, "WHOLE")).is_empty()
+	assert_str((doc.parts[doc.root] as ShipPart).kind).is_equal(ShipPart.KIND_COMPONENT_INSTANCE)
+
+
+## DISSOLVE (ADR 0024): the inverse of MAKE COMP for one instance - the inner parts come back as
+## document parts, the definition's root in the instance's place, the parts hung off inner
+## parts and the joints naming them following.
+func test_dissolve_puts_the_inner_parts_back() -> void:
+	var doc: ShipDoc = _carbon_doc()
+	var instance: String = doc.root
+	var before: int = doc.parts.size()
+	var joints_before: int = doc.joints.size()
+	var back: PackedStringArray = ShipComponents.dissolve(doc, instance)
+	assert_int(back.size()).is_equal(6)
+	assert_bool(doc.parts.has(instance)).is_false()
+	assert_str(doc.root).is_equal(back[0])
+	assert_str((doc.parts[doc.root] as ShipPart).kind).is_equal(ShipPart.KIND_PRIMITIVE)
+	assert_int(doc.parts.size()).is_equal(before - 1 + 6)
+	# The definition's open links come back as document joints (ADR 0025).
+	assert_int(doc.joints.size()).is_greater(joints_before)
+	var open_back: int = 0
+	for jid: String in doc.joints:
+		if (doc.joints[jid] as ShipJoint).mode == ShipJoint.MODE_OPEN:
+			open_back += 1
+	assert_int(open_back).is_greater_equal(5)
+	for pid: String in doc.part_order():
+		var part: ShipPart = doc.parts[pid]
+		if pid != doc.root:
+			(
+				assert_bool(doc.parts.has(part.parent))
+				. append_failure_message("%s hangs off %s" % [pid, part.parent])
+				. is_true()
+			)
+	for jid: String in doc.joints:
+		var joint: ShipJoint = doc.joints[jid]
+		(
+			assert_bool(doc.parts.has(joint.a) and doc.parts.has(joint.b))
+			. append_failure_message("joint %s-%s" % [joint.a, joint.b])
+			. is_true()
+		)
+	var data: ShipData = ShipData.new()
+	assert_bool(data.load_all()).is_true()
+	var xforms: Dictionary = ShipAttach.resolve_all(doc, data, ShipConfig.defaults())
+	for pid: String in doc.part_order():
+		assert_bool(xforms.has(pid)).append_failure_message(pid).is_true()
+
+
+## An inner part edited through the document's cache (isolation, ADR 0024) reaches its
+## definition once stored, and every instance reads it from there.
+func test_part_at_edits_an_inner_part_through_the_cache() -> void:
+	var doc: ShipDoc = _carbon_doc()
+	var definition: Dictionary = doc.components[(doc.parts[doc.root] as ShipPart).family]
+	var inner_id: String = ""
+	for candidate: String in definition["parts"]:
+		if candidate != str(definition["root"]):
+			inner_id = candidate
+			break
+	var expanded: String = "%s/%s" % [doc.root, inner_id]
+	assert_bool(ShipComponents.inner_exists(doc, expanded)).is_true()
+	var part: ShipPart = doc.part_at(expanded)
+	assert_object(part).is_not_null()
+	var was: Vector3 = part.scale
+	part.scale = was * 1.5
+	# Not stored yet: a fresh read of the definition still says the old scale.
+	assert_vector(ShipComponents.inner_part(doc, expanded).scale).is_equal(was)
+	doc.store_inner(expanded)
+	assert_vector(ShipComponents.inner_part(doc, expanded).scale).is_equal(was * 1.5)
+	assert_object(doc.part_at("nobody/cp_0001")).is_null()
+
+
+## The links between a component's chunks live in its definition (ADR 0025): the inner parts
+## of a carbon nucleus pair with what they hang from and read OPEN - the template's joints -
+## and erasing one puts the wall back; a tunnel on an inner proton keeps its own hatch.
+func test_a_components_inner_parts_pair_and_read_their_definitions_joints() -> void:
+	var doc: ShipDoc = ShipTemplates.build(_data, _cfg, "carbon", {})
+	var definition: Dictionary = doc.components[(doc.parts[doc.root] as ShipPart).family]
+	var ids: PackedStringArray = PackedStringArray([doc.root])
+	for inner_id: String in definition["parts"]:
+		if inner_id != str(definition["root"]):
+			ids.append("%s/%s" % [doc.root, inner_id])
+	var pairs: Array[PackedStringArray] = ShipSeams.pairs_within(doc, ids)
+	assert_int(pairs.size()).append_failure_message(str(pairs)).is_greater_equal(5)
+	for pair: PackedStringArray in pairs:
+		assert_bool(ShipSeams.within_one_instance(doc, pair[0], pair[1])).is_true()
+		assert_str(ShipSeams.mode_for(doc, pair[0], pair[1])).is_equal(ShipSeams.MODE_OPEN)
+	assert_str(ShipSeams.shared_mode(doc, pairs)).is_equal(ShipSeams.MODE_OPEN)
+	# Erase one link: that pair is a wall again, the rest still open; set it back to a doorway.
+	var first: PackedStringArray = pairs[0]
+	assert_bool(ShipComponents.set_inner_joint(doc, first[0], first[1], null)).is_true()
+	assert_str(ShipSeams.mode_for(doc, first[0], first[1])).is_equal(ShipSeams.MODE_WALL)
+	assert_str(ShipSeams.shared_mode(doc, pairs)).is_equal(ShipSeams.MODE_WALL)
+	var doorway: ShipJoint = ShipJoint.new()
+	doorway.mode = ShipJoint.MODE_DOORWAY
+	assert_bool(ShipComponents.set_inner_joint(doc, first[0], first[1], doorway)).is_true()
+	assert_str(ShipSeams.mode_for(doc, first[0], first[1])).is_equal(ShipSeams.MODE_DOORWAY)
+	# A tunnel on an inner proton is NOT within the instance: its seam keeps its own joint.
+	var tunnel: String = ""
+	for pid: String in doc.part_order():
+		if (doc.parts[pid] as ShipPart).role == ShipPart.ROLE_HALLWAY:
+			tunnel = pid
+			break
+	var host: String = (doc.parts[tunnel] as ShipPart).parent
+	assert_bool(ShipSeams.within_one_instance(doc, tunnel, host)).is_false()
+	assert_str(ShipSeams.mode_for(doc, tunnel, host)).is_equal(ShipSeams.MODE_HATCHED)
+
+
+## The default link of a fresh seam (ADR 0027): a tunnel on a module, or a module on a tunnel,
+## is HATCHED; two modules are a WALL; an instance answers with its definition root's role, so an
+## imported arm (a tunnel with its pod) placed on a proton hatches too.
+func test_a_tunnel_meeting_a_module_is_hatched_by_default() -> void:
+	var doc: ShipDoc = ShipTemplates.build(_data, _cfg, "carbon", {})
+	var tunnel: String = ""
+	var pod: String = ""
+	for pid: String in doc.part_order():
+		var part: ShipPart = doc.parts[pid]
+		if part.role == ShipPart.ROLE_HALLWAY and tunnel.is_empty():
+			tunnel = pid
+		if part.role == ShipPart.ROLE_ROOM and part.parent == tunnel and not tunnel.is_empty():
+			pod = pid
+	var host: String = (doc.parts[tunnel] as ShipPart).parent
+	assert_str(ShipSeams.role_of(doc, host)).is_equal(ShipPart.ROLE_ROOM)
+	assert_str(ShipSeams.default_link_for(doc, tunnel, host)).is_equal(ShipSeams.MODE_HATCHED)
+	assert_str(ShipSeams.default_link_for(doc, pod, tunnel)).is_equal(ShipSeams.MODE_HATCHED)
+	assert_str(ShipSeams.default_link_for(doc, pod, doc.root)).is_equal(ShipSeams.MODE_WALL)
+	# An instance of an arm: its root is the tunnel, so it hatches onto a room.
+	var other: ShipDoc = ShipTemplates.build(_data, _cfg, "carbon", {})
+	var added: PackedStringArray = ShipComponents.import_from(doc, other, "CARBON")
+	var arm_id: String = added[added.size() - 2]
+	var arm: String = ShipComponents.instantiate(doc, arm_id, doc.root)
+	assert_str(ShipSeams.role_of(doc, arm)).is_equal(ShipPart.ROLE_HALLWAY)
+	assert_str(ShipSeams.default_link_for(doc, arm, doc.root)).is_equal(ShipSeams.MODE_HATCHED)

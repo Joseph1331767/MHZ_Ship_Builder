@@ -277,6 +277,11 @@ func test_a_component_is_one_room_with_one_seam() -> void:
 	var doc: ShipDoc = _new_doc()
 	var arm: String = _add(doc, doc.root, "cylinder_spar", 0.0, 90.0)
 	var hand: String = _add(doc, arm, "sphere_pod", 0.0, 90.0)
+	# Arm and hand linked open BEFORE the lift: the link travels into the definition (ADR 0025).
+	var open_joint: ShipJoint = ShipJoint.from_dict(
+		doc.new_joint_id(), {"a": arm, "b": hand, "mode": ShipJoint.MODE_OPEN}
+	)
+	doc.joints[open_joint.id] = open_joint
 	var before: ShipSdf = ShipSdf.build(doc, _data, _cfg)
 	assert_int(before.seam_count()).is_equal(2)
 	var component_id: String = ShipComponents.make_component(
@@ -289,10 +294,15 @@ func test_a_component_is_one_room_with_one_seam() -> void:
 			instance = pid
 	assert_str(instance).is_not_empty()
 	var sdf: ShipSdf = ShipSdf.build(doc, _data, _cfg)
-	# Three entries - the root, the instance's proxy, the inner sphere - and ONE seam.
+	# Three entries - the root, the instance's proxy, the inner sphere - and TWO seams: the
+	# instance's on the root, walled, and the inner sphere's on the instance, OPEN as the
+	# definition's joint says (ADR 0025); the exploded view pulls the pieces apart along it.
 	assert_int(sdf.part_count()).is_equal(3)
-	assert_int(sdf.seam_count()).is_equal(1)
+	assert_int(sdf.seam_count()).is_equal(2)
 	assert_str(sdf.seams()[0][ShipSeams.SEAM_CHILD]).is_equal(instance)
+	assert_str(sdf.seams()[0][ShipSeams.SEAM_MODE]).is_equal(ShipSeams.MODE_WALL)
+	assert_str(sdf.seams()[1][ShipSeams.SEAM_HOST]).is_equal(instance)
+	assert_str(sdf.seams()[1][ShipSeams.SEAM_MODE]).is_equal(ShipSeams.MODE_OPEN)
 	(
 		assert_array(ShipSeams.module_ids(doc, ShipAttach.resolve_all(doc, _data, _cfg)))
 		. contains_exactly([doc.root, instance])
@@ -408,6 +418,46 @@ func test_explode_offsets_accumulate_down_the_chain() -> void:
 	assert_float(c.y).is_greater_equal(_cfg.explode_gap_m)
 	assert_float(absf(c.x) + absf(c.z)).is_less(TOL)
 	assert_float(g.y).is_greater(c.y + _cfg.explode_gap_m - TOL)
+
+
+func test_explode_leaves_no_two_modules_overlapping() -> void:
+	# "explode has some parts overlapping and thats incorrect." Clearing a module from its HOST is
+	# all one seam knows about, and nothing in it separates SIBLINGS - which the atomic templates
+	# make ordinary, since a nucleus body and an extremity take their directions from two different
+	# arrangements that are free to point the same way.
+	for name: String in ["lithium", "carbon", "argon"]:
+		var doc: ShipDoc = ShipTemplates.build(_data, _cfg, name, {})
+		var sdf: ShipSdf = ShipSdf.build(doc, _data, _cfg)
+		var boxes: Dictionary = {}
+		var order: PackedStringArray = PackedStringArray()
+		for i: int in sdf.part_count():
+			var module: String = ShipSeams.module_of(sdf.part_id_at(i))
+			if boxes.has(module):
+				boxes[module] = (boxes[module] as AABB).merge(sdf.part_aabb(i))
+			else:
+				order.append(module)
+				boxes[module] = sdf.part_aabb(i)
+		var offsets: Dictionary = ShipSeams.explode_offsets(sdf.seams(), _cfg, boxes)
+
+		var placed: Dictionary = {}
+		for id: String in order:
+			var box: AABB = boxes[id]
+			placed[id] = AABB(box.position + (offsets.get(id, Vector3.ZERO) as Vector3), box.size)
+		for i: int in order.size():
+			for j: int in range(i + 1, order.size()):
+				var one: AABB = placed[order[i]]
+				var two: AABB = placed[order[j]]
+				if not one.intersects(two):
+					continue
+				var shared: AABB = one.intersection(two)
+				var deep: float = minf(shared.size.x, minf(shared.size.y, shared.size.z))
+				(
+					assert_float(deep)
+					. append_failure_message(
+						"%s exploded: %s and %s still overlap" % [name, order[i], order[j]]
+					)
+					. is_less_equal(TOL)
+				)
 
 
 func test_seams_are_deterministic() -> void:
@@ -686,3 +736,68 @@ func test_a_seam_style_round_trips_and_flat_writes_no_key() -> void:
 	# An unrecognised style is flat, not a crash and not a silently different geometry.
 	var odd: ShipJoint = ShipJoint.from_dict("j_0002", {"a": "x", "b": "y", "seam": "bevelled"})
 	assert_str(odd.seam_style).is_equal(ShipJoint.SEAM_FLAT)
+
+
+# ---------------------------------------------------------------- linking a selection
+
+
+func test_pairs_within_names_the_seams_inside_a_selection() -> void:
+	# What LINK acts on when several parts are selected: the seams internal to the selection, and
+	# not the one that leaves it.
+	var doc: ShipDoc = _new_doc()
+	var a: String = _add(doc, doc.root, "box_hull", 0.0, 90.0)
+	var b: String = _add(doc, a, "box_hull", 0.0, 90.0)
+	var outside: String = _add(doc, doc.root, "box_hull", 0.0, -90.0)
+
+	var pairs: Array[PackedStringArray] = ShipSeams.pairs_within(
+		doc, PackedStringArray([doc.root, a, b])
+	)
+	assert_int(pairs.size()).is_equal(2)
+	var keys: PackedStringArray = PackedStringArray()
+	for pair: PackedStringArray in pairs:
+		keys.append(ShipDoc.joint_key_for(pair[0], pair[1]))
+	keys.sort()
+	var wanted: PackedStringArray = PackedStringArray(
+		[ShipDoc.joint_key_for(a, doc.root), ShipDoc.joint_key_for(b, a)]
+	)
+	wanted.sort()
+	assert_array(keys).is_equal(wanted)
+
+	# The part left out of the selection contributes no seam, however joined it is.
+	for pair: PackedStringArray in pairs:
+		assert_bool(pair.has(outside)).is_false()
+
+	# One part on its own names nothing; a part and a stranger name nothing either.
+	assert_int(ShipSeams.pairs_within(doc, PackedStringArray([a])).size()).is_equal(0)
+	assert_int(ShipSeams.pairs_within(doc, PackedStringArray()).size()).is_equal(0)
+
+
+func test_two_parts_are_a_pair_even_when_neither_stands_on_the_other() -> void:
+	# Two siblings that grew into each other meet as truly as a child meets its host, and a joint
+	# is keyed over an unordered pair rather than over the attach tree. LINK on exactly two parts
+	# must reach them.
+	var doc: ShipDoc = _new_doc()
+	var one: String = _add(doc, doc.root, "box_hull", 0.0, 90.0)
+	var two: String = _add(doc, doc.root, "box_hull", 0.0, -90.0)
+	var pairs: Array[PackedStringArray] = ShipSeams.pairs_within(doc, PackedStringArray([one, two]))
+	assert_int(pairs.size()).is_equal(1)
+	assert_str(ShipDoc.joint_key_for(pairs[0][0], pairs[0][1])).is_equal(
+		ShipDoc.joint_key_for(one, two)
+	)
+
+
+func test_shared_mode_reports_the_wall_when_a_selection_disagrees() -> void:
+	# A mixed selection unifies before it cycles: reporting the wall makes the next step land on
+	# DOORWAY for all of them, where reporting whichever mode came first would make the result
+	# depend on dictionary order.
+	var doc: ShipDoc = _new_doc()
+	var a: String = _add(doc, doc.root, "box_hull", 0.0, 90.0)
+	var b: String = _add(doc, a, "box_hull", 0.0, 90.0)
+	var ids: PackedStringArray = PackedStringArray([doc.root, a, b])
+	var pairs: Array[PackedStringArray] = ShipSeams.pairs_within(doc, ids)
+
+	assert_str(ShipSeams.shared_mode(doc, pairs)).is_equal(ShipSeams.MODE_WALL)
+	_join(doc, doc.root, a, ShipJoint.MODE_OPEN)
+	assert_str(ShipSeams.shared_mode(doc, pairs)).is_equal(ShipSeams.MODE_WALL)
+	_join(doc, a, b, ShipJoint.MODE_OPEN)
+	assert_str(ShipSeams.shared_mode(doc, pairs)).is_equal(ShipSeams.MODE_OPEN)

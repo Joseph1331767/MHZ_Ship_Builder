@@ -69,7 +69,7 @@ extends Node3D
 ## rendering effect/node to be listed among wire, flat, shaded options". So it is a mode: the body
 ## drops to the ramp's dark end and the silhouette rises to its top, which reads as an outlined
 ## shell rather than as a shaded solid with a bright edge.
-enum DisplayMode { FLAT, WIREFRAME, SHADED_WIRE, XRAY, FRESNEL }
+enum DisplayMode { FLAT, WIREFRAME, SHADED_WIRE, XRAY, FRESNEL, INSIDE }
 
 ## Metadata key carrying the part id on each pick body.
 const PART_META: String = "mhz_part_id"
@@ -78,6 +78,13 @@ const PICK_LAYER: int = 1
 
 ## Faceted solid shading — see _faceted_material and FOLLOWUPS F7.
 const FACETED_SHADER: String = "res://shaders/part_faceted.gdshader"
+## The shader's own default cut plane: infinitely far behind everything (ADR 0028).
+## The INTERIOR set's shading (ADR 0028): the cavity shades hard so it reads as a hollow, the
+## far outer wall keeps a floor so the wall thickness reads, and the distance cue is light.
+const INTERIOR_AMBIENT: float = 0.5
+const INTERIOR_CAVITY_AMBIENT: float = 0.12
+const INTERIOR_DEPTH_STRENGTH: float = 0.1
+const NO_CUT: Vector4 = Vector4(0.0, 0.0, 0.0, -1.0e9)
 const FACET_LIGHT_DIR: Vector3 = Vector3(-0.45, -0.80, -0.40)
 const FACET_AMBIENT: float = 0.28
 ## How far along the ramp the distance cue may pull a fragment. Enough that a far face drops a
@@ -166,6 +173,11 @@ var _mode: int = DisplayMode.SHADED_WIRE
 var _visuals: Dictionary = {}
 var _selected: Dictionary = {}
 var _solid_materials: Dictionary = {}
+## The faceted shader by cull mode ("", "back", "front") - see _faceted_shader.
+var _faceted_shaders: Dictionary = {}
+## The component instance being edited in isolation, or "" (ADR 0024).
+var _isolated: String = ""
+var _washed: Material = null
 var _wire_materials: Dictionary = {}
 var _ghost: MeshInstance3D = null
 ## The MIRRORED preview, shown only while the pending placement would actually generate a
@@ -192,10 +204,14 @@ var _m_per_px: float = 0.0
 ## The EXPLODED view is showing: every part visual and the gizmo hide behind the module bakes
 ## (ShipExplodeView), and come back untouched when it clears.
 var _exploded: bool = false
+## Placed ids the current bake covers (the baked view hides these primitives), ADR 0028.
+var _covered: Dictionary = {}
 ## Distance-cue range in metres, pushed in from ShipView3D as the orbit camera moves. Equal values
 ## disable the cue, which is the correct behaviour before the first camera frame.
 var _depth_near: float = 0.0
 var _depth_far: float = 0.0
+## The INTERIOR cutaway plane the interior materials wear (ADR 0028).
+var _cut_plane: Vector4 = NO_CUT
 ## Part hidden because it is the one currently being re-placed; "" when none.
 var _suppressed: String = ""
 ## Last document and config handed to sync()/rebuild(). Cached ONLY so the ghost can answer
@@ -691,7 +707,7 @@ func selection() -> PackedStringArray:
 ## HIT-TESTED there can never drift apart.
 func _refresh_handles() -> void:
 	var ids: PackedStringArray = selection()
-	if ids.size() != 1 or _exploded:
+	if ids.size() != 1 or _exploded or _is_covered(ids[0]):
 		_free_handles()
 		return
 	var v: PartVisual = _visuals.get(ids[0], null)
@@ -861,13 +877,29 @@ func part_has_seam(pid: String) -> bool:
 
 ## Hide every part and the gizmo behind the exploded view, or bring them back. The visuals
 ## are kept, not destroyed: assembling again is a visibility flip, not a rebuild.
-func set_exploded(on: bool) -> void:
-	if on == _exploded:
+func set_exploded(on: bool, covered: PackedStringArray = PackedStringArray()) -> void:
+	# With [param covered] given, only the parts the bake COVERS hide (the baked view, ADR
+	# 0028): a part placed since the bake still shows as its primitive, so the resolved ship stays
+	# on screen while the player works and a new part is not invisible until the next bake.
+	var next_covered: Dictionary = {}
+	if on:
+		for pid: String in covered:
+			next_covered[pid] = true
+	var hide_all: bool = on and covered.is_empty()
+	if hide_all == _exploded and next_covered == _covered:
 		return
-	_exploded = on
+	_exploded = hide_all
+	_covered = next_covered
 	for key: Variant in _visuals.keys():
 		_apply_visibility(_visuals[key])
 	_refresh_handles()
+
+
+## True when the bake covers [param pid] (its piece stands where the primitive would).
+func _is_covered(pid: String) -> bool:
+	if _covered.is_empty():
+		return false
+	return _covered.has(pid) or _covered.has(ShipSymmetry.source_of_twin(pid))
 
 
 func is_exploded() -> bool:
@@ -885,6 +917,69 @@ func materials_for(mode: int, selected: bool) -> Array:
 	if mode != DisplayMode.FLAT and mode != DisplayMode.FRESNEL:
 		wire = _wire_material(mode, selected)
 	return [solid, wire]
+
+
+## The INSIDE mode's materials, one per named surface of a baked piece, as
+## `{"exterior": Material, "interior": Material, "cut": Material, "wire": Material}`.
+##
+## The materials of the INTERIOR mode, per named surface (ADR 0022, corrected in ADR 0024):
+## "showing only the inner mesh faces (excluding their back faces) and the exterior mesh back
+## faces (excluding their outward facing faces) yields the interior view." The interior
+## surface draws its FRONT faces only, the exterior surface its BACK faces only, the cuts (the
+## wall thickness at every opening) both sides; nothing is translucent and there is no wire, so
+## the near wall is simply not there and the far cavity wall faces the camera from any angle.
+func inside_materials(selected: bool) -> Dictionary:
+	var key: String = "inside|%d" % int(selected)
+	if _solid_materials.has(key):
+		return _solid_materials[key]
+	# The faceted shader is cull_disabled by design (mirrored twins, F7); here each surface is
+	# culled to the one side the mode wants. Measured before this: the interior surface drew both
+	# its sides and the ship read solid again.
+	# GODOT'S FRONT FACE IS CLOCKWISE. The engine's pieces wind by the right-hand rule (normals
+	# out of the material), so from the side a surface faces, Godot sees its BACK faces: the
+	# hull's outside is back faces from outside, the cavity wall is back faces from the cavity.
+	# Hence the exterior keeps its FRONTS (its inner side, the far wall seen from within) and the
+	# interior keeps its BACKS (the cavity side). Measured the other way round: the near outer
+	# wall drew as a solid blob and the far cavity wall as a black hole (ADR 0028).
+	var out: Dictionary = {
+		"exterior": _faceted_material(DisplayMode.SHADED_WIRE, selected, false, "back"),
+		"interior": _faceted_material(DisplayMode.SHADED_WIRE, selected, false, "front"),
+		"cut": _faceted_material(DisplayMode.SHADED_WIRE, selected, false),
+		"wire": null,
+	}
+	for name: String in ["exterior", "interior", "cut"]:
+		var m: ShaderMaterial = out[name]
+		m.set_shader_parameter("cut_plane", _cut_plane)
+		m.set_shader_parameter("depth_strength", INTERIOR_DEPTH_STRENGTH)
+	# The cavity wall is a bowl, and a bowl lit flat reads as a ball (measured: "filled solid").
+	# Strong directional shading with a low floor makes it shade bright-to-dark the way a hollow
+	# does; the far outer wall's inner side keeps a higher floor so the wall thickness reads.
+	(out["interior"] as ShaderMaterial).set_shader_parameter("ambient", INTERIOR_CAVITY_AMBIENT)
+	(out["exterior"] as ShaderMaterial).set_shader_parameter("ambient", INTERIOR_AMBIENT)
+	_solid_materials[key] = out
+	return out
+
+
+## ISOLATION (ADR 0024): [param instance_id] is the component instance being edited, or "" to
+## close it; [param washed] is what everything outside it wears (dim and translucent, made by
+## the view from the theme). While open, a pick inside resolves to the inner part rather than
+## the instance, so the component's own parts can be selected and edited one by one -
+## SketchUp's double-click. [method part_id_for] and the materials read it.
+func set_isolated(instance_id: String, washed: Material = null) -> void:
+	if instance_id == _isolated and (washed == null or washed == _washed):
+		return
+	_isolated = instance_id
+	if washed != null:
+		_washed = washed
+	for key: Variant in _visuals.keys():
+		_apply_materials(_visuals[key])
+
+
+## True when [param pid] (a visual's id, expanded or not) belongs to the isolated instance.
+func _in_isolation(pid: String) -> bool:
+	if _isolated.is_empty():
+		return false
+	return ShipSymmetry.source_of_twin(ShipComponents.instance_of(pid)) == _isolated
 
 
 ## True when `mode` draws the solid at all.
@@ -950,11 +1045,21 @@ func part_id_for(node: Node) -> String:
 	if node == null:
 		return ""
 	if node.has_meta(PART_META):
-		return ShipComponents.instance_of(str(node.get_meta(PART_META)))
+		return _resolve_pick(str(node.get_meta(PART_META)))
 	var parent: Node = node.get_parent()
 	if parent != null and parent.has_meta(PART_META):
-		return ShipComponents.instance_of(str(parent.get_meta(PART_META)))
+		return _resolve_pick(str(parent.get_meta(PART_META)))
 	return ""
+
+
+## The id a picked visual stands for: its instance - or, inside the isolated component, the
+## inner part itself (ADR 0024). A pick on the isolated instance's own proxy (its definition
+## root) is that root's expanded id, which the instance's key alone cannot say; it stays the
+## instance.
+func _resolve_pick(raw: String) -> String:
+	if not _isolated.is_empty() and ShipComponents.is_expanded_id(raw) and _in_isolation(raw):
+		return raw
+	return ShipComponents.instance_of(raw)
 
 
 ## Union of every part's preview mesh AABB, in this node's local space. Empty when the
@@ -1005,7 +1110,7 @@ func _apply_visibility(v: PartVisual) -> void:
 	# symmetry twin: the ghost shows a twin of its own, so the placed one would sit stale at
 	# the old position beside it.
 	var owner: String = ShipSymmetry.source_of_twin(ShipComponents.instance_of(v.pid))
-	var shown: bool = owner != _suppressed and not _exploded
+	var shown: bool = owner != _suppressed and not _exploded and not _is_covered(v.pid)
 	v.solid.visible = shown and _mode != DisplayMode.WIREFRAME
 	# FRESNEL draws no wireframe: the rim IS the edge, and a bright wire over it would bury the
 	# very thing the mode exists to show.
@@ -1016,6 +1121,10 @@ func _apply_materials(v: PartVisual) -> void:
 	if v == null:
 		return
 	_apply_visibility(v)
+	if not _isolated.is_empty() and not _in_isolation(v.pid) and _washed != null:
+		v.solid.material_override = _washed
+		v.wire.visible = false
+		return
 	v.solid.material_override = _solid_material(_mode, v.selected, v.flipped)
 	v.wire.material_override = _wire_material(_mode, v.selected)
 
@@ -1028,6 +1137,12 @@ func _solid_material(mode: int, selected: bool, flipped: bool) -> Material:
 	if _solid_materials.has(key):
 		return _solid_materials[key]
 
+	if mode == DisplayMode.INSIDE:
+		# A preview part has one surface, so it wears the exterior's two passes: opaque backs,
+		# translucent fronts. The exploded view splits a piece's surfaces and does better.
+		var exterior: Material = inside_materials(selected)["exterior"]
+		_solid_materials[key] = exterior
+		return exterior
 	if mode != DisplayMode.XRAY:
 		var faceted: ShaderMaterial = _faceted_material(mode, selected, flipped)
 		_solid_materials[key] = faceted
@@ -1081,9 +1196,11 @@ func _solid_material(mode: int, selected: bool, flipped: bool) -> Material:
 ## shading is computed in the shader against a fixed world direction. Without this, every face is
 ## one flat colour and SHADED_WIRE is indistinguishable from FLAT — which is exactly what shipped
 ## and exactly what the author reported.
-func _faceted_material(mode: int, selected: bool, _flipped: bool) -> ShaderMaterial:
+func _faceted_material(
+	mode: int, selected: bool, _flipped: bool, cull: String = ""
+) -> ShaderMaterial:
 	var m: ShaderMaterial = ShaderMaterial.new()
-	m.shader = load(FACETED_SHADER) as Shader
+	m.shader = _faceted_shader(cull)
 	m.set_shader_parameter("light_dir", FACET_LIGHT_DIR)
 	var fresnel: bool = mode == DisplayMode.FRESNEL
 	m.set_shader_parameter("ambient", FRESNEL_AMBIENT if fresnel else FACET_AMBIENT)
@@ -1099,6 +1216,23 @@ func _faceted_material(mode: int, selected: bool, _flipped: bool) -> ShaderMater
 	# normal on back faces via FRONT_FACING, so a negative-determinant basis shades correctly
 	# with this same material.
 	return m
+
+
+## The faceted shader as authored (cull_disabled), or the same code culling one side: "back"
+## draws front faces only, "front" draws back faces only (ADR 0024, the INTERIOR mode). The
+## shader flips its normal on back faces itself, so the culled variants shade the same way.
+## Built once from the authored file by editing its render_mode line - one source of truth.
+func _faceted_shader(cull: String) -> Shader:
+	if _faceted_shaders.has(cull):
+		return _faceted_shaders[cull]
+	var base: Shader = load(FACETED_SHADER) as Shader
+	if cull.is_empty():
+		_faceted_shaders[cull] = base
+		return base
+	var variant: Shader = Shader.new()
+	variant.code = base.code.replace("cull_disabled", "cull_" + cull)
+	_faceted_shaders[cull] = variant
+	return variant
 
 
 ## Upload a named ShipTheme ramp as the shader's shading bands.
@@ -1152,15 +1286,28 @@ func _apply_depth(m: ShaderMaterial) -> void:
 ## Distance-cue range, in metres from the camera. ShipView3D derives it from the orbit distance
 ## and the scene bounds so the ramp always spans the model rather than a fixed world range - at a
 ## fixed range the cue would wash out entirely on a zoomed-in part and clip on a zoomed-out ship.
-func set_depth_range(near_m: float, far_m: float) -> void:
-	if is_equal_approx(near_m, _depth_near) and is_equal_approx(far_m, _depth_far):
+func set_depth_range(near_m: float, far_m: float, cut_plane: Vector4 = NO_CUT) -> void:
+	# [param cut_plane] is the INTERIOR mode's cutaway (ADR 0028): normal in xyz, distance in w;
+	# only the interior materials wear it, every other mode keeps the shader's default.
+	var same_depth: bool = (
+		is_equal_approx(near_m, _depth_near) and is_equal_approx(far_m, _depth_far)
+	)
+	if same_depth and cut_plane.is_equal_approx(_cut_plane):
 		return
 	_depth_near = near_m
 	_depth_far = far_m
+	_cut_plane = cut_plane
 	for key: Variant in _solid_materials.keys():
-		var mat: Variant = _solid_materials[key]
-		if mat is ShaderMaterial:
-			_apply_depth(mat)
+		var entry: Variant = _solid_materials[key]
+		if entry is ShaderMaterial:
+			_apply_depth(entry)
+		elif entry is Dictionary:
+			# The INTERIOR set: exterior, interior and cut, each a faceted variant.
+			for name: Variant in entry as Dictionary:
+				var mat: Variant = (entry as Dictionary)[name]
+				if mat is ShaderMaterial:
+					_apply_depth(mat)
+					(mat as ShaderMaterial).set_shader_parameter("cut_plane", _cut_plane)
 	if _ghost != null and _ghost.material_override is ShaderMaterial:
 		_apply_depth(_ghost.material_override)
 

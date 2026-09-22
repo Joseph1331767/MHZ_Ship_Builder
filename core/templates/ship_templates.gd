@@ -220,12 +220,15 @@ static func build(
 	root_part.role = ROLE_ROOM
 	root_part.display_name = _room_name(nodes[0], 0)
 	part_of_node[0] = doc.root
+	var nucleus_ids: PackedStringArray = PackedStringArray([doc.root])
 
 	for i: int in range(1, nodes.size()):
 		var node: Dictionary = nodes[i]
 		var parent_index: int = int(node.get("parent", 0))
 		var parent_id: String = part_of_node[parent_index]
 		var dir: Vector3 = node.get("dir", Vector3.UP)
+		if bool(node.get("world", false)):
+			dir = _local_direction(doc, data, conf, parent_id, dir)
 		var angles: Vector2 = ShipAttach.angles_from_direction(dir)
 
 		# A NUCLEUS body is fused straight into its neighbour: no tunnel, no hatch, and sunk far
@@ -251,7 +254,14 @@ static func build(
 			fused.display_name = _room_name(node, i)
 			fused.asymmetric = true
 			part_of_node[i] = doc.add_part(fused)
+			nucleus_ids.append(part_of_node[i])
 			continue
+
+		# The first body that is not fused: the nucleus is complete, so it becomes the ship's
+		# root component before anything hangs off it (ADR 0024).
+		if nucleus_ids.size() > 1 and doc.root == nucleus_ids[0]:
+			part_of_node = _lift_nucleus(doc, nucleus_ids, part_of_node, _symbol_of(nodes))
+			parent_id = part_of_node[parent_index]
 
 		var tunnel: ShipPart = ShipPart.new()
 		tunnel.parent = parent_id
@@ -296,6 +306,8 @@ static func build(
 
 		_hatch(doc, parent_id, tunnel_id, hatch, data)
 		_hatch(doc, tunnel_id, room_id, hatch, data)
+	if nucleus_ids.size() > 1 and doc.root == nucleus_ids[0]:
+		part_of_node = _lift_nucleus(doc, nucleus_ids, part_of_node, _symbol_of(nodes))
 	return doc
 
 
@@ -312,16 +324,43 @@ static func _nodes_for(data: ShipData, template_id: String) -> Array[Dictionary]
 	if kind_of(template_id) == KIND_ELEMENT:
 		var id: String = _bare_id(template_id)
 		var symbol: String = _text(e.get("symbol"), "")
-		# The core, then the rest of the nucleus fused around it, then the extremities.
+		var plan: Dictionary = _layout(data, e)
+		var nucleus: Array[Vector3] = plan["nucleus"]
+		var nucleus_slots: PackedInt32Array = plan["nucleus_slots"]
+		var node_of_slot: Dictionary = {}
+		# The root, then the rest of the nucleus fused to it, then the extremities.
 		out.append(_node(0, Vector3.UP, id, symbol, LINK_ROOT))
-		for dir: Vector3 in nucleus_dirs(data, nucleus_count(e)):
+		if int(plan["root_slot"]) >= 0:
+			node_of_slot[int(plan["root_slot"])] = 0
+		for i: int in nucleus.size():
 			if out.size() >= MAX_NODES:
 				break
-			out.append(_node(0, dir, id, symbol, LINK_FUSE))
-		for dir: Vector3 in extremity_dirs(data, e):
+			if i < nucleus_slots.size() and nucleus_slots[i] >= 0:
+				node_of_slot[nucleus_slots[i]] = out.size()
+			out.append(_node(0, nucleus[i], id, symbol, LINK_FUSE))
+
+		# A POD IS BUILT ON THE PROTON WHOSE SLOT IT SHARES, and continues straight out from it -
+		# a tunnel's own +Y already points away from the core, so Vector3.UP here is "keep going".
+		# Hanging every pod off the ROOT instead is what the old hub-and-spoke nucleus did, and on
+		# a nucleus that fills its arrangement it does not work: the pod's slot is occupied by a
+		# proton, so the tunnel would set off straight through it. Measured on a carbon class, a
+		# rim proton had eaten the very face its own pod's tunnel was seated on, and the tunnel
+		# joint then cut nothing at all.
+		var extremity: Array[Vector3] = plan["extremity"]
+		var extremity_slots: PackedInt32Array = plan["extremity_slots"]
+		for i: int in extremity.size():
 			if out.size() >= MAX_NODES:
 				break
-			out.append(_node(0, dir, id, symbol, LINK_TUNNEL))
+			var stem: int = 0
+			var dir: Vector3 = extremity[i]
+			var slot: int = extremity_slots[i] if i < extremity_slots.size() else -1
+			var world: bool = false
+			if node_of_slot.has(slot):
+				# On its own proton, reaching along the SLOT'S direction in ship space - level for
+				# a rim slot - not along whatever the proton's +Y turned out to be.
+				stem = int(node_of_slot[slot])
+				world = true
+			out.append(_node(stem, dir, id, symbol, LINK_TUNNEL, world))
 		return out
 
 	var raw: Array = e.get("nodes", []) as Array
@@ -355,9 +394,43 @@ static func _nodes_for(data: ShipData, template_id: String) -> Array[Dictionary]
 
 
 static func _node(
-	parent: int, dir: Vector3, element_id: String, symbol: String, link: String = LINK_TUNNEL
+	parent: int,
+	dir: Vector3,
+	element_id: String,
+	symbol: String,
+	link: String = LINK_TUNNEL,
+	world: bool = false
 ) -> Dictionary:
-	return {"parent": parent, "dir": dir, "element": element_id, "symbol": symbol, "link": link}
+	return {
+		"parent": parent,
+		"dir": dir,
+		"element": element_id,
+		"symbol": symbol,
+		"link": link,
+		"world": world,
+	}
+
+
+## [param dir], a direction in SHIP space, expressed in the frame [param parent_id] actually stands
+## in - which is only known once the parts placed so far have been resolved.
+##
+## A part's own +Y is the mount normal where it landed on its parent, and that depends on the
+## FAMILY: on a box a 30-degree ray strikes a side face and the normal is level; on a sphere the
+## normal is the ray itself and the part tilts 30 degrees. A pod told to continue along its proton's
+## +Y therefore reached level on a box hull and down on a sphere hull - "the sphere one has the
+## electron pods all angled down below the craft making a pyrimid. all shaped hull versions should
+## look the same" (2026-09-05). Naming the direction in ship space and converting it here is what
+## makes every family lay out alike.
+static func _local_direction(
+	doc: ShipDoc, data: ShipData, conf: ShipConfig, parent_id: String, dir: Vector3
+) -> Vector3:
+	var shapes: Dictionary = ShipAttach.resolve_shapes(doc, data, conf)
+	var xforms: Dictionary = ShipAttach.resolve_all_from_shapes(doc, shapes, conf)
+	if not xforms.has(parent_id):
+		return dir
+	var basis: Basis = (xforms[parent_id] as Transform3D).basis.orthonormalized()
+	var local: Vector3 = basis.inverse() * dir
+	return local.normalized() if local.length_squared() > 1.0e-12 else dir
 
 
 ## Nucleus body count of an element entry: one per proton, capped at [constant MAX_NUCLEUS].
@@ -378,35 +451,164 @@ static func body_count(element: Dictionary) -> int:
 	return maxi(nucleus_count(element) + extremity_count(element), 1)
 
 
-## Directions the fused nucleus bodies sit in - one fewer than the count, because the first body
-## IS the centre they are fused around.
-static func nucleus_dirs(data: ShipData, count: int) -> Array[Vector3]:
-	var out: Array[Vector3] = []
-	if count <= 1:
-		return out
-	var dirs: Array[Vector3] = _dirs_of(data, _arrangement_holding(data, count - 1))
-	for i: int in mini(count - 1, dirs.size()):
-		out.append(dirs[i])
-	return out
+## Where every body of a class goes, as
+## `{"nucleus": Array[Vector3], "nucleus_slots": PackedInt32Array, "extremity":
+## Array[Vector3], "extremity_slots": PackedInt32Array, "root_slot": int}`.
+##
+## THE NUCLEUS SITS ON AN ARRANGEMENT, IT IS NOT WRAPPED AROUND A BODY AT THE CENTRE. The
+## arrangement holding as many slots as the class has protons is chosen, the root takes the slot
+## nearest straight up, and every other slot becomes a direction FROM the root's slot to it. A
+## carbon class is six bodies on an octahedron: "the central one should be the singular top, and the
+## 4 rim and lower added" (2026-09-04). The rim comes out at 45 degrees down and out, the sixth
+## straight down, and the root's whole upper half stays in the open air.
+##
+## THE EXTREMITIES TAKE SLOTS OF THAT SAME ARRANGEMENT - "the valance electron count should be half
+## or full resonant to the structure of protons at all times" - most perpendicular to the root's
+## slot first, which puts them around the waist. A carbon class hangs its four valence pods on the
+## four rim slots of the octahedron its six protons sit on; a neon class fills all eight slots of
+## the cube. Ties fall to the earlier slot, for determinism (AGENTS section 8b).
+##
+## `nucleus_slots` and `extremity_slots` say WHICH slot each body took, which is how a pod finds the
+## proton it belongs to: [method _nodes_for] builds it on that body rather than on the root, so the
+## tunnel continues the line the proton is already on instead of cutting across it. -1 means the
+## slot is not known, which happens only on the fallback below.
+##
+## RETIRED(ADR 0017, 2026-09-04): the arrangement holding `count - 1`, spread around a body at the
+## centre. That body ends up buried under its own neighbours - "the central completely burried one
+## still exists and thats incorrect" - and the seams that bury it then hollow its hull away to
+## slivers. A cluster with nothing at its centre has no such body to lose. The body COUNT is
+## unchanged either way: one root plus `count - 1` directions.
+static func _layout(data: ShipData, element: Dictionary) -> Dictionary:
+	var count: int = nucleus_count(element)
+	var nucleus: Array[Vector3] = []
+	var nucleus_slots: PackedInt32Array = PackedInt32Array()
+	var slots: Array[Vector3] = _dirs_of(data, _arrangement_holding(data, count))
+	var root: int = -1
+	if count > 1 and slots.size() >= count:
+		root = root_slot(slots)
+		for i: int in slots.size():
+			if i == root or nucleus.size() >= count - 1:
+				continue
+			var hang: Vector3 = _hang_direction(slots, root, i)
+			if hang.length_squared() <= 1.0e-12:
+				continue
+			nucleus.append(hang)
+			nucleus_slots.append(i)
+	elif count > 1:
+		# No arrangement in the pack is big enough. Fall back to the old hub and spoke rather than
+		# hand back a short nucleus: a class with fewer bodies than its Z is a worse answer than a
+		# class with a body in the middle.
+		var spokes: Array[Vector3] = _dirs_of(data, _arrangement_holding(data, count - 1))
+		for i: int in mini(count - 1, spokes.size()):
+			nucleus.append(spokes[i])
+			nucleus_slots.append(-1)
 
-
-## Directions the extremities reach in: the PERIOD's own arrangement, stepped up to a larger one
-## when the class has more extremities than that arrangement has berths.
-static func extremity_dirs(data: ShipData, element: Dictionary) -> Array[Vector3]:
-	var out: Array[Vector3] = []
+	var extremity: Array[Vector3] = []
+	var extremity_slots: PackedInt32Array = PackedInt32Array()
 	var wanted: int = extremity_count(element)
-	if wanted <= 0:
-		return out
-	var period: int = int(_num(element.get("period"), 1.0))
-	var name: String = _text(
-		_dict_of(_dict_of(_pack(data).get(SECTION_PERIODS)).get(str(period))).get("arrangement"), ""
-	)
-	var dirs: Array[Vector3] = _dirs_of(data, name)
-	if dirs.size() < wanted:
-		dirs = _dirs_of(data, _arrangement_holding(data, wanted))
-	for i: int in mini(wanted, dirs.size()):
-		out.append(dirs[i])
-	return out
+	if wanted > 0 and root >= 0 and slots.size() >= wanted:
+		var up: Vector3 = slots[root]
+		var order: Array[int] = []
+		for i: int in slots.size():
+			order.append(i)
+		order.sort_custom(func(a: int, b: int) -> bool: return _waist_first(slots, up, a, b))
+		for i: int in wanted:
+			extremity.append(slots[order[i]])
+			extremity_slots.append(order[i])
+	elif wanted > 0:
+		# Too few slots to be resonant with: the PERIOD's own arrangement, stepped up to a larger
+		# one when even that has too few berths.
+		var period: int = int(_num(element.get("period"), 1.0))
+		var name: String = _text(
+			_dict_of(_dict_of(_pack(data).get(SECTION_PERIODS)).get(str(period))).get(
+				"arrangement"
+			),
+			""
+		)
+		var dirs: Array[Vector3] = _dirs_of(data, name)
+		if dirs.size() < wanted:
+			dirs = _dirs_of(data, _arrangement_holding(data, wanted))
+		for i: int in mini(wanted, dirs.size()):
+			extremity.append(dirs[i])
+			extremity_slots.append(-1)
+
+	return {
+		"nucleus": nucleus,
+		"nucleus_slots": nucleus_slots,
+		"extremity": extremity,
+		"extremity_slots": extremity_slots,
+		"root_slot": root,
+	}
+
+
+## The direction the body in slot [param i] hangs off the root in.
+##
+## EVERY FUSED BODY SITS THE SAME DISTANCE FROM THE ROOT - the attach model seats it at one depth
+## along the mount normal - so the arrangement's vertices cannot be reproduced as such: a body at
+## the octahedron's far pole is twice as far from the top as one on its rim. What can be kept is
+## the slot's BEARING and the slot's HEIGHT, taken as a fraction of the way from the top of the
+## arrangement to its bottom. A rim slot at the equator is halfway down, so it is hung at the
+## direction whose fall is half its length - 30 degrees below level - and lands halfway between the
+## top body and the bottom one: "the 4 rim protons are not vertically centered between the top and
+## bottom proton" (2026-09-04).
+##
+## Thirty degrees on a box root also strikes a SIDE face rather than an edge, so the rim body
+## mounts level and the pod that grows out of it reaches sideways, not down. The old bearing -
+## straight from the top vertex to the rim vertex, 45 degrees - ran exactly along the box's edge,
+## where the surface normal is diagonal, which is why every valence pod pointed 45 degrees at the
+## floor.
+##
+## A slot at the very bottom AND off to one side - the far corners of a cube - has no direction
+## that puts it right at one seating depth; it keeps its plain bearing from the root rather than
+## being folded onto the axis with the others.
+static func _hang_direction(slots: Array[Vector3], root: int, i: int) -> Vector3:
+	var rel: Vector3 = slots[i] - slots[root]
+	var flat: Vector3 = Vector3(rel.x, 0.0, rel.z)
+	var lowest: float = slots[root].y
+	for slot: Vector3 in slots:
+		lowest = minf(lowest, slot.y)
+	var span: float = slots[root].y - lowest
+	if span <= 1.0e-6:
+		return rel.normalized()
+	var drop: float = clampf((slots[root].y - slots[i].y) / span, 0.0, 1.0)
+	if flat.length_squared() <= 1.0e-12:
+		return Vector3.DOWN if drop > 0.0 else rel.normalized()
+	var reach: float = sqrt(maxf(1.0 - drop * drop, 0.0))
+	if reach <= 0.05:
+		return rel.normalized()
+	return (flat.normalized() * reach + Vector3.DOWN * drop).normalized()
+
+
+## Slot [param a] before slot [param b] when the pods are handed out: most perpendicular to the
+## root's own slot first, so they land around the waist rather than on top of the cluster. The
+## index breaks a tie, because determinism is a gate.
+static func _waist_first(slots: Array[Vector3], up: Vector3, a: int, b: int) -> bool:
+	var ka: float = absf(slots[a].dot(up))
+	var kb: float = absf(slots[b].dot(up))
+	if absf(ka - kb) > 1.0e-6:
+		return ka < kb
+	return a < b
+
+
+## Which slot of [param dirs] the root body takes: the one nearest straight up, so a cluster reads
+## as a top with the rest hung below it. Ties fall to the earlier slot.
+static func root_slot(dirs: Array[Vector3]) -> int:
+	var best: int = 0
+	for i: int in dirs.size():
+		if dirs[i].y > dirs[best].y + 1.0e-6:
+			best = i
+	return best
+
+
+## Directions the fused nucleus bodies sit in, measured FROM THE ROOT BODY - one fewer than the
+## count, because the root is one of them. See [method _layout].
+static func nucleus_dirs(data: ShipData, count: int) -> Array[Vector3]:
+	return _layout(data, {"z": count, "period": 1.0, "valence": 0.0})["nucleus"]
+
+
+## Directions the extremities reach in - the arrangement SLOTS they take. See [method _layout].
+static func extremity_dirs(data: ShipData, element: Dictionary) -> Array[Vector3]:
+	return _layout(data, element)["extremity"]
 
 
 ## The name of the smallest arrangement in the pack with at least [param wanted] directions.
@@ -551,6 +753,61 @@ static func _hatch(
 
 ## Default params for a hatch family, read straight off the pack's own ranges. A hatch record with
 ## empty params would resolve to nothing the day the hatch geometry is implemented.
+## The nucleus - the root and the bodies fused into it - is ONE COMPONENT, the ship's root
+## instance (ADR 0024): click one proton and the clump is selected, double-click and it opens,
+## and it is in the palette to place again. Its chunks are linked OPEN in the definition (ADR
+## 0025) - one room by default, and every link editable. Every node that named a nucleus body
+## now names its inner part ("<instance>/<inner>") so tunnels hang off the proton they were laid
+## out for; the top body is the instance's own proxy.
+static func _lift_nucleus(
+	doc: ShipDoc, nucleus_ids: PackedStringArray, part_of_node: PackedStringArray, symbol: String
+) -> PackedStringArray:
+	var names: Dictionary = {}
+	for id: String in nucleus_ids:
+		names[id] = (doc.parts[id] as ShipPart).display_name
+	var label: String = "%s NUCLEUS" % symbol.to_upper() if not symbol.is_empty() else "NUCLEUS"
+	var component_id: String = ShipComponents.make_component(doc, nucleus_ids, label)
+	if component_id.is_empty():
+		return part_of_node
+	var instance_id: String = doc.root
+	# Like every part the template makes: no mirror twins of the clump or of its protons.
+	(doc.parts[instance_id] as ShipPart).asymmetric = true
+	var definition: Dictionary = doc.components[component_id]
+	var inner: Dictionary = ShipComponents.definition_parts(definition)
+	var root_inner: String = str(definition.get("root", ""))
+	var inner_by_name: Dictionary = {}
+	for inner_id: String in inner:
+		inner_by_name[(inner[inner_id] as ShipPart).display_name] = inner_id
+	# OPEN by default (ADR 0025): every pair of the clump that meets gets an open joint IN the
+	# definition, where the player can change it like any other link.
+	var keys: PackedStringArray = PackedStringArray([instance_id])
+	for inner_id: String in inner:
+		if inner_id != root_inner:
+			keys.append(instance_id + "/" + inner_id)
+	for pair: PackedStringArray in ShipSeams.pairs_within(doc, keys):
+		var joint: ShipJoint = ShipJoint.new()
+		joint.mode = ShipJoint.MODE_OPEN
+		ShipComponents.set_inner_joint(doc, pair[0], pair[1], joint)
+	var out: PackedStringArray = PackedStringArray(part_of_node)
+	for node_index: int in out.size():
+		var old_id: String = out[node_index]
+		if not names.has(old_id):
+			continue
+		var inner_id: String = str(inner_by_name.get(names[old_id], ""))
+		if inner_id.is_empty() or inner_id == root_inner:
+			out[node_index] = instance_id
+		else:
+			out[node_index] = instance_id + "/" + inner_id
+	return out
+
+
+## The element symbol the template's nodes carry ("C" for carbon), for the nucleus's label.
+static func _symbol_of(nodes: Array[Dictionary]) -> String:
+	if nodes.is_empty():
+		return ""
+	return _text(nodes[0].get("symbol"), "")
+
+
 static func _hatch_defaults(data: ShipData, hatch_family: String) -> Dictionary:
 	var out: Dictionary = {}
 	if data == null:

@@ -181,6 +181,12 @@
     "min": 0.3,
     "max": 4.0
   },
+  "hatch_min_m": {
+    "value": 0.5,
+    "description": "The smallest clear width or height, in metres, a hatch or doorway should be given: a person's squeeze, shoulders turned, which is the floor the hatch panel clamps its size fields to (ADR 0029). The bake still bores a smaller hole where a seam has no room for this one - a tunnel's bore, less the frame, may be under it - and reports the door TIGHT rather than leaving a wall.",
+    "min": 0.2,
+    "max": 2.0
+  },
   "explode_gap_m": {
     "value": 1.5,
     "description": "EXPLODE view: the fixed gap in metres each module is pulled away from the module it stands on, along its own seam normal, in addition to half its own extent along that normal. Larger reads clearer on a crowded ship at the cost of a wider frame; 0 packs the modules back to touching so only the seam faces show.",

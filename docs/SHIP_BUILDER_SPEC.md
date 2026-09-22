@@ -270,6 +270,11 @@ rule serves all three: the plate is the shell of hull thickness just inside the 
 clipped to the other solid. All three partition the overlap exactly, so the choice is taste, not
 correctness. `flat` on a CURVED host is a tangent plane and the two cavities can meet around its
 rim — which is what a flat plane means, and why the other two exist.
+AMENDED(ADR 0029, 2026-09-06): the opening IS bored. A hatched or doorway seam's hole goes
+through both modules' walls at a gasket plane on the indenting module's mesh, each module takes a
+flat collar of the frame's outline and its own door (single hinge, double leaves or iris) over
+the same opening, and the hole is clamped to what both cavities take, never under
+`ShipConfig.hatch_min_m` without saying so. `ShipDoors` plans it, `ShipCsgBake` bores it.
 The original text follows as written.
 
 Phase 1 ships the **full authoring UI**: select an overlapping pair, toggle

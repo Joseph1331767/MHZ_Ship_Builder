@@ -54,6 +54,12 @@ static func make_component(doc: ShipDoc, part_ids: PackedStringArray, label: Str
 	if head == "":
 		push_warning("ShipComponents.make_component: the selection is not a single subtree.")
 		return ""
+	# A definition's root is a PRIMITIVE - it is the instance's proxy shape, and an instance has
+	# none of its own. Measured: a ship whose root was an instance imported with no proxy and no
+	# nucleus, and the builder had nothing to draw or hover (ADR 0026).
+	if (doc.parts[head] as ShipPart).kind == KIND_INSTANCE:
+		push_warning("ShipComponents.make_component: the head of the selection is an instance.")
+		return ""
 	var ids: PackedStringArray = ShipMirror.subtree_ids(doc, head)
 	if not _selection_is_whole_subtree(chosen, ids):
 		push_warning("ShipComponents.make_component: select the whole subtree, children included.")
@@ -62,6 +68,7 @@ static func make_component(doc: ShipDoc, part_ids: PackedStringArray, label: Str
 		return ""
 	var component_id: String = _unique_component_id(doc, label)
 	doc.components[component_id] = _build_definition(doc, ids, head, label)
+	_move_inside_joints(doc, ids, component_id)
 	return _swap_in_instance(doc, head, component_id, label)
 
 
@@ -245,14 +252,45 @@ static func _selection_mirror_safe(
 
 
 # Copy the subtree into definition form: inner ids, the root re-seated at the component origin.
-static func _build_definition(
-	doc: ShipDoc, ids: PackedStringArray, head: String, label: String
-) -> Dictionary:
+## The inner id each lifted part gets: its position in [param ids], one-based.
+static func _inner_id_map(ids: PackedStringArray) -> Dictionary:
 	var id_map: Dictionary = {}
 	var index: int = 0
 	for id: String in ids:
 		index += 1
 		id_map[id] = "%s%04d" % [INNER_ID_PREFIX, index]
+	return id_map
+
+
+## The joints between two lifted parts go INTO the definition, keyed by inner ids, so a
+## component keeps the links between its own chunks and they stay editable (ADR 0025). Joints
+## reaching outside are reseated on the instance by [method _swap_in_instance].
+static func _move_inside_joints(doc: ShipDoc, ids: PackedStringArray, component_id: String) -> void:
+	var id_map: Dictionary = _inner_id_map(ids)
+	var definition: Dictionary = doc.components[component_id]
+	var inner_joints: Dictionary = {}
+	var keys: Array = doc.joints.keys()
+	keys.sort()
+	for key: Variant in keys:
+		var joint: ShipJoint = doc.joints[key]
+		if not id_map.has(joint.a) or not id_map.has(joint.b):
+			continue
+		var moved: ShipJoint = ShipJoint.from_dict(str(key), joint.to_dict())
+		moved.a = id_map[joint.a]
+		moved.b = id_map[joint.b]
+		if moved.a > moved.b:
+			var swap: String = moved.a
+			moved.a = moved.b
+			moved.b = swap
+		inner_joints[str(key)] = moved.to_dict()
+		doc.joints.erase(key)
+	definition["joints"] = inner_joints
+
+
+static func _build_definition(
+	doc: ShipDoc, ids: PackedStringArray, head: String, label: String
+) -> Dictionary:
+	var id_map: Dictionary = _inner_id_map(ids)
 	var inner: Dictionary = {}
 	for id: String in ids:
 		var part: ShipPart = doc.parts[id]
@@ -278,9 +316,14 @@ static func _build_definition(
 #
 # THE JOINTS FOLLOW THE LIFT. A joint between a lifted part and a part outside the selection is
 # re-seated on the instance: the outside room is still hatched to what is now one room. A joint
-# wholly inside the selection is dropped, because joining parts into one room removes the walls
-# between them ("combining multiple into the same room removes all internal walls making it a
-# component and defining it as a single room", 2026-09-02). ShipDoc.remove_part() erases every
+# wholly inside the selection is dropped, which WALLS it - a wall is the absence of a record
+# (ShipSeams.mode_for returns MODE_WALL when there is none), and a definition has nowhere to keep
+# a joint anyway: it is {label, root, parts}.
+# RETIRED(ADR 0016, 2026-09-04): "...because joining parts into one room removes the walls between
+# them" -> it does the opposite, and making a room no longer comes through here at all. Rooms are
+# LINK OPEN over a selection (PartTreePanel._on_link); this is MAKE COMP only, where losing an
+# internal joint costs a hatch the player has to place again rather than a wall they did not ask
+# for. ShipDoc.remove_part() erases every
 # joint touching a removed part, so the records are taken before it runs and the survivors are
 # put back afterwards, under their own ids, against the instance.
 static func _swap_in_instance(
@@ -491,3 +534,471 @@ static func _reaches(edges: Dictionary, from_id: String, target: String, depth: 
 		if _reaches(edges, ref, target, depth + 1):
 			return true
 	return false
+
+
+## The inner part an expanded id names, built fresh from its definition's record; null when the
+## instance, the definition or the inner id is missing. Edits to the returned object are not
+## stored until [method store_inner_part] (or [method ShipDoc.store_inner]) writes them back.
+static func inner_part(doc: ShipDoc, expanded_id: String) -> ShipPart:
+	var location: Dictionary = _locate_inner(doc, expanded_id)
+	if location.is_empty():
+		return null
+	var record: Variant = location["record"]
+	if record is ShipPart:
+		return (record as ShipPart).duplicate_part()
+	if record is Dictionary:
+		return ShipPart.from_dict(location["inner"], record)
+	return null
+
+
+## Write [param part] back as the record of the inner part [param expanded_id] names.
+static func store_inner_part(doc: ShipDoc, expanded_id: String, part: ShipPart) -> void:
+	var location: Dictionary = _locate_inner(doc, expanded_id)
+	if location.is_empty() or part == null:
+		return
+	var definition: Dictionary = doc.components[location["component"]]
+	var inner: Dictionary = definition.get("parts", {})
+	var stored: ShipPart = part.duplicate_part()
+	stored.id = location["inner"]
+	inner[location["inner"]] = stored.to_dict()
+	definition["parts"] = inner
+
+
+## True when [param id] is an expanded id whose instance exists and whose inner id is in that
+## instance's definition (nested instances walk the chain).
+static func inner_exists(doc: ShipDoc, id: String) -> bool:
+	return not _locate_inner(doc, id).is_empty()
+
+
+## The key an inner part hangs from: its parent's expanded key, or the instance's own key when
+## its parent is the definition's root (the instance stands for that root). "" when the id is
+## not an inner part or its parent is not in the definition.
+static func inner_host_key(doc: ShipDoc, expanded_id: String) -> String:
+	var location: Dictionary = _locate_inner(doc, expanded_id)
+	if location.is_empty():
+		return ""
+	var definition: Dictionary = doc.components[location["component"]]
+	var record: Variant = location["record"]
+	var parent: String = ""
+	if record is ShipPart:
+		parent = (record as ShipPart).parent
+	elif record is Dictionary:
+		parent = str((record as Dictionary).get("parent", ""))
+	if parent.is_empty():
+		return ""
+	var head: String = expanded_id.substr(0, expanded_id.rfind("/"))
+	if parent == str(definition.get("root", "")):
+		return head
+	return head + "/" + parent
+
+
+## Where an expanded id lives: {"component": definition id, "inner": inner id, "record": the
+## stored record}. Empty when any link of the chain is missing.
+static func _locate_inner(doc: ShipDoc, expanded_id: String) -> Dictionary:
+	if doc == null or not is_expanded_id(expanded_id):
+		return {}
+	var chain: PackedStringArray = expanded_id.split("/")
+	var head: String = ShipSymmetry.source_of_twin(chain[0])
+	var part: Variant = doc.parts.get(head, null)
+	if not (part is ShipPart) or (part as ShipPart).kind != KIND_INSTANCE:
+		return {}
+	var component_id: String = (part as ShipPart).family
+	var record: Variant = null
+	var inner_id: String = ""
+	for i: int in range(1, chain.size()):
+		if not doc.components.has(component_id):
+			return {}
+		var definition: Dictionary = doc.components[component_id]
+		var inner: Dictionary = definition.get("parts", {})
+		inner_id = ShipSymmetry.source_of_twin(chain[i])
+		if not inner.has(inner_id):
+			return {}
+		record = inner[inner_id]
+		if i < chain.size() - 1:
+			var kind: String = ""
+			var family: String = ""
+			if record is ShipPart:
+				kind = (record as ShipPart).kind
+				family = (record as ShipPart).family
+			elif record is Dictionary:
+				kind = str((record as Dictionary).get("kind", ""))
+				family = str((record as Dictionary).get("family", ""))
+			if kind != KIND_INSTANCE:
+				return {}
+			component_id = family
+	return {"component": component_id, "inner": inner_id, "record": record}
+
+
+## Bring every component of [param other] into [param doc] - definitions, the definitions
+## those reference, all of them - then every ARM of the ship (each subtree hanging off its root,
+## identical arms once) and the whole ship as one more, named [param ship_label] (ADR 0024/0026).
+## A ship whose root is an instance is flattened first (the instance dissolved on a copy), so
+## every definition made here has a primitive root. Ids are remapped to stay unique here;
+## nothing in [param other] is touched. Returns the new definition ids, the whole ship's last.
+static func import_from(doc: ShipDoc, other: ShipDoc, ship_label: String) -> PackedStringArray:
+	var out: PackedStringArray = PackedStringArray()
+	if doc == null or other == null:
+		return out
+	var id_map: Dictionary = {}
+	var keys: Array = other.components.keys()
+	keys.sort()
+	for key: Variant in keys:
+		var old_id: String = str(key)
+		var definition: Variant = other.components[old_id]
+		if not (definition is Dictionary):
+			continue
+		var label: String = str((definition as Dictionary).get("label", old_id))
+		id_map[old_id] = _unique_component_id(doc, label)
+	for key: Variant in keys:
+		var old_id: String = str(key)
+		if not id_map.has(old_id):
+			continue
+		var copy: Dictionary = (other.components[old_id] as Dictionary).duplicate(true)
+		copy["parts"] = _remapped_parts(copy.get("parts", {}), id_map)
+		doc.components[id_map[old_id]] = copy
+		out.append(id_map[old_id])
+	if other.parts.is_empty() or other.root.is_empty() or not other.parts.has(other.root):
+		return out
+	# The ship, flat: a root that is an instance is dissolved on a copy until it is a primitive.
+	var flat: ShipDoc = other.duplicate_doc()
+	var guard: int = MAX_NESTING_DEPTH
+	while guard > 0 and (flat.parts[flat.root] as ShipPart).kind == KIND_INSTANCE:
+		guard -= 1
+		if dissolve(flat, flat.root).is_empty():
+			break
+	# Its arms: each subtree hanging off the root - off the root component's inner parts too,
+	# which is where a class hangs its tunnels - identical arms once, numbered as they come.
+	var seen: Dictionary = {}
+	var arm_count: int = 0
+	for arm: String in other.children_of(other.root):
+		var ids: PackedStringArray = ShipMirror.subtree_ids(other, arm)
+		var signature: String = _subtree_signature(other, ids, arm)
+		if seen.has(signature):
+			continue
+		seen[signature] = true
+		arm_count += 1
+		var arm_label: String = "%s ARM %d" % [ship_label, arm_count]
+		var arm_id: String = _unique_component_id(doc, arm_label)
+		doc.components[arm_id] = _definition_from(other, ids, arm, arm_label, id_map)
+		out.append(arm_id)
+	# The ship itself.
+	var all_ids: PackedStringArray = flat.part_order()
+	var ship_id: String = _unique_component_id(doc, ship_label)
+	doc.components[ship_id] = _definition_from(flat, all_ids, flat.root, ship_label, id_map)
+	out.append(ship_id)
+	return out
+
+
+## A definition made of [param ids] of [param source] rooted at [param head]: parts under fresh
+## inner ids (a parent that is an inner part of an instance keeps its tail), instances inside
+## repointed through [param id_map], and every joint between two of the parts carried along.
+static func _definition_from(
+	source: ShipDoc, ids: PackedStringArray, head: String, label: String, id_map: Dictionary
+) -> Dictionary:
+	var inner_of: Dictionary = _inner_id_map(ids)
+	var inner: Dictionary = {}
+	for id: String in ids:
+		var part: ShipPart = (source.parts[id] as ShipPart).duplicate_part()
+		part.id = inner_of[id]
+		if id == head:
+			part.parent = ""
+			part.yaw = 0.0
+			part.pitch = 0.0
+			part.rot = Vector3.ZERO
+			part.offset = 0.0
+		else:
+			var parent_head: String = instance_of(part.parent)
+			var tail: String = part.parent.substr(parent_head.length())
+			part.parent = str(inner_of.get(parent_head, "")) + tail
+		if part.kind == KIND_INSTANCE and id_map.has(part.family):
+			part.family = id_map[part.family]
+		inner[part.id] = part.to_dict()
+	var joints: Dictionary = {}
+	var joint_keys: Array = source.joints.keys()
+	joint_keys.sort()
+	for key: Variant in joint_keys:
+		var joint: ShipJoint = source.joints[key]
+		var a: String = _imported_end(joint.a, inner_of)
+		var b: String = _imported_end(joint.b, inner_of)
+		if a.is_empty() or b.is_empty():
+			continue
+		var copy: ShipJoint = ShipJoint.from_dict(str(key), joint.to_dict())
+		copy.a = a if a <= b else b
+		copy.b = b if a <= b else a
+		joints[str(key)] = copy.to_dict()
+	return {"label": label, "root": inner_of[head], "parts": inner, "joints": joints}
+
+
+## What makes two arms the same arm: every part's family, manufacturer, params, scale, role and
+## blend, its attach numbers (the head's excluded - that is where it sits, not what it is), and
+## the shape of the tree. Ids and names are not it.
+static func _subtree_signature(source: ShipDoc, ids: PackedStringArray, head: String) -> String:
+	var index_of: Dictionary = {}
+	for i: int in ids.size():
+		index_of[ids[i]] = i
+	var lines: PackedStringArray = PackedStringArray()
+	for id: String in ids:
+		var part: ShipPart = source.parts[id]
+		var attach: String = ""
+		if id != head:
+			attach = (
+				"%s|%.4f|%.4f|%s|%.4f"
+				% [
+					str(index_of.get(instance_of(part.parent), -1)),
+					part.yaw,
+					part.pitch,
+					str(part.rot.snapped(Vector3.ONE * 0.0001)),
+					part.offset
+				]
+			)
+		lines.append(
+			(
+				(
+					"%s|%s|%s|%s|%s|%.4f|%s"
+					% [
+						part.kind,
+						part.family,
+						part.manufacturer,
+						JSON.stringify(part.params, "", true),
+						str(part.scale.snapped(Vector3.ONE * 0.0001)),
+						part.blend,
+						part.role
+					]
+				)
+				+ "|"
+				+ attach
+			)
+		)
+	return "\n".join(lines)
+
+
+## A joint end of a source ship as an inner id of the definition being made: a part becomes its
+## inner id, an inner part of one of its instances keeps its tail behind that instance's inner
+## id; "" when the end is not among the lifted parts.
+static func _imported_end(end: String, inner_of: Dictionary) -> String:
+	var head: String = instance_of(end)
+	if not inner_of.has(head):
+		return ""
+	return str(inner_of[head]) + end.substr(head.length())
+
+
+static func _remapped_parts(parts: Variant, id_map: Dictionary) -> Dictionary:
+	var out: Dictionary = {}
+	if not (parts is Dictionary):
+		return out
+	for key: Variant in parts:
+		var record: Variant = parts[key]
+		if record is Dictionary:
+			var copy: Dictionary = (record as Dictionary).duplicate(true)
+			if (
+				str(copy.get("kind", "")) == KIND_INSTANCE
+				and id_map.has(str(copy.get("family", "")))
+			):
+				copy["family"] = id_map[str(copy.get("family", ""))]
+			out[key] = copy
+		elif record is ShipPart:
+			var part: ShipPart = (record as ShipPart).duplicate_part()
+			if part.kind == KIND_INSTANCE and id_map.has(part.family):
+				part.family = id_map[part.family]
+			out[key] = part.to_dict()
+	return out
+
+
+## The inverse of [method make_component] for one instance: its inner parts become document
+## parts again (fresh ids), the definition's root taking the instance's place, attach numbers
+## and all; parts hung off its inner parts and joints naming them follow. The definition stays
+## for the palette. Returns the new ids, the root's first; empty when refused.
+static func dissolve(doc: ShipDoc, instance_id: String) -> PackedStringArray:
+	var out: PackedStringArray = PackedStringArray()
+	if doc == null or not doc.parts.has(instance_id):
+		return out
+	var instance: ShipPart = doc.parts[instance_id]
+	if instance.kind != KIND_INSTANCE or not doc.components.has(instance.family):
+		return out
+	var definition: Dictionary = doc.components[instance.family]
+	var inner: Dictionary = definition_parts(definition)
+	var root_inner: String = str(definition.get("root", ""))
+	if not inner.has(root_inner):
+		return out
+	var new_id: Dictionary = {}
+	for inner_id: String in definition_order(inner, root_inner):
+		var part: ShipPart = (inner[inner_id] as ShipPart).duplicate_part()
+		part.id = doc.new_part_id()
+		new_id[inner_id] = part.id
+		if inner_id == root_inner:
+			part.parent = instance.parent
+			part.yaw = instance.yaw
+			part.pitch = instance.pitch
+			part.rot = instance.rot
+			part.offset = instance.offset
+			part.blend = instance.blend
+			if instance.display_name != "":
+				part.display_name = instance.display_name
+		else:
+			part.parent = str(new_id.get(part.parent, ""))
+		doc.parts[part.id] = part
+		doc._bump_part_counter(part.id)
+		out.append(part.id)
+	var prefix: String = instance_id + "/"
+	for key: Variant in doc.parts:
+		var part: ShipPart = doc.parts[key]
+		if part.parent == instance_id:
+			part.parent = new_id[root_inner]
+		elif part.parent.begins_with(prefix):
+			part.parent = str(new_id.get(part.parent.substr(prefix.length()), part.parent))
+	# The links between its chunks come back as document joints under fresh ids.
+	var stored: Dictionary = definition.get("joints", {})
+	var stored_keys: Array = stored.keys()
+	stored_keys.sort()
+	for key: Variant in stored_keys:
+		var record: Variant = stored[key]
+		if not (record is Dictionary):
+			continue
+		var joint: ShipJoint = ShipJoint.from_dict(doc.new_joint_id(), record)
+		joint.a = str(new_id.get(joint.a, joint.a))
+		joint.b = str(new_id.get(joint.b, joint.b))
+		if joint.a > joint.b:
+			var swap_end: String = joint.a
+			joint.a = joint.b
+			joint.b = swap_end
+		doc.joints[joint.id] = joint
+	for key: Variant in doc.joints:
+		var joint: ShipJoint = doc.joints[key]
+		joint.a = _dissolved_end(joint.a, instance_id, prefix, new_id, root_inner)
+		joint.b = _dissolved_end(joint.b, instance_id, prefix, new_id, root_inner)
+		if joint.a > joint.b:
+			var swap: String = joint.a
+			joint.a = joint.b
+			joint.b = swap
+	var was_root: bool = doc.root == instance_id
+	doc.parts.erase(instance_id)
+	if was_root:
+		doc.root = new_id[root_inner]
+	doc.drop_inner_cache()
+	return out
+
+
+static func _dissolved_end(
+	end: String, instance_id: String, prefix: String, new_id: Dictionary, root_inner: String
+) -> String:
+	if end == instance_id:
+		return new_id[root_inner]
+	if end.begins_with(prefix):
+		return str(new_id.get(end.substr(prefix.length()), end))
+	return end
+
+
+## Two keys that are parts of ONE definition - two inner parts of an instance, or one of them
+## and the instance itself (its proxy is the definition's root): {"prefix": the instance key,
+## "a", "b": their inner ids, sorted}. Empty otherwise. Nested instances are their own
+## definitions: "x/cp_1/cp_2" pairs with "x/cp_1/cp_3" and with "x/cp_1", not with "x/cp_4".
+static func inner_pair(doc: ShipDoc, child: String, host: String) -> Dictionary:
+	if doc == null:
+		return {}
+	var c: String = ShipSymmetry.source_of_twin(child)
+	var h: String = ShipSymmetry.source_of_twin(host)
+	if not is_expanded_id(c) and not is_expanded_id(h):
+		return {}
+	var prefix: String = ""
+	var a: String = ""
+	var b: String = ""
+	if is_expanded_id(c) and is_expanded_id(h):
+		var pc: String = c.substr(0, c.rfind("/"))
+		var ph: String = h.substr(0, h.rfind("/"))
+		if pc != ph:
+			return {}
+		prefix = pc
+		a = c.substr(pc.length() + 1)
+		b = h.substr(ph.length() + 1)
+	else:
+		var inner: String = c if is_expanded_id(c) else h
+		var proxy: String = h if is_expanded_id(c) else c
+		if inner.substr(0, inner.rfind("/")) != proxy:
+			return {}
+		prefix = proxy
+		var located: Dictionary = _locate_inner(doc, inner)
+		if located.is_empty():
+			return {}
+		a = inner.substr(proxy.length() + 1)
+		b = str((doc.components[located["component"]] as Dictionary).get("root", ""))
+	if a.is_empty() or b.is_empty():
+		return {}
+	return {"prefix": prefix, "a": a if a <= b else b, "b": b if a <= b else a}
+
+
+## The definition id the instance at [param prefix] (an instance key, possibly nested) uses.
+static func definition_of(doc: ShipDoc, prefix: String) -> String:
+	if doc == null:
+		return ""
+	if not is_expanded_id(prefix):
+		var part: Variant = doc.parts.get(ShipSymmetry.source_of_twin(prefix), null)
+		if part is ShipPart and (part as ShipPart).kind == KIND_INSTANCE:
+			return (part as ShipPart).family
+		return ""
+	var located: Dictionary = _locate_inner(doc, prefix)
+	if located.is_empty():
+		return ""
+	var record: Variant = located["record"]
+	if record is ShipPart and (record as ShipPart).kind == KIND_INSTANCE:
+		return (record as ShipPart).family
+	if record is Dictionary and str((record as Dictionary).get("kind", "")) == KIND_INSTANCE:
+		return str((record as Dictionary).get("family", ""))
+	return ""
+
+
+## The joint a definition holds between two of its parts, by their keys; null when none.
+static func inner_joint_for(doc: ShipDoc, child: String, host: String) -> ShipJoint:
+	var pair: Dictionary = inner_pair(doc, child, host)
+	if pair.is_empty():
+		return null
+	var component_id: String = definition_of(doc, pair["prefix"])
+	if component_id.is_empty() or not doc.components.has(component_id):
+		return null
+	var stored: Dictionary = (doc.components[component_id] as Dictionary).get("joints", {})
+	var keys: Array = stored.keys()
+	keys.sort()
+	for key: Variant in keys:
+		var record: Variant = stored[key]
+		if not (record is Dictionary):
+			continue
+		var joint: ShipJoint = ShipJoint.from_dict(str(key), record)
+		if joint.a == pair["a"] and joint.b == pair["b"]:
+			return joint
+	return null
+
+
+## Store [param joint] as the definition's joint between the two keys (its ends are rewritten
+## to their inner ids; a null joint erases). Every instance of the definition reads it. Returns
+## false when the two keys are not parts of one definition.
+static func set_inner_joint(doc: ShipDoc, child: String, host: String, joint: ShipJoint) -> bool:
+	var pair: Dictionary = inner_pair(doc, child, host)
+	if pair.is_empty():
+		return false
+	var component_id: String = definition_of(doc, pair["prefix"])
+	if component_id.is_empty() or not doc.components.has(component_id):
+		return false
+	var definition: Dictionary = doc.components[component_id]
+	var stored: Dictionary = definition.get("joints", {})
+	var keys: Array = stored.keys()
+	keys.sort()
+	for key: Variant in keys:
+		var record: Variant = stored[key]
+		if (
+			record is Dictionary
+			and str(record.get("a", "")) == pair["a"]
+			and str(record.get("b", "")) == pair["b"]
+		):
+			stored.erase(key)
+	if joint != null:
+		var copy: ShipJoint = ShipJoint.from_dict(joint.id, joint.to_dict())
+		copy.a = pair["a"]
+		copy.b = pair["b"]
+		var jid: String = (
+			joint.id if not joint.id.is_empty() else "j_inner_%04d" % (stored.size() + 1)
+		)
+		while stored.has(jid):
+			jid += "_"
+		copy.id = jid
+		stored[jid] = copy.to_dict()
+	definition["joints"] = stored
+	return true

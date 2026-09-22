@@ -1979,3 +1979,692 @@ reading the wall and the cut added together. Six times faster, too.
 Build a class and EXPLODE it. Each module should be a closed shell about 20 cm thick, with its seam
 faces solid - no cavity showing through where two modules meet. Nothing has a way in yet; hatch
 cutting and the frame between linked modules are next.
+
+
+## [2026-09-04d] LINK is one command now, and an open seam finally opens
+
+> "explode failed, and thats because i believe the link, and makeroom arent working properly.
+> infact they shouldn't really be separate options, as when making a room it defines open
+> structures at their link.. but i guess more is happening there as well so ill let you hash that
+> out. - explode has some parts overlapping and thats incorrect."
+
+Three defects, and all three were confirmed by measurement before a line changed. ADR 0016.
+
+**Explode.** The offset cleared each module from its HOST, which is all one seam knows about, and
+nothing separated SIBLINGS - which the atomic templates make ordinary, because a nucleus body and
+an extremity draw their directions from two different arrangements that may point the same way.
+The relaxation pushes overlapping modules further along their OWN normals, so the view still means
+what it says. One thing had to be learnt the hard way: pushing BOTH of a near-parallel pair moves
+them together and never separates them. Sending only the one already further out turns that pair
+into a stack. All five classes now report zero overlapping pairs, with the exploded span 1.7-2x the
+assembled one.
+
+**Link.** `ShipSdf` honours the seam mode; `ShipMeshBake` - the exact path EXPLODE shows - read only
+the seam STYLE. Sealed, doorway, hatched and open all baked to the same 24 faces and the same
+514.89 m3. The pipeline swap had dropped the link modes and nothing noticed.
+
+**Make room.** Its multi-part branch lifted the selection into a component, and the lift DROPS a
+joint whose two ends are both inside it - which the comment there calls "removing the walls
+between them". A wall is the ABSENCE of a record, so that walled every internal seam. 2 joints
+before the lift, 0 after, none of them open: the exact opposite of what the button promised.
+
+### Boring the wall out
+
+An open seam leaves a plate of hull on each side - each interior stops the wall short of the
+linkage surface, which is what keeps a module sealed. `_wall_between(cavity, body, other)` names
+that plate without needing to know where the seam surface ended up: what one cavity reaches into
+the other body and does not find cavity there. Taken from both sides, bored out of both shells.
+Helium's protons go 294.83 -> 246.94 and 220.06 -> 172.17 m3 - a full 0.20 m plate off each - and
+both stay CLOSED. An opened module is a cup, not a torn shell, so nothing downstream needs a case
+for it.
+
+Three shapes for that plate were tried and measured away first, each of them reasonable:
+
+- **A zero inset at the seam pass.** Opens one side only. The interior pass computes its own
+  crossing plane from the interior surfaces, which is not where the outer surfaces crossed.
+- **The smaller part's whole interior.** Needs a "which is smaller" test, and helium's two protons
+  are the same size to within float noise - the tie fell to the host and the bore did nothing. It
+  would also have opened every other seam on that part at once.
+- **The lens where the two interiors overlap.** For a fused pair that is most of the host's cavity
+  and misses the plate entirely.
+
+The reach is two walls rather than one because the hulls do not always touch: measured, the flange
+put helium's cut 0.16 m past the host surface, and a one-wall reach took 0.04 m off a 0.20 m plate.
+
+### What the accounting turned up
+
+Of argon's 23 seams, 9 open and **14 were already one room**. The fused nucleus bodies overlap by a
+third of their span, so their interiors interpenetrate by 97-159 m3 and were never separated at
+all. That is a real gap against "the hatch and seam surfaces remain solid" - it holds per module,
+not between two fused ones - and it belongs with the hatch work rather than here. One seam in one
+class is a genuine miss: lithium's tunnel-to-nucleus joint, whose plates are 0.2 and 1.1 m3 and lie
+outside both shells.
+
+### Verified
+
+`--import` clean; **gdUnit4 270/270** (six new: explode separation, `pairs_within`, the two-part
+pair, `shared_mode`, the open bore, the pending count); selfcheck PASSED with the hash unchanged at
+`5536787c6c35d236`; data validator PASSED, 0 warnings; gdformat and gdlint clean over all seven
+changed files; windowed visual check PASSED, five modes.
+
+One self-inflicted detour worth recording: the first edit to `ship_visual_check.gd` cut from a
+docstring to the next function I happened to name, which swallowed 344 lines of unrelated helpers.
+The file was restored from HEAD with `git show` (a read command writing to disk, not a checkout)
+and the edit redone against exact boundaries. Anchoring a deletion on "the next thing that looks
+like the end" is how a patch takes more than it was pointed at.
+
+### Still the human's to check
+
+Select two modules that meet and press LINK four times: WALL, DOORWAY, HATCH, OPEN, and back. At
+OPEN, explode and look into the pair - the hull between their interiors should be gone and a ring
+of hull left around the opening. Select three or more and the same press should move every seam
+between them at once. DOORWAY and HATCH still look like walls on purpose; that is the next piece.
+
+
+## [2026-09-04e] A nucleus with nothing in the middle, and the fifty-two seconds that bought nothing
+
+> "on the carbon class ship, (which has 5 protons around a central one which is wrong, the central
+> one should be the singular top, and the 4 rim and lower added..) .. i click the 6 protons and make
+> them an open room .. it reveals that the central completely burried one still exists .. also most
+> of them arent shelled out properly, i see one that is, the others just appear to have been walled
+> along parent surface."
+
+Three reports; the first two are one defect seen from two sides. ADR 0017.
+
+**The nucleus was a hub.** ADR 0014 laid the fused bodies on the arrangement holding `count - 1`
+and put the last one at its CENTRE. So a carbon class had a sixth proton nobody could see, host to
+five seams, which the bake then carved down to 5.9 m3 of slivers once the six were made one room -
+71.9 m3 walled. That is the module in the exploded view. The fix is to sit the nucleus ON an
+arrangement instead: six bodies on an octahedron, the root taking the slot nearest straight up and
+the rest measured from it. Four rim at 45 degrees down and out, one straight below, and the root's
+whole upper half in the open air.
+
+The pods take slots of the SAME arrangement, most perpendicular to the root's first, so they land
+around the waist - and each is built on the proton whose slot it shares rather than on the root.
+That last part is not decoration: once the nucleus fills its own arrangement, a pod's slot is
+occupied by a proton, and a tunnel from the root would set off straight through it. Measured before
+that change, a rim proton had eaten the very face its own pod's tunnel was seated on.
+
+**An open seam left one plate of two.** The bore from ADR 0016 built the wall between two cavities
+and subtracted it - but on a fused pair only ONE of the two is ever cut by the flange, so only that
+one had a plate to find. The other kept its own wall standing exactly where its neighbour meets it.
+
+### The fifty-two seconds
+
+Opening the five nucleus seams of a carbon class took **52 seconds**, and opened nothing. The bore
+put a thin passage against a finished SHELL - two nearly parallel surfaces a wall apart - and the
+BSP split until the split budget ran out, at which point `_cut` did the right thing and returned the
+shell it had been given. Fifty-two seconds of work, discarded, and the report cheerfully said five
+seams were open because the object identity had changed.
+
+Two fixes were tried and measured before the right one. A slab about the true seam plane - the
+flange knows where it cut, and I threaded it through for this - is the right REGION and made no
+difference: 47 s. Boring the plain outer solid instead of the shell, which is the same set by
+algebra and a much simpler operand, was 62 s. **The cost was never the operand. It was making the
+cut at all.**
+
+An open seam is the seam the interior is NOT cut at. Leave the cavity running at full extent through
+where the seam face would be, and no plate is ever built to remove; take the neighbour's interior out
+of this module's outer, and the wall on the other side is pierced too. Carbon went from 52 s to
+**578 ms** - marginally faster than the same ship walled, because a skipped cut is a cut not made.
+Argon shells in 3.0 s where ADR 0015 measured 7.6, and hollows all 24 parts rather than 20.
+
+### Verified
+
+`--import` clean; **gdUnit4 275/275** (five new: the nucleus has no centre, pods take nucleus slots,
+a pod stands on its own proton, an open seam leaves no hull in the other room, and a nucleus made
+one room stays closed and stays under a cliff-detector budget); selfcheck PASSED with the hash
+unchanged at `5536787c6c35d236`; data validator PASSED, 0 warnings; all 22 classes bake with **0
+unmerged joints, 0 validator issues, 0 open parts** and the 8000 m3 budget holding to within 24 m3;
+gdformat and gdlint clean; windowed visual check PASSED, five modes.
+
+Two tests had "the tunnel stands on the root" baked into them - they read `solids[doc.root]` while
+styling the tunnel's joint. True until a pod moved onto its own proton, and then quietly measuring
+the wrong part. They ask the document now.
+
+### Still the human's to check
+
+Build a carbon class and look at it assembled: a proton on top, four at 45 degrees below it, one
+underneath, and a valence pod continuing out from each of the four rim protons. Select all six
+protons, press LINK to OPEN, then EXPLODE - each module should be a cup, open where it meets its
+neighbours, with no slab of hull left floating inside anyone's room and nothing buried in the
+middle. DOORWAY and HATCH still look like walls on purpose; that is the next and last piece.
+
+
+## [2026-09-04f] An open seam that meets on the real curve, and a rim that hangs where it should
+
+> "the only correct one was the parent node .. the other 5 are not cut at intersection lines they
+> are cut flat .. very shalow indents .. not a prooper uniforme thickness shell .. the 4 rim protons
+> are not vertically centered .. the extending electrons are all pointed 45 degrees downward"
+
+ADR 0018. Two of the five were the layout, three the seam, and the thickness one is a number: a
+carbon proton is a 9.28 m cube and the wall is 0.20 m - 2.2% of its side. It is unchanged.
+
+**The layout.** A child sits where the ray from its parent's centre strikes the surface and sinks
+along the NORMAL there, taking that normal as its own +Y. The 45-degree rim ray of ADR 0017 struck
+a box root exactly on an EDGE, where the normal is diagonal - so the rim tilted, the pods followed
+it down, and at one seating depth 45 degrees can never be halfway to the bottom. A body now keeps
+its slot's bearing and takes its fall from where the slot sits between the top of the arrangement
+and its bottom: the rim hangs 30 degrees below level, lands 48% of the way down, mounts on a side
+face, and its pod reaches straight out.
+
+**The seam.** ADR 0017 skipped the interior cut and subtracted each module's room from the other's
+outer. On a fused pair only one side is ever cut by the flange, so the root came out right and its
+five neighbours came out cut flat with a shallow dent. An open seam is now resolved NATIVELY and
+ASYMMETRICALLY off the bodies as built: the indented module loses the indenter's whole body - a
+hole bounded by the true crossing curve - and the indenter loses what lies inside the indented
+room, so its walls plug that hole for one skin's depth and stop. No gap, no double hull. And every
+overlapping pair within a room is resolved, not only the tree's edges: a fused cluster has far
+more neighbours than the attach tree has parents.
+
+### What it took to get there
+
+- **The tie.** Six protons of one class differ in the last bits, and a plain `>=` sent some of the
+  root's children to each side of it - the root came out at 247 m3, one child at 528. One tie rule
+  now, with a tolerance, for the flange, the native branch and the pierce alike.
+- **The clearance, twice.** A millimetre off exact coincidence was measured in isolation as the
+  right move (body grown, room shrunk); in the full bake it and a centimetre both put the cutter
+  near-coplanar with the target and the BSP split into sliver cascades - 400 s and no finish. The
+  other direction leaves a sliver that the merge welds open. It is held at zero.
+- **A packed array is a value.** `(members[room] as PackedStringArray).append(id)` appended to a
+  copy, every room came out empty, and six protons baked as six sealed shells. My own memory note.
+- **PowerShell ate the docstrings.** A `Get-Content`/`Set-Content` round-trip on a BOM-less UTF-8
+  file decoded it as the ANSI codepage: every em-dash became U+FFFD, and six docstrings I had
+  never touched failed the line-length lint. Restored verbatim from HEAD by their ASCII skeleton;
+  the whole tree scanned clean afterwards. Memory note saved: edit files with python only.
+
+### What is still not right
+
+Two of the six sibling cuts on a carbon nucleus are REFUSED. Same-size boxes centred on each
+other's faces put faces on exactly the same planes everywhere, and once a target already carries
+faces from an earlier cut on those planes, the BSP's coplanar path fails the guard. In isolation
+every cut is right; accumulated, two rim protons keep 30 m3 of skin standing in the room beside
+them. Robust coplanar handling in `MeshCsg` is the next piece of work, and it is now the only thing
+between this and a nucleus that comes out entirely right.
+
+### Verified
+
+`--import` clean; **gdUnit4 275/275**; selfcheck PASSED, hash unchanged at `5536787c6c35d236`;
+data validator PASSED, 0 warnings; gdformat and gdlint clean; windowed visual check PASSED, five
+modes. Carbon with its six protons one room bakes in **640 ms**, every module closed: root 38.1 m3
+with five passages and nothing in anyone's room.
+
+### Still the human's to check
+
+Build carbon: the rim should sit level halfway between the top and bottom proton, with a pod
+reaching straight out from each rim proton. Select the six protons, LINK to OPEN, EXPLODE: the root
+is a shell with five holes at the real crossing curves; four of the five around it are cut on the
+curve too, two of them still carry a flat sibling face - that is the coplanar limit above.
+
+
+## [2026-09-05] Humanity has figured out shells already
+
+> "your techniques for making an inner and outer shell and closing it is 100% wrong. ive gotten the
+> same result now 6-7 times in a row. so i feel like you arent listening to me."
+
+> "if i had to make a shell... i would make a copy of the part, downsize or upsize slightly, then
+> sub one fromn the other.. so whats the big deal here?"
+
+They were right, twice, and the second line is the fix. ADR 0019.
+
+**I was measuring the wrong shape.** `ShipTemplates.build(data, cfg, id, {})` builds boxes; the
+author picks `sphere_pod` in the start dialog. Six rounds of "fixed and measured" on boxes changed
+nothing on the author's screen, and it took a screenshot of a sphere with a bowl carved into a
+SOLID to end it. On that shape the hollowing had failed every time: `outer - inner` through the
+BSP on two concentric spheres of one tessellation gave 742 open edges and the wrong volume, the
+guard refused it, and the module stayed solid - silently. Two lathes on one axis share every
+longitude plane, the one thing a csg.js-style BSP cannot split.
+
+**The big deal was that there is none.** The inner surface is strictly inside the outer by
+construction, so the shell is the outer surface plus the inner turned inside out - Blender's
+Solidify, no boolean. Hydrogen: 370.9 m3 to the decimal, zero open edges, 12 ms. Every class on
+spheres now hollows every part (carbon 14 of 14, zero open).
+
+**A room is a union of surfaces, not of solids.** A chain of five BSP unions to fuse six protons
+did not finish in 400 s. Each member's surface clipped against the other members' distance fields
+- keep what is outside, bisect the crossings on each edge - is linear, cannot hang, and is exact to
+the tessellation: the same room in 3.2 s, one hollow mesh, five members absorbed into it. The bore,
+the skip-and-pierce and the native asymmetric cut of the last three ADRs are all gone; a union has
+no seam faces to open.
+
+What is not right: the room's seams are hairlines, each side bisected on its own edges, agreeing
+only to a segment's sagitta - about 6 cm on a 9 m sphere. 464 open edges on the carbon room, a
+faint lip on screen. Stitching them to one shared curve is next.
+
+### Verified
+
+`--import` clean; **gdUnit4 275/275** (two per-part open-seam tests replaced by a room test and a
+sphere-shell test that builds hydrogen, helium and carbon on `sphere_pod` - the first tests ever to);
+selfcheck PASSED, hash unchanged at `5536787c6c35d236`; data validator PASSED, 0 warnings; gdformat
+and gdlint clean; windowed visual check PASSED, five modes. A PowerShell text round-trip destroyed
+six docstrings' em-dashes along the way (restored verbatim from HEAD); memory notes saved for that,
+for the family, and for nesting.
+
+### Still the human's to check
+
+Build carbon ON SPHERE PODS. Explode: every module a hollow shell of uniform wall. Select the six
+protons, LINK to OPEN, explode again: the room is one hollow mesh, its members meeting on their
+real crossing curves, with a faint seam line where two spheres join.
+
+
+## [2026-09-05b] The engine does the booleans
+
+> "the assembled room doesnt explode into its pieces .. the sphere one has the electron pods all
+> angled down below the craft making a pyrimid. all shaped hull versions should look the same .. only
+> half of the tunnel-to-module connections cut .. we need the shell to be about 10-20cm .. where seams
+> exist i can see a gap to the exterior of the hull, very small."
+
+Five reports; ADR 0020 answers all five, and the answer is the one the author gave: "humanity has
+figured out shells already". Godot 4.4+ backs its CSG nodes with Manifold, an exact mesh-boolean
+engine, and it was sitting unused because core/ keeps clear of Nodes. Four generations of hand-built
+booleans were tried in this session - a BSP, nested shells with BSP unions, distance-field clipping,
+a shared-segment seam splitter - and each fixed the previous failure and exposed the next. The last
+two could not make the two sides of a curved seam share a vertex: hundreds of open edges per sphere
+piece, the "very small gap". Measured, the engine built a helium shell, a hole and a wall-stop
+closed, in under 80 ms.
+
+**The split:** core/ PLANS (`ShipMeshBake.plan()` - every part's three surfaces, and which cutter
+takes which surface at every seam) and `ShipCsgBake` in harness/ EXECUTES with CSG nodes, awaiting
+the frames the engine takes. The pure bake carries the same plan out with its own clipping and is
+the tree-less fallback. One plan, two executors, no second reading of the seams.
+
+**Measured on both families.** Carbon on spheres and on boxes, walled and as one room: every part a
+closed shell, every tunnel's pod with its socket (967 faces where a plain shell has 576), the open
+room six separate pieces with the root holed five times - zero open parts in all four cases, 2-4 s.
+Pods reach level on both families now (their direction is named in ship space and converted into
+the proton's frame at build time; a sphere's mount normal is the 30-degree ray itself, which is
+where the pyramid came from). The rim sits 49% of the way down. The wall is 0.10 m.
+
+### The detours, so they are not taken again
+
+- Every probe before this day measured boxes; the author builds with sphere pods. Memory note.
+- The first engine bake of a run came back empty: CSG computes on a deferred call, and one frame
+  was not enough. `ShipCsgBake` now waits until every combiner has a mesh.
+- A `PackedStringArray` appended through a Dictionary is a copy. My own memory note, hit again.
+- A PowerShell `Get-Content`/`Set-Content` round-trip destroyed six docstrings' em-dashes.
+
+### Verified
+
+`--import` clean; **gdUnit4 278/278** (three new in `tests/harness/test_csg_bake.gd`, building on
+sphere_pod AND box_hull; five pure-path tests re-scoped to what that path promises); selfcheck
+PASSED, hash unchanged at `5536787c6c35d236`; data validator PASSED, 0 warnings; gdformat and gdlint
+clean; windowed visual check PASSED, five modes, with EXPLODE now on the engine bake ("13 modules
+baked from 12 seams .. 13 visuals back after ASSEMBLE").
+
+### Still the human's to check
+
+Build carbon on sphere pods, and again on boxes: rim level and halfway down, pods straight out on
+both. Explode: every module a hollow shell of 10 cm, every pod with a socket where its tunnel meets
+it. Link the six protons OPEN and explode again: six pieces, each with holes on the real curves,
+nothing left inside anyone's room. Flat versus native styles look the same for now - F32 item 1.
+
+
+## [2026-09-05c] A room is built whole and cut back into its pieces
+
+> "the central proton doesnt resolve correctly. - to fix this we need to union all proton chunks ..
+> then make the interior mesh by .. down sizing them slightly, unioning all those smaller chunks ..
+> subtracting .. then we re cut the single mesh using orignal data .. this should make perfect shell
+> chunks. and yea use godots stuff or existing stuff no need to reinvent the wheel."
+
+Built exactly as written, in two engine passes (ADR 0021): the room's shell as the union of its
+members' bodies less the union of their interiors - each member's walled sockets cut in first - and
+then each piece as that shell intersected with the member's original body, less the bodies of the
+members before it, so the shell is partitioned rather than counted twice where chunks overlap. The
+per-part rule it replaces was right for a pair and wrong for a hub: the root kept slabs of its own
+skin inside its neighbours' walls, which is the central proton in the author's picture.
+
+One thing bit on the way: pass one's shell has to go back into pass two as the ENGINE's mesh. Read
+back as merged n-gons with holed faces and re-triangulated, it is not a manifold the engine accepts,
+and a box nucleus came back with a 348 m3 "piece" of a 50 m3 shell. The engine's own triangles are
+the operand; the merge is for the wireframe only.
+
+**Measured.** Carbon on spheres and on boxes, one room of six: every piece closed, zero open parts;
+sphere root 14.6 m3, rims 24.0, bottom 15.3; box 18.9 / 29.3 / 19.0. And, measured by the engine
+itself, every piece intersected with every other member's interior body has no volume - the test
+that pins the complaint.
+
+### Verified
+
+**gdUnit4 279/279** (one new, engine-measured, both families); selfcheck PASSED, hash unchanged at
+`5536787c6c35d236`; data validator PASSED, 0 warnings; gdformat and gdlint clean; windowed visual
+check PASSED, five modes.
+
+### Still the human's to check
+
+Six protons linked OPEN, exploded: six shell pieces from one shell, the central one hollow with
+five holes and nothing of it left inside its neighbours.
+
+
+## [2026-09-05d] Halves, rooms whole, and the interior view
+
+> "any module .. need to get sliced down the middle in the explode group (in manufacturing they
+> are made in 2 pieces) .. an explode control toggle to choose to explode rooms or keep them whole
+> .. a special render mode that renders the faces of the interior mesh, and the backs of the
+> exterior mesh only. the rest should become translucent/holographic wireframe"
+
+ADR 0022. The plan names each part's manufacturing plane (through its origin, normal its local Z -
+a clamshell, never across a bore); the engine bake's third pass halves every finished solid, and
+every room's whole shell too, so the `ROOMS: PIECES / WHOLE` toggle has both to show. Every mesh
+the view draws now carries its faces in three named surfaces, and the INTERIOR mode draws them
+apart: interior and cuts lit and opaque, the exterior's backs opaque and its fronts a ghost in one
+two-pass material, wire over the lot. The far wall faces the camera whatever the angle.
+
+### What the classification taught
+
+- **Not by planes.** A lathe's quads are not planar; the engine re-triangulates them its own way;
+  measured, no baked face matched an input plane. By corners against the distance fields instead.
+- **Not on the field's zero either.** A box's mesh is the fillet's CORE and its field the rounded
+  envelope: every corner, edge and face centre of a carbon box read -0.200 m. Calibrated per
+  surface off its own corners. Recorded as F34 item 1 - it is a real, small, systematic error.
+- `ArrayMesh.surface_find_by_name`, not `surface_find_name` - a runtime error that also masqueraded
+  as a probe timeout. And the engine's triangle order is the project's outward winding: reversed,
+  the merge tore two halves.
+- A tail-replace that took every helper after the classifier with it; restored from what was
+  written, not from memory of it.
+
+### Verified
+
+**gdUnit4 281/281**; selfcheck PASSED, hash unchanged at `5536787c6c35d236`; data validator
+PASSED, 0 warnings; gdformat and gdlint clean; windowed visual check PASSED, five modes. Measured on
+carbon, both families, walled and one room: 14 of 14 parts halved, every half closed, every pair
+summing to its piece, 14 of 14 meshes naming exterior and interior, zero open parts.
+
+### Still the human's to check
+
+Explode: every module in two halves, pulled a little apart. Toggle ROOMS to WHOLE with a linked
+nucleus: one shell in two halves. Switch the mode to INTERIOR: the near wall goes to ghost and
+wire, the far cavity wall and the sliced wall thickness stay solid, from any angle.
+
+
+## [2026-09-06] The baked view, its update, and the ghost
+
+> "carbon ships should have its proton pre resolved .. open rooms by default on proton clumps ..
+> i change them to open room.. and nothing changes in render .. a button highlighted at top should
+> say update meshes and next to it a toggle auto update meshes .. a loading bar .. research a
+> quick ghost renderer that ray marches the hull changes by the sdf info"
+
+ADR 0023. The assembled scene was the preview primitives; only the exploded view had ever drawn
+the engine's pieces, so no link change could show assembled. Now: a template's nucleus is one open
+room as built; the assembled view is the baked pieces once a bake exists (ASSEMBLE lands there);
+every edit lights UPDATE MESHES and, with AUTO on (default - a carbon resolves on load), queues the
+re-bake; a bar in the status row moves with the engine's passes and the view's placement; and a
+GPU ray-marcher - the resolved shapes as uniforms, ResolvedShape.sdf op for op in GLSL - ghosts
+the hull in the warning colour the frame the document changes, writing its own depth so it sorts
+against the stale pieces, and fades once the update lands.
+
+### The research, answered
+
+Instant feedback off the fields alone is achievable and now exists: no bake, no mesh, one box
+with a shader, on screen the same frame. It cannot know walls (that is the bake's), so the two
+halves stay: the ghost for the moment, the update for the truth.
+
+### Measured on the way
+
+- The demo ship's bake lands inside a dozen frames, so its ghost is a blink and the check samples
+  at frame 2; a carbon of spheres bakes in 9-12 s and the ghost carries the wait.
+- A ProgressBar in this theme has no boxes: `visible` on, nothing drawn. Styled by hand.
+- A `PackedStringArray` handed to `ShipCheckViews._init` is SHARED: merging it back at the report
+  doubled every failure line. The earlier "value type" note was the Dictionary-element case;
+  memory corrected.
+- The nudge in the update stage sits a part on the mirror plane: its twin appeared and the module
+  count went 13 to 14. The stage counts after its edit now.
+
+### Verified
+
+**gdUnit4 281/281** (two new tests); selfcheck PASSED, hash unchanged at `5536787c6c35d236`; data
+validator PASSED, 0 warnings; gdformat and gdlint clean; windowed visual check PASSED, five modes
+plus the explode and update stages; `reports/visual_ghost.png` shows the ghost over the stale
+pieces, `reports/visual_update.png` the baked view after.
+
+### Still the human's to check
+
+Open a carbon: the primitives, then the baked pieces landing with the bar; the nucleus already one
+room in INTERIOR. Change a link: the button lights, the red ghost, the re-bake. Flip AUTO off and
+edit: the ghost stays until UPDATE MESHES is pressed.
+
+
+## [2026-09-06b] Components are rooms, the nucleus is the root component, the ghost withdrawn
+
+> "the proton should be classified as a component (by default) .. double clicking like in
+> sketchup we can wash out the rest .. import components .. including the ship as a component
+> itself, and components containing more components .. fix our bakes to be component based ..
+> just kill the ghost view .. we force the update button"
+
+ADR 0024. Five asks, one model change underneath them: a part may hang off an INNER part of a
+component instance. With that, the template lifts the six protons into the ship's root component
+and hangs the tunnels off the protons they were laid out for; a component instance is one room by
+membership (no joints), its inner seams are open, and the engine bake keys every piece - inner
+parts included - so the exploded and baked views draw a module per piece. Click a proton and the
+nucleus lights; double-click and it opens - the rest washed out, its parts picked one by one and
+edited through the inspector, every instance following; ESC closes it. IMPORT COMPONENTS on the
+palette brings every definition of another saved ship across, references remapped, and the ship
+itself as one more. INTERIOR draws the interior's fronts and the exterior's backs and nothing
+else. The ghost ray-marcher and AUTO are gone: nothing bakes by itself, the button lights.
+
+### Measured on the way
+
+- `make_component` already lifts the root (the instance becomes the root) and already allows
+  nesting; the missing piece was a parent that is an inner part. `ShipAttach` expands an instance
+  when it is placed, not after the loop, and everything that walks parents normalises through
+  `ShipComponents.instance_of`.
+- The nucleus instance had no `asymmetric` flag, so its rim protons grew mirror twins (`~m`) and
+  the root itself overlapped its own twin on explode. The template marks it asymmetric as it does
+  every part.
+- The room join written after the rooms were assembled joined nothing; the assembly is a loop
+  one screen above `var rooms`.
+- gdUnit stops a suite at its first failure: "Executed (8/8)" is not a crash.
+- A `ProgressBar` in this theme has no boxes; a bar with `visible` on drew nothing. Styled by
+  hand (ADR 0023's bar, kept).
+
+### Verified
+
+**gdUnit4 286/286**; selfcheck PASSED, hash unchanged at `5536787c6c35d236`; data validator
+PASSED, 0 warnings; gdformat and gdlint clean; windowed visual check PASSED - five modes, explode
+(13 modules), update (14 baked assembled, button lit then cleared), isolation (a two-part
+component opened: 10 washed, 4 kept, inner pick `p_0012/cp_0002`, closed on ESC).
+
+### Still the human's to check
+
+Open a carbon: one row for the nucleus in the tree, tunnels under it; click a proton and all six
+light; double-click and the ship washes out around them; click one proton, change its scale in
+the inspector, watch every instance follow; ESC. UPDATE MESHES, then INTERIOR: the near wall
+gone, the far cavity wall solid. Save the carbon, NEW a hydrogen, IMPORT COMPONENTS -> the
+carbon's nucleus and the carbon itself in the palette; place the carbon on the hydrogen.
+
+## [2026-09-06c] INTERIOR on the baked pieces, and LINK inside a component
+
+> "after bake interior render doesnt work right. - the default proton pieces arent defaulted to a
+> room link. so i double clicked the component so i could select all the sub components and link
+> as room and that wouldnt let me either."
+
+Two causes, both plain once measured. The INTERIOR mode dressed the interior surface in the
+faceted shader, which is `cull_disabled` by design - so the interior drew both its sides and the
+ship read solid from outside, exactly as before the mode existed. It now wears two variants of
+that shader built at load by editing the one render_mode word (interior: back-culled, exterior:
+front-culled), and `reports/visual_interior.png` shows the baked demo with its near walls gone and
+its far cavity walls and sockets facing the camera. And `ShipSeams.pairs_within` knew only
+`doc.parts`, so the six protons - inner parts of the root component since ADR 0024 - never paired
+and LINK answered "nothing in the selection is joined". Inner parts pair with what they hang from
+now, `mode_for` reads OPEN for two parts of one instance without a joint, and LINK on them says
+why it will not cycle: they are one room already; dissolve the component to wall them. The tree's
+instance row reads `(6 PARTS, ONE ROOM)` so the default is visible without a bake.
+
+### Verified
+
+gdUnit4 **287/287** (new: a component's inner parts pair, read open, and a tunnel on an inner
+proton keeps its hatch); selfcheck PASSED, hash unchanged at `5536787c6c35d236`; data validator
+PASSED, 0 warnings; gdformat and gdlint clean; windowed visual check PASSED with the interior
+frame saved from the baked view.
+
+### Still the human's to check
+
+UPDATE MESHES, then INTERIOR: the near wall gone, the far cavity wall solid and shaded, the
+sockets cut through. Double-click the nucleus, select two protons, LINK: the refusal names the
+reason. The tree row: `C NUCLEUS (6 PARTS, ONE ROOM)`.
+
+
+## [2026-09-06d] A component's links live in its definition
+
+> "i dont care if they are already a room, they are a room made of chunks and i should be able
+> to change their internal chunk link types. (AND I SHOULD BE SET TO OPEN ROOM BY DEFAULT and its
+> not). - i try to import components but it says 'theres no ships' yet we have an entire fleet of
+> default ships made? .. going into a component shouldnt block me from doing anything."
+
+ADR 0025. The membership rule of ADR 0024 - a component is one room, no joint behind it - was
+the wrong abstraction and it showed as a refusal. Now a definition holds the joints between its
+own parts, exactly as the document holds those between its own: `ShipSeams` routes an inner
+pair to its definition, so LINK, the seam styles, the SDF, the plan and the engine bake all read
+the same answer; the nucleus is lifted with OPEN joints written in, so it IS an open room by
+default and says so; the links move with the parts at lift, at dissolve and at import (an
+imported ship keeps its walls and hatches). IMPORT COMPONENTS lists the fleet - every atomic
+class, built in the importing ship's own room family - ahead of the saved files. The builder's
+import flow and bake HUD moved into two small classes to stay under its line cap; measured on the
+way, the first HUD was handed a null button because the status row is built before the toolbar.
+
+### Verified
+
+**gdUnit4 287/287**; selfcheck PASSED, hash unchanged at `5536787c6c35d236`; data validator
+PASSED, 0 warnings; gdformat and gdlint clean; windowed visual check PASSED (five modes, explode,
+update with the interior frame, isolation).
+
+### Still the human's to check
+
+Double-click the nucleus, select two protons, LINK: it cycles (wall / doorway / hatched / open)
+and the status names the pair; the seam menu on two protons styles their seam. New carbon: the
+protons are open already - UPDATE MESHES, INTERIOR, the cavities run through. IMPORT COMPONENTS
+on any ship: the list starts with `CLASS: hydrogen` and the rest of the fleet.
+
+
+## [2026-09-06e] Imports: a primitive root, the arms, and the host's size
+
+> "importing components is freezing the system .. i dont see the tunnels used in the model, and
+> i dont see the electrons .. the proton cluster came in way way too large, like 5x .. the entire
+> carbon class ship as a component module .. basically froze .. adding any component as a single
+> primitive, a wing, a proton cluster, or an entire ship should all act the exact same."
+
+ADR 0026. Measured headlessly first: nothing in core takes more than half a second, but the
+whole-ship definition's root was the nucleus instance - and an instance has no shape of its own,
+so the ship instance had no proxy shape and no protons under it, and the builder was handed a
+part with nothing to draw. `import_from` now flattens the source ship before making its
+definition, and `make_component` refuses an instance head: every definition's root is a
+primitive. An import offers the ship's arms too - each subtree off the root, identical arms
+once - so a carbon arrives as its nucleus, `CARBON ARM 1` (tunnel and pod) and `CARBON`. And a
+class is built at the host ship's own span, bore and length, read off its shapes: the class
+defaults are sized per class by a volume budget (a carbon's proton 11.8 m, a hydrogen's
+25.5 m), which is the "5x".
+
+### Verified
+
+**gdUnit4 289/289**; selfcheck PASSED, hash unchanged at `5536787c6c35d236`; data validator
+PASSED, 0 warnings; gdformat and gdlint clean; windowed visual check PASSED. Headless probe:
+the ship instance has a proxy, 19 keys under it, 29 parts in the field; the carbon rebuilt from
+a host built at span 8.0 / bore 2.2 has the same proton within a centimetre.
+
+### Still the human's to check
+
+IMPORT COMPONENTS -> `CLASS: carbon` into your ship: three entries - nucleus, ARM 1, CARBON.
+Place each: the nucleus at your protons' size, the arm as a tunnel with its pod, the whole ship
+as one part that drops onto a surface like a primitive.
+
+
+## [2026-09-06f] Default hatches, the LINK crash, and the phase-one review
+
+> "selected a tunnel and the main proton room, and tried to change their link to hatch and the
+> system crashed .. all default pre-made ships, and any future procedurally generated ones should
+> have hatch connections between each and every tunnel and linked module by default"
+
+ADR 0027. The crash was the one `doc.parts[...]` left on the LINK path - the tree's status line
+- fed an inner part of the open component; it reads through `part_at` now, and the seam menu's
+pairs come from `pairs_within`, which knows what hangs off what inside a component. The "400
+warnings" before it were ADR 0026's shapeless whole-ship instance, already gone. Hatches by
+default: `ShipSeams.default_link_for` answers HATCHED wherever a hallway meets a room by role
+(an instance by its definition root's role, so an imported arm hatches onto a proton), and the
+builder applies it when a placement commits. The templates already did both ends of every
+tunnel; placed and generated tunnels now behave the same.
+
+The Phase One Hull Review was written as an artifact: state measured, strains named, eight
+ranked recommendations (room-keyed bake cache first), a tooltip contract, four risks, and the
+phase-1 scope stated - deliver, do not preclude, do not build.
+
+### Verified
+
+**gdUnit4 290/290**; selfcheck PASSED, hash unchanged at `5536787c6c35d236`; data validator
+PASSED, 0 warnings; gdformat and gdlint clean; windowed visual check PASSED.
+
+### Still the human's to check
+
+Open the carbon component, select a tunnel and the main proton, LINK: it cycles and names the
+pair, no crash. Place a tunnel on a proton, or an imported ARM: the seam reads HATCHED without
+a click.
+
+
+## [2026-09-06g] A ship arrives resolved; the interior is its own mesh
+
+> "the damn ships should be fully resolved .. when i load it its like that and i dont have to do
+> anything" / "the inner mesh and outer mesh of the hull as a single mesh .. the correct way is
+> for the exterior mesh and the interior mesh to be separate"
+
+ADR 0028. The document had been resolved since ADR 0025; the screen showed six primitive spheres
+over one another until a button was pressed. A ship now bakes itself on arrival - class, file or
+blank - with the bar up, and the baked pieces stay on screen while the player works (only the
+primitives the bake covers hide). Measured on the exact scenario, no press: 14 modules, one room
+of six, eight hatches, zero primitives. On the way: a bake landing for a document since replaced
+was shown for the new ship (the chooser's blank ship under the carbon) - discarded now.
+
+INTERIOR was wrong the whole time for one reason: Godot's front face is CLOCKWISE, the engine's
+pieces wind by the right-hand rule, and the faceted shader's `cull_disabled` had hidden that
+from every other mode. The culls are the right way round now, the interior is a separate mesh
+node per piece as asked, nothing is double-sided, and the cavity shades as a hollow. The frame:
+one continuous cavity across the six protons, tunnel mouths open into the pods, wall thickness at
+the rims. A cutaway plane was built and measured on the way - it hid half the ship - and is
+plumbed but unused.
+
+### Verified
+
+**gdUnit4 290/290**; selfcheck PASSED, hash unchanged at `5536787c6c35d236`; data validator
+PASSED, 0 warnings; gdformat and gdlint clean; windowed visual check PASSED; resolve check PASSED
+with `reports/visual_resolved_{wire,shaded,interior}.png`.
+
+### Still the human's to check
+
+Pick a carbon, wait for the bar: one fused nucleus, no press. WIRE, then INTERIOR: the cavity
+runs through all six protons and out the tunnels into the pods.
+
+
+## [2026-09-06h] An opening is capped, collared and doored on both sides
+
+> "where we cut holes for hatches, and openings, we need those manifold meshes to cap the
+> exposed open hole edges .. a hatch that can open or close shutter eye style, double hung door
+> style, and single hinge door style .. each hatch will be a double hatch with one on each
+> module .. a thin flat faced cylinder .. that extends into each module just enough to give a
+> flat manifold gasket .. the user should be able to choose the general shape .. the dimensions
+> .. and the style"
+
+ADR 0029. A hatched seam had never been bored: the plan counted it PENDING and cut a wall. Now
+`ShipDoors` (core) puts a gasket plane where the seam axis crosses the indenting module's mesh
+and gives each module, on its own side, a collar to union, a clearing prism and the bore to
+subtract; the engine's third pass carries them out and Manifold caps every rim by construction.
+The leaves - single hinge, double, iris - are built per module at any amount open and swung on
+a tween; the inspector's HATCH section chooses family, shape, style, width and height within
+the seam's own maximum and the 0.5 m squeeze, sides for a polygon, and swings each door.
+
+Three things were measured on the way and are written into the code. A spar's field zero sits
+0.094 m outside the cap the engine builds (F34 again): every field is now read at its own mesh,
+and the plane is cast onto the tessellation. A bore through a 0.1 m cap costs 0.0376 m3 and the
+collar bridging the cap's dome gives back 0.005. And the merge that reads the engine's triangles
+back as n-gons bridged three annular faces into closed solids 0.4-0.5 m3 too big - so a merge is
+kept only when its volume matches the triangles.
+
+### Verified
+
+**gdUnit4 300/300**; selfcheck PASSED, hash unchanged at `5536787c6c35d236`; data validator
+PASSED, 0 warnings; gdformat and gdlint clean; windowed visual check PASSED; resolve check PASSED
+with `reports/visual_resolved_{wire,shaded,interior,doors}.png` - 8 doors planned, 12 pieces
+bored, none open, a leaf on every piece.
+
+### Still the human's to check
+
+Pick a carbon, wait for the bar. Select a tunnel: the HATCH section shows CRAWLWAY, CIRCLE,
+SINGLE, 0.70 x 0.70 M and the seam's maximum; press a DOOR button and the leaf swings into its
+module. INTERIOR: the hole through each tunnel cap with its rim capped. Change the shape to
+POLYGON and the style to IRIS, UPDATE MESHES, and press DOOR again.

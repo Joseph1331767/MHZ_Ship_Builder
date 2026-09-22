@@ -138,7 +138,27 @@ var _redo_button: Button = null
 ## EXPLODE / ASSEMBLE (ADR 0008). The exploded view shows bakes, not the document, so any edit
 ## assembles first - see _leave_explode().
 var _explode_button: Button = null
+var _rooms_button: Button = null
+## Whether an open room explodes as its member pieces (false) or as one whole shell (true).
+## "an explode control toggle to choose to explode rooms or keep them whole" (2026-09-05).
+var _rooms_whole: bool = false
 var _exploded: bool = false
+## True from the EXPLODE press until the engine has handed the baked modules to the view - the
+## frames the CSG nodes take to compute. The visual check waits on it; nothing else needs to.
+var _explode_baking: bool = false
+## The baked assembled view (ADR 0023): the last engine bake, whether it is on screen, whether
+## the document has moved on since, and whether AUTO re-bakes on every edit.
+var _last_bake: Dictionary = {}
+var _baked: bool = false
+var _meshes_stale: bool = false
+var _bake_pending: bool = false
+var _update_button: Button = null
+## The component instance open for editing in isolation (ADR 0024), or "".
+var _isolated: String = ""
+var _progress: ProgressBar = null
+var _bake_hud: ShipBakeHud = null
+## Whether a ship that arrives bakes itself (ADR 0028); the visual check turns it off.
+var _resolve_on_load_enabled: bool = true
 ## The right-click seam menu (ADR 0009), and the pair it was opened on.
 var _context_menu: ShipContextMenu = null
 ## Every connection the open seam menu will restyle, as `[child, host]` pairs. Captured when the
@@ -375,36 +395,69 @@ func add_part(family_id: String, manufacturer_id: String, parent_id: String) -> 
 ## An existing joint between the pair is flipped rather than duplicated: joints are keyed over the
 ## unordered pair (ShipDoc.joint_key_for), and two joints over one pair would give the bake two
 ## contradictory answers about whether that wall is there.
-## Steps a pair's link one notch round LINK_CYCLE - WALL -> DOORWAY -> HATCH -> OPEN -> WALL -
-## and returns the new mode. "it should have dynamic options for how 2 rooms link." A wall is
-## the absence of a record, so stepping onto WALL erases the joint; a hatch keeps whatever
-## family the joint already carried, or takes the default one.
-func cycle_link(a: String, b: String) -> String:
-	if _doc == null or a.is_empty() or b.is_empty() or a == b:
+## Steps a whole SELECTION one notch round LINK_CYCLE - WALL -> DOORWAY -> HATCH -> OPEN -> WALL -
+## and returns the mode they all now carry, or "" if nothing was linkable. Every pair of parts
+## within [param ids] that is joined parent-to-child moves together.
+##
+## TAKES A SELECTION, NOT A PAIR, because a room is not a separate idea from a link: "they
+## shouldn't really be separate options, as when making a room it defines open structures at their
+## link" (2026-09-04). Selecting several parts and stepping them to OPEN IS making them one room -
+## no wall between any of them - and that is the whole of what MAKE ROOM used to promise. Naming
+## one is a rename, which the part tree has always done in the row itself.
+##
+## ONE MODE FOR THE GROUP, and one undo step. A selection whose links already agree steps on from
+## there; a mixed one is unified first, at the mode the cycle would reach from a wall, so a second
+## press is predictable rather than depending on which pair the walk happened to see first.
+##
+## A wall is the ABSENCE of a record, so stepping onto WALL erases the joint; a hatch keeps
+## whatever family the joint already carried, or takes the default one.
+func cycle_link(ids: PackedStringArray) -> String:
+	if _doc == null:
 		return ""
-	var current: String = ShipSeams.mode_for(_doc, a, b)
-	var index: int = LINK_CYCLE.find(current)
-	var next: String = str(LINK_CYCLE[(index + 1) % LINK_CYCLE.size()])
-	var existing: String = _joint_id_for(a, b)
+	var pairs: Array[PackedStringArray] = ShipSeams.pairs_within(_doc, ids)
+	if pairs.is_empty():
+		return ""
+	var here: String = ShipSeams.shared_mode(_doc, pairs)
+	var next: String = str(LINK_CYCLE[(LINK_CYCLE.find(here) + 1) % LINK_CYCLE.size()])
 	begin_edit("link " + next)
-	if next == ShipSeams.MODE_WALL:
-		if not existing.is_empty():
-			_doc.joints.erase(existing)
-	else:
-		var joint: ShipJoint = null
-		if existing.is_empty():
-			joint = ShipJoint.new()
-			joint.id = _doc.new_joint_id()
-			joint.a = a if a <= b else b
-			joint.b = b if a <= b else a
-			_doc.joints[joint.id] = joint
-		else:
-			joint = _doc.joints[existing]
-		joint.mode = _joint_mode_for_link(next)
-		if next == ShipSeams.MODE_HATCHED and joint.hatch_family.is_empty():
-			joint.hatch_family = _default_hatch()
+	for pair: PackedStringArray in pairs:
+		_set_link(pair[0], pair[1], next)
 	commit_edit(PackedStringArray())
 	return next
+
+
+## Puts one pair at [param link]. Caller brackets this with begin_edit/commit_edit.
+func _set_link(a: String, b: String, link: String) -> void:
+	# Two chunks of one component: the link lives in the definition (ADR 0025).
+	if ShipSeams.within_one_instance(_doc, a, b):
+		var inner: ShipJoint = ShipComponents.inner_joint_for(_doc, a, b)
+		if link == ShipSeams.MODE_WALL:
+			ShipComponents.set_inner_joint(_doc, a, b, null)
+			return
+		if inner == null:
+			inner = ShipJoint.new()
+		inner.mode = _joint_mode_for_link(link)
+		if link == ShipSeams.MODE_HATCHED and inner.hatch_family.is_empty():
+			inner.hatch_family = _default_hatch()
+		ShipComponents.set_inner_joint(_doc, a, b, inner)
+		return
+	var existing: String = _joint_id_for(a, b)
+	if link == ShipSeams.MODE_WALL:
+		if not existing.is_empty():
+			_doc.joints.erase(existing)
+		return
+	var joint: ShipJoint = null
+	if existing.is_empty():
+		joint = ShipJoint.new()
+		joint.id = _doc.new_joint_id()
+		joint.a = a if a <= b else b
+		joint.b = b if a <= b else a
+		_doc.joints[joint.id] = joint
+	else:
+		joint = _doc.joints[existing]
+	joint.mode = _joint_mode_for_link(link)
+	if link == ShipSeams.MODE_HATCHED and joint.hatch_family.is_empty():
+		joint.hatch_family = _default_hatch()
 
 
 ## The id of the joint over the unordered pair, or "".
@@ -539,6 +592,7 @@ func begin_move_selected() -> void:
 
 ## Drop the ghost with no edit. Safe to call when nothing is being placed.
 func cancel_placement() -> void:
+	_leave_isolation()
 	if _placement == null or not _placement.active:
 		return
 	_placement.cancel()
@@ -625,7 +679,25 @@ func _on_ghost_validity_changed(is_valid: bool, reason: String) -> void:
 
 func _on_placement_committed(part_id: String) -> void:
 	placement_state_changed.emit(false)
+	_default_link_for_placed(part_id)
 	set_status("PLACED %s" % part_id)
+
+
+## A tunnel placed on a module is HATCHED to it by default (ADR 0027); an existing link stays.
+func _default_link_for_placed(part_id: String) -> void:
+	if _doc == null or not _doc.parts.has(part_id):
+		return
+	var host: String = (_doc.parts[part_id] as ShipPart).parent
+	if host.is_empty():
+		return
+	if ShipSeams.mode_for(_doc, part_id, host) != ShipSeams.MODE_WALL:
+		return
+	var link: String = ShipSeams.default_link_for(_doc, part_id, host)
+	if link == ShipSeams.MODE_WALL:
+		return
+	begin_edit("default hatch")
+	_set_link(part_id, host, link)
+	commit_edit(PackedStringArray())
 
 
 func _on_placement_cancelled() -> void:
@@ -640,6 +712,7 @@ func _commit(changed_ids: PackedStringArray, check_budget: bool) -> bool:
 	if _doc == null:
 		return false
 	_leave_explode()
+	_mark_meshes_stale()
 	if check_budget and _bbox_exceeded():
 		var restored: ShipDoc = _history.peek()
 		if restored != null:
@@ -649,8 +722,15 @@ func _commit(changed_ids: PackedStringArray, check_budget: bool) -> bool:
 		_emit_state()
 		show_message("BUDGET", "EDIT REFUSED - BOUNDING BOX OVER max_bbox_m.")
 		return false
+	# An edit made to an inner part of a component (isolation, ADR 0024) lives in a cached
+	# object until it is written into the definition; every instance follows at the sync.
+	var inner_edit: bool = false
+	for pid: String in changed_ids:
+		if ShipComponents.is_expanded_id(pid):
+			_doc.store_inner(pid)
+			inner_edit = true
 	_history.push(_doc, _pending_label)
-	if changed_ids.is_empty():
+	if changed_ids.is_empty() or inner_edit:
 		_refresh_view(false)
 	else:
 		if _view != null:
@@ -663,9 +743,14 @@ func _commit(changed_ids: PackedStringArray, check_budget: bool) -> bool:
 
 ## Swap the whole document in. Never budget-checked: loading and undo are exempt.
 func _replace_doc(doc: ShipDoc) -> void:
+	_isolated = ""
+	if _view != null:
+		_view.set_isolated("")
 	_doc = doc
 	_selection = _filter_selection(_selection)
+	_drop_bake()
 	_refresh_view(true)
+	_mark_meshes_stale()
 	_emit_state()
 
 
@@ -712,6 +797,7 @@ func found_document(family_id: String, manufacturer_id: String) -> void:
 	if _view != null:
 		_view.frame_all()
 	set_status("NEW SHIP - %s AT %s m" % [family_id, String.num(span, 1)])
+	_resolve_on_load()
 
 
 func _refresh_view(full: bool) -> void:
@@ -744,18 +830,22 @@ func _set_exploded(on: bool) -> void:
 		_connect_explode()
 		_exploded = true
 		set_status("EXPLODING...")
-		# The exact per-part bake (ADR 0011). The SDF still comes along: the explode
-		# OFFSETS are measured off the seams it carries, and a module made of several placed
-		# ids still falls back to extracting from it.
-		var exact: Dictionary = ShipMeshBake.bake(_doc, _data, _config)
-		_view.set_exploded(
-			true, ShipSdf.build(_doc, _data, _config), _selection, exact.get("solids", {})
-		)
+		# The exact per-part bake, carried out by the ENGINE's CSG (ShipCsgBake, ADR 0020): the
+		# plan is core's, the booleans are Manifold's. A fresh bake is shown as it is; a stale or
+		# missing one is made first, and _show_bake() finds _exploded set when it lands.
+		if _last_bake.is_empty() or _meshes_stale:
+			_update_meshes()
+		else:
+			_show_bake()
 	else:
 		if not _exploded:
 			return
 		_exploded = false
 		_view.set_exploded(false)
+		# Back into the baked view when there is one - the assembled ship is the finished pieces
+		# where they stand, not the preview primitives (ADR 0023).
+		if not _last_bake.is_empty():
+			_show_bake()
 		set_status("ASSEMBLED")
 	if _explode_button != null:
 		_explode_button.text = "ASSEMBLE" if _exploded else "EXPLODE"
@@ -763,6 +853,126 @@ func _set_exploded(on: bool) -> void:
 
 func _on_explode_pressed() -> void:
 	_set_exploded(not _exploded)
+
+
+func _on_rooms_pressed() -> void:
+	_rooms_whole = not _rooms_whole
+	if _rooms_button != null:
+		_rooms_button.text = "ROOMS: WHOLE" if _rooms_whole else "ROOMS: PIECES"
+	if _view != null:
+		_view.set_rooms_whole(_rooms_whole)
+
+
+# ---------------------------------------------------------------- baked view and its update
+
+
+## UPDATE MESHES: the engine bake of the document as it is now, shown assembled or exploded
+## (ADR 0023). A coroutine over frames; a request during a bake queues one more; a bake of a
+## document since replaced is discarded (ADR 0028).
+func _update_meshes() -> void:
+	if _doc == null or _view == null:
+		return
+	if _explode_baking:
+		_bake_pending = true
+		return
+	_explode_baking = true
+	_bake_pending = false
+	_meshes_stale = false
+	if _bake_hud != null:
+		_bake_hud.refresh_button(_meshes_stale)
+	if _bake_hud != null:
+		_bake_hud.show_progress(0.0)
+	set_status("BAKING...")
+	var doc_at_start: ShipDoc = _doc
+	var exact: Dictionary = await ShipCsgBake.bake(self, _doc, _data, _config, _on_bake_progress)
+	_explode_baking = false
+	if _view == null:
+		return
+	if _doc != doc_at_start:
+		# Another document arrived meanwhile (measured: the chooser's blank ship baking when the
+		# class replaced it): its bake is not this ship's. Bake this one instead.
+		_update_meshes()
+		return
+	if _bake_pending:
+		_meshes_stale = true
+	_last_bake = exact
+	_show_bake()
+	if _bake_pending:
+		_update_meshes()
+
+
+## Put the last bake on screen - exploded when the exploded view is up, assembled otherwise.
+func _show_bake() -> void:
+	if _view == null or _doc == null or _last_bake.is_empty():
+		return
+	_connect_explode()
+	var sdf: ShipSdf = ShipSdf.build(_doc, _data, _config)
+	_view.set_rooms_whole(_rooms_whole)
+	if _exploded:
+		_baked = false
+		_view.set_exploded(true, sdf, _selection, _last_bake)
+	else:
+		_baked = true
+		_view.set_baked(true, sdf, _selection, _last_bake)
+	if _bake_hud != null:
+		_bake_hud.refresh_button(_meshes_stale)
+
+
+## A ship that arrives RESOLVES ITSELF: one bake, the bar up, the pieces on screen (ADR 0028).
+func _resolve_on_load() -> void:
+	if not _resolve_on_load_enabled or _doc == null:
+		return
+	set_status("RESOLVING SHIP...")
+	_update_meshes()
+
+
+## Leave the baked view for the primitives (the visual check uses this); the bake is kept.
+func _set_baked(on: bool) -> void:
+	if on:
+		if _last_bake.is_empty() or _meshes_stale:
+			_update_meshes()
+		else:
+			_show_bake()
+		return
+	if not _baked:
+		return
+	_baked = false
+	if _view != null:
+		_view.set_baked(false)
+	set_status("PREVIEW")
+
+
+## The document changed: the baked view (if up) is stale and the button lights (ADR 0024).
+func _mark_meshes_stale() -> void:
+	if _doc == null:
+		return
+	_meshes_stale = true
+	if _bake_hud != null:
+		_bake_hud.refresh_button(_meshes_stale)
+
+
+## Forget the bake: the document was swapped wholesale.
+func _drop_bake() -> void:
+	_last_bake = {}
+	_meshes_stale = false
+	if _baked:
+		_baked = false
+		if _view != null:
+			_view.set_baked(false)
+
+
+func _on_update_pressed() -> void:
+	if _doc == null:
+		set_status("NOTHING TO BAKE")
+		return
+	_update_meshes()
+
+
+func _on_bake_progress(fraction: float, label: String) -> void:
+	if _bake_hud != null:
+		_bake_hud.show_progress(fraction)
+	if label != "":
+		set_status("BAKING: %s  %d%%" % [label, int(round(fraction * 100.0))])
 
 
 ## Any path that changes what is on screen assembles first: the exploded modules were baked
@@ -783,9 +993,18 @@ func _connect_explode() -> void:
 func _on_explode_progress(done: int, total: int) -> void:
 	if _exploded:
 		set_status("EXPLODING %d / %d MODULES" % [done, total])
+	elif _baked:
+		set_status("PLACING %d / %d MODULES" % [done, total])
+	if total > 0 and _bake_hud != null:
+		_bake_hud.show_progress(0.9 + 0.1 * float(done) / float(total))
 
 
 func _on_explode_finished(modules: int, seams: int, ms: int) -> void:
+	if _bake_hud != null:
+		_bake_hud.hide_progress()
+	if _baked and not _exploded:
+		set_status("MESHES UPDATED: %d MODULES, %d SEAMS  (%d ms)" % [modules, seams, ms])
+		return
 	if _exploded:
 		set_status(
 			(
@@ -812,6 +1031,10 @@ func _filter_selection(ids: PackedStringArray) -> PackedStringArray:
 	for pid: String in ids:
 		if _doc.parts.has(pid):
 			out.append(pid)
+		elif not _isolated.is_empty() and ShipComponents.instance_of(pid) == _isolated:
+			# An inner part of the component open in isolation is selectable (ADR 0024).
+			if ShipComponents.inner_exists(_doc, pid):
+				out.append(pid)
 	return out
 
 
@@ -884,6 +1107,7 @@ func _build_layout() -> void:
 	_view = ShipView3D.new()
 	_view.name = "ShipView3D"
 	_view.part_picked.connect(_on_part_picked)
+	_view.part_double_clicked.connect(_on_part_double_clicked)
 	_view.pick_cleared.connect(_on_pick_cleared)
 	_view.seam_menu_requested.connect(_on_seam_menu_requested)
 	view_frame.add_child(_view)
@@ -907,7 +1131,23 @@ func _build_layout() -> void:
 	_status_label.name = "StatusLabel"
 	_status_label.add_theme_font_size_override("font_size", ShipTheme.font_small())
 	_status_label.text = "READY"
-	status_frame.add_child(_status_label)
+	_status_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var status_row: HBoxContainer = HBoxContainer.new()
+	status_row.name = "StatusRow"
+	status_row.add_child(_status_label)
+	# The bake's bar: the engine takes seconds, and a bar that moves says the builder is not
+	# frozen. Hidden between bakes.
+	_progress = ProgressBar.new()
+	_progress.name = "BakeProgress"
+	# Measured 1 px tall in the row without these: a ProgressBar does not fill its box on its own.
+	_progress.custom_minimum_size = Vector2(ShipTheme.pxf(240.0), ShipTheme.pxf(10.0))
+	_progress.size_flags_vertical = Control.SIZE_FILL
+	_progress.show_percentage = false
+	_progress.visible = false
+	status_row.add_child(_progress)
+	_bake_hud = ShipBakeHud.new(_update_button, _progress, _ship_theme)
+	_bake_hud.style_bar()
+	status_frame.add_child(status_row)
 
 	part_palette_slot = _slots.get("PartPaletteSlot", null)
 	tree_slot = _slots.get("TreeSlot", null)
@@ -949,6 +1189,7 @@ func _build_header() -> PanelContainer:
 	_mode_option.add_item("SHADED+WIRE", ShipSceneBuilder.DisplayMode.SHADED_WIRE)
 	_mode_option.add_item("X-RAY", ShipSceneBuilder.DisplayMode.XRAY)
 	_mode_option.add_item("FRESNEL", ShipSceneBuilder.DisplayMode.FRESNEL)
+	_mode_option.add_item("INTERIOR", ShipSceneBuilder.DisplayMode.INSIDE)
 	# Must match ShipSceneBuilder._mode, or the toolbar label lies about what is on screen.
 	_mode_option.select(ShipSceneBuilder.DisplayMode.SHADED_WIRE)
 	_mode_option.item_selected.connect(_on_mode_selected)
@@ -964,6 +1205,15 @@ func _build_header() -> PanelContainer:
 	bar.add_child(_make_button("FRAME", _on_frame_pressed))
 	_explode_button = _make_button("EXPLODE", _on_explode_pressed)
 	bar.add_child(_explode_button)
+	_rooms_button = _make_button("ROOMS: PIECES", _on_rooms_pressed)
+	_rooms_button.tooltip_text = "EXPLODE A ROOM INTO ITS PIECES, OR KEEP IT WHOLE"
+	bar.add_child(_rooms_button)
+	_update_button = _make_button("UPDATE MESHES", _on_update_pressed)
+	_update_button.tooltip_text = "BAKE THE EXACT MESHES OF THE DOCUMENT AS IT IS NOW"
+	bar.add_child(_update_button)
+	# The status row (and its bar) is built before this toolbar: the HUD is remade here with both.
+	_bake_hud = ShipBakeHud.new(_update_button, _progress, _ship_theme)
+	_bake_hud.style_bar()
 	bar.add_child(_make_button("BAKE", _on_bake_pressed))
 	return frame
 
@@ -1121,6 +1371,7 @@ func found_from_template(template_id: String, options: Dictionary) -> void:
 			% [ShipTemplates.label_of(_data, template_id), _doc.parts.size(), _doc.joints.size()]
 		)
 	)
+	_resolve_on_load()
 
 
 ## The start chooser, layered over everything. Built after the dialog modal so a message raised
@@ -1283,6 +1534,44 @@ func _on_part_picked(part_id: String, additive: bool) -> void:
 	set_status("SELECTED %s" % resolved)
 
 
+## SketchUp's double-click (ADR 0024): on a component instance, open it - the rest of the ship
+## washes out and its inner parts pick one by one; on empty space, or on anything that is not
+## part of the open component, close it.
+func _on_part_double_clicked(part_id: String) -> void:
+	var resolved: String = ShipSymmetry.source_of_twin(part_id)
+	var part: ShipPart = _doc.parts.get(resolved, null) if _doc != null else null
+	if part != null and part.kind == ShipPart.KIND_COMPONENT_INSTANCE and resolved != _isolated:
+		_isolate(resolved)
+		return
+	if _isolated.is_empty():
+		return
+	if part_id.is_empty() or ShipComponents.instance_of(resolved) != _isolated:
+		_leave_isolation()
+
+
+func _isolate(instance_id: String) -> void:
+	if _doc == null or not _doc.parts.has(instance_id):
+		return
+	_isolated = instance_id
+	set_selection(PackedStringArray())
+	if _view != null:
+		_view.set_isolated(instance_id)
+	set_status("EDITING COMPONENT %s - ESC TO CLOSE" % instance_id.to_upper())
+
+
+func _leave_isolation() -> void:
+	if _isolated.is_empty():
+		return
+	var was: String = _isolated
+	_isolated = ""
+	_selection = _filter_selection(_selection)
+	if _view != null:
+		_view.set_isolated("")
+		_view.set_selection(_selection)
+	selection_changed.emit(_selection)
+	set_status("CLOSED COMPONENT %s" % was.to_upper())
+
+
 func _on_pick_cleared() -> void:
 	set_selection(PackedStringArray())
 
@@ -1369,6 +1658,39 @@ func _on_open_pressed() -> void:
 ## Loading is budget-exempt (SPEC section 8). An over-budget ship opens as a visible
 ## violation, never as a refusal - otherwise lowering a lever makes yesterday's ships
 ## unopenable.
+## IMPORT COMPONENTS (ADR 0024/0025): every component of another ship - an atomic class of the
+## fleet, or a saved file - and the ship itself as one, into this document's palette. The
+## palette's button asks for it; ShipComponentImport knows the sources.
+func _on_import_pressed() -> void:
+	if _doc == null:
+		set_status("NOTHING TO IMPORT INTO")
+		return
+	var items: PackedStringArray = ShipComponentImport.sources(_data, SHIP_DIR)
+	if items.is_empty():
+		show_message("IMPORT COMPONENTS", "NO SHIPS TO IMPORT FROM")
+		return
+	_open_dialog(
+		"IMPORT COMPONENTS",
+		"PICK A CLASS OR A SAVED SHIP",
+		DialogMode.LIST,
+		_import_named,
+		items,
+		""
+	)
+
+
+func _import_named(name: String) -> void:
+	var other: ShipDoc = ShipComponentImport.source_doc(name, _doc, _data, _config, SHIP_DIR)
+	if other == null:
+		show_message("IMPORT FAILED", "%s IS NOT A SHIP." % name.to_upper())
+		return
+	begin_edit("import components")
+	var label: String = ShipComponentImport.label_of(name)
+	var added: PackedStringArray = ShipComponents.import_from(_doc, other, label)
+	commit_edit(PackedStringArray())
+	set_status("IMPORTED %d COMPONENTS FROM %s" % [added.size(), label])
+
+
 func _open_named(file_name: String) -> void:
 	var path: String = "%s/%s.json" % [SHIP_DIR, file_name]
 	if not FileAccess.file_exists(path):
@@ -1390,6 +1712,7 @@ func _open_named(file_name: String) -> void:
 	if _view != null:
 		_view.frame_all()
 	set_status("OPENED %s" % path)
+	_resolve_on_load()
 
 
 ## Synchronous on purpose for the shell: chunked, threaded baking with progress is M6.
@@ -1456,15 +1779,8 @@ func _on_seam_menu_requested(position: Vector2) -> void:
 		var pid: String = ShipSymmetry.source_of_twin(raw)
 		if _doc.parts.has(pid):
 			chosen[pid] = true
-	_seam_pairs = []
-	# The doc's own order, so the same selection always yields the same list.
-	for pid: String in _doc.part_order():
-		if not chosen.has(pid):
-			continue
-		var host: String = (_doc.parts[pid] as ShipPart).parent
-		if host.is_empty() or not chosen.has(host):
-			continue
-		_seam_pairs.append(PackedStringArray([pid, host]))
+	# Inner parts of a component included (ADR 0025): pairs_within knows what hangs off what.
+	_seam_pairs = ShipSeams.pairs_within(_doc, PackedStringArray(chosen.keys()))
 	if _seam_pairs.is_empty():
 		if chosen.size() > 1:
 			set_status("NONE OF THOSE PARTS ARE CONNECTED TO EACH OTHER")
@@ -1511,7 +1827,7 @@ func _on_seam_style_chosen(style: String) -> void:
 		return
 	var live: Array[PackedStringArray] = []
 	for pair: PackedStringArray in _seam_pairs:
-		if _doc.parts.has(pair[0]) and _doc.parts.has(pair[1]):
+		if _is_part_alive(pair[0]) and _is_part_alive(pair[1]):
 			live.append(pair)
 	if live.is_empty():
 		set_status("THOSE PARTS ARE GONE")
@@ -1546,6 +1862,14 @@ func _on_seam_style_chosen(style: String) -> void:
 func _apply_seam_style(a: String, b: String, style: String) -> bool:
 	if _seam_style_of(a, b) == style:
 		return false
+	# Two chunks of one component: the style lives in the definition's joint (ADR 0025).
+	if ShipSeams.within_one_instance(_doc, a, b):
+		var inner: ShipJoint = ShipComponents.inner_joint_for(_doc, a, b)
+		if inner == null:
+			inner = ShipJoint.new()
+			inner.mode = ShipJoint.MODE_SEALED
+		inner.seam_style = style
+		return ShipComponents.set_inner_joint(_doc, a, b, inner)
 	var existing: String = _joint_id_for(a, b)
 	var joint: ShipJoint = null
 	if existing.is_empty():
@@ -1581,8 +1905,13 @@ static func _seam_style_label(style: String) -> String:
 
 
 ## A part's display name, or its id when it has none.
+## A document part or an inner part of a component (ADR 0024).
+func _is_part_alive(pid: String) -> bool:
+	return _doc.parts.has(pid) or ShipComponents.inner_exists(_doc, pid)
+
+
 func _part_label(pid: String) -> String:
-	var part: ShipPart = _doc.parts.get(pid, null) as ShipPart
+	var part: ShipPart = _doc.part_at(pid)
 	if part == null:
 		return pid
 	return part.display_name if not part.display_name.is_empty() else pid

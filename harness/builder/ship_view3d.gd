@@ -70,6 +70,8 @@ extends SubViewportContainer
 ## in this Control's coordinates, which is where the seam menu opens (ADR 0009).
 signal seam_menu_requested(position: Vector2)
 
+## A part was double-clicked: the id the pick resolved to, "" for empty space (ADR 0024).
+signal part_double_clicked(part_id: String)
 signal part_picked(part_id: String, additive: bool)
 ## Emitted when a click lands on empty space.
 signal pick_cleared
@@ -77,6 +79,8 @@ signal pick_cleared
 ## A press that moves further than this many pixels is a camera drag, not a click.
 const CLICK_SLOP_PX: float = 4.0
 const PICK_RAY_LENGTH: float = 10000.0
+## Alpha of everything outside the component open in isolation (ADR 0024).
+const WASHED_ALPHA: float = 0.12
 const GRID_EXTENT: float = 20.0
 const GRID_STEP: float = 1.0
 
@@ -177,6 +181,14 @@ var _bbox_cage: MeshInstance3D = null
 ## edit keys - because what is on screen is a set of bakes, not the document.
 var _explode: ShipExplodeView = null
 var _exploded: bool = false
+## The ASSEMBLED baked view is up: the finished pieces where they stand, in place of the preview
+## primitives (ADR 0023). Never true together with _exploded.
+var _baked: bool = false
+## How far open every door is (ADR 0029): key -> {side -> 0..1}. Kept here, above the explode
+## view, so a rebake puts the doors back the way the player left them.
+var _door_open: Dictionary = {}
+## The component instance being edited in isolation, or "" (ADR 0024).
+var _isolated: String = ""
 
 var _press_pos: Vector2 = Vector2.ZERO
 var _press_active: bool = false
@@ -185,6 +197,8 @@ var _press_active: bool = false
 var _rmb_pos: Vector2 = Vector2.ZERO
 var _rmb_active: bool = false
 var _pick_pending: bool = false
+## A double-click waiting for the physics frame to resolve what it landed on.
+var _double_pending: bool = false
 var _pick_pos: Vector2 = Vector2.ZERO
 var _pick_additive: bool = false
 ## Ctrl was held on the press: re-centre the orbit on whatever this pick resolves to.
@@ -529,7 +543,10 @@ func _push_depth_range() -> void:
 	var box: AABB = _scene.scene_aabb()
 	var radius: float = maxf(box.size.length() * 0.5, DEPTH_MIN_RADIUS)
 	var dist: float = _camera_rig.distance
-	_scene.set_depth_range(maxf(dist - radius, 0.05), dist + radius)
+	# The cut plane stays at NO_CUT: the INTERIOR mode is the far walls from any angle, as
+	# asked; a section through the orbit focus is the shader's to offer when a SECTION mode
+	# wants it (ADR 0028).
+	_scene.set_depth_range(maxf(dist - radius, 0.05), dist + radius, ShipSceneBuilder.NO_CUT)
 	_push_handle_scale()
 
 
@@ -615,13 +632,100 @@ func set_exploded(
 		return
 	_exploded = on
 	if on:
+		_baked = false
 		_scene.set_exploded(true)
 		_explode.show_modules(sdf, _cfg, selected, solids)
+		_explode.set_doors_open(_door_open)
 	else:
 		_explode.clear()
 		_scene.set_exploded(false)
 		frame_all()
 	_refresh_hints()
+
+
+## Whether an exploded room shows as its pieces or as one whole shell. Takes effect on the next
+## EXPLODE, and at once when one is showing.
+## The ASSEMBLED baked view (ADR 0023): every finished piece where it stands, whole, in place of
+## the preview primitives, so a link or a wall is on screen as the engine made it. Rooms whole or
+## in pieces per [method set_rooms_whole]. Off puts the primitives back. Exploding leaves it; it
+## does not leave exploding.
+func set_baked(
+	on: bool,
+	sdf: ShipSdf = null,
+	selected: PackedStringArray = PackedStringArray(),
+	report: Dictionary = {}
+) -> void:
+	if _explode == null or _scene == null:
+		return
+	if on:
+		if sdf == null:
+			return
+		_exploded = false
+		_baked = true
+		var covered: PackedStringArray = PackedStringArray()
+		for key: Variant in report.get("solids", {}) as Dictionary:
+			covered.append(str(key))
+		_scene.set_exploded(true, covered)
+		_explode.show_modules(sdf, _cfg, selected, report, true)
+		_explode.set_doors_open(_door_open)
+	else:
+		if not _baked:
+			return
+		_baked = false
+		if not _exploded:
+			_explode.clear()
+			_scene.set_exploded(false)
+	_refresh_hints()
+
+
+func is_baked() -> bool:
+	return _baked
+
+
+## Swings one door (ADR 0029): the door of [param key] (ShipHatchEdit.door_key) on
+## [param side] (ShipDoors.SIDE_CHILD or SIDE_HOST) to [param amount] open. Remembered across
+## rebakes; animated when the baked pieces are on screen.
+func set_door_open(key: String, side: String, amount: float) -> void:
+	var sides: Dictionary = _door_open.get(key, {})
+	sides[side] = clampf(amount, 0.0, 1.0)
+	_door_open[key] = sides
+	if _explode != null:
+		_explode.set_door_open(key, side, amount, true)
+
+
+## How far open the door of [param key] on [param side] is, 0 when never touched.
+func door_open(key: String, side: String) -> float:
+	var sides: Dictionary = _door_open.get(key, {})
+	return float(sides.get(side, 0.0))
+
+
+## ISOLATION (ADR 0024): [param instance_id] is the component being edited ("" to leave);
+## the scene washes out everything else and picks inside resolve to inner parts.
+func set_isolated(instance_id: String) -> void:
+	_isolated = instance_id
+	var washed: Material = _washed_material() if not instance_id.is_empty() else null
+	if _scene != null:
+		_scene.set_isolated(instance_id, washed)
+	if _explode != null:
+		_explode.set_isolated(instance_id, washed)
+	_refresh_hints()
+
+
+## What everything outside the open component wears: dim, translucent, depth-tested, so the
+## component reads through the rest of the ship without the rest vanishing.
+func _washed_material() -> Material:
+	var m: StandardMaterial3D = StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.albedo_color = _role_color("text_dim", Color(0.4, 0.5, 0.5))
+	m.albedo_color.a = WASHED_ALPHA
+	m.cull_mode = BaseMaterial3D.CULL_BACK
+	return m
+
+
+func set_rooms_whole(on: bool) -> void:
+	if _explode != null:
+		_explode.set_rooms_whole(on)
 
 
 func is_exploded() -> bool:
@@ -647,7 +751,7 @@ func _gui_input(event: InputEvent) -> void:
 	if _camera_rig == null:
 		return
 
-	if _exploded:
+	if _exploded or _baked:
 		_handle_explode_input(event)
 		return
 
@@ -740,6 +844,11 @@ func _handle_explode_input(event: InputEvent) -> void:
 func _explode_left_button(mb: InputEventMouseButton) -> void:
 	if mb.pressed:
 		grab_focus()
+		if mb.double_click:
+			_pick_pos = mb.position
+			_double_pending = true
+			_press_active = false
+			return
 		_press_pos = mb.position
 		_press_active = true
 		return
@@ -767,6 +876,11 @@ func _explode_left_button(mb: InputEventMouseButton) -> void:
 func _handle_left_button(mb: InputEventMouseButton) -> bool:
 	if mb.pressed:
 		grab_focus()
+		if mb.double_click:
+			_pick_pos = mb.position
+			_double_pending = true
+			_press_active = false
+			return true
 		if mb.alt_pressed and _clone_selected():
 			return true
 		if _try_begin_handle_drag(mb.position):
@@ -1103,16 +1217,39 @@ func _refresh_hints() -> void:
 	var placing: bool = _placement != null and _placement.active
 	var key: String = (
 		"%d|%d|%d|%d|%d"
-		% [int(placing), _axis_lock, int(_aim_to_normal), int(_attached_pivot), int(_exploded)]
+		% [
+			int(placing),
+			_axis_lock,
+			int(_aim_to_normal),
+			int(_attached_pivot),
+			int(_exploded) + 2 * int(_baked) + 4 * int(not _isolated.is_empty())
+		]
 	)
 	if key == _hints_key:
 		return
 	_hints_key = key
 	var lines: PackedStringArray = PackedStringArray()
+	if not _isolated.is_empty():
+		lines.append("EDITING COMPONENT %s - THE REST IS WASHED OUT" % _isolated.to_upper())
+		lines.append("LMB SELECT A PART OF IT   EDIT IT IN THE INSPECTOR (EVERY INSTANCE FOLLOWS)")
+		lines.append("ESC OR DOUBLE-CLICK EMPTY SPACE TO CLOSE")
+		_hint_label.text = "\n".join(lines)
+		return
 	if _exploded:
 		lines.append("EXPLODED - EVERY MODULE PULLED OFF ITS SEAM, WALLS AND DOORS BAKED")
 		lines.append("RMB ORBIT   , / . ORBIT   +/- ZOOM   SHIFT+WHEEL ZOOM")
 		lines.append("E OR ASSEMBLE TO RETURN")
+		_hint_label.text = "\n".join(lines)
+		return
+	if _baked:
+		lines.append("BAKED - EVERY PIECE AS THE ENGINE MADE IT, LINKS AND WALLS INCLUDED")
+		(
+			lines
+			. append(
+				"EDIT FREELY - UPDATE MESHES WHEN THE BUTTON LIGHTS   DOUBLE-CLICK A COMPONENT TO OPEN IT"
+			)
+		)
+		lines.append("LMB SELECT   RMB ORBIT   , / . ORBIT   +/- ZOOM   E EXPLODE")
 		_hint_label.text = "\n".join(lines)
 		return
 	if placing:
@@ -1354,10 +1491,12 @@ func _physics_process(_delta: float) -> void:
 	if _ghost_commit_pending:
 		_ghost_commit_pending = false
 		_finish_placement()
-	if not _pick_pending:
+	if not _pick_pending and not _double_pending:
 		return
+	var double: bool = _double_pending
 	_pick_pending = false
-	_do_pick(_pick_pos, _pick_additive)
+	_double_pending = false
+	_do_pick(_pick_pos, _pick_additive, double)
 
 
 ## Left button up over a live placement. Dragging a part clear of the ship REMOVES it
@@ -1473,40 +1612,12 @@ func _clear_ghost() -> void:
 	_scene.set_suppressed_part("")
 
 
-func _do_pick(local_pos: Vector2, additive: bool) -> void:
-	if _viewport == null or _camera_rig == null or _scene == null:
+func _do_pick(local_pos: Vector2, additive: bool, double: bool = false) -> void:
+	var pid: String = _pid_under(local_pos)
+	# A double-click reports what it landed on, "" for empty space (ADR 0024).
+	if double:
+		part_double_clicked.emit(pid)
 		return
-	var cam: Camera3D = _camera_rig.get_camera()
-	if cam == null:
-		return
-	# local_pos is this Control's local coordinate, which with stretch = true is also the
-	# inner viewport coordinate - exactly what project_ray_* expects. No global anything.
-	var from: Vector3 = cam.project_ray_origin(local_pos)
-	var dir: Vector3 = cam.project_ray_normal(local_pos)
-
-	# PAINT gets first refusal. click() returns false whenever paint mode is inactive, so this
-	# is a no-op in BUILD; when paint IS live it consumes the click even on a miss, because
-	# falling through to selection there would silently drop the player back into BUILD.
-	if _paint != null and _paint.click(from, dir, _pick_shift, _pick_ctrl, _pick_alt):
-		return
-	# _space_state(), NOT _viewport.world_3d. This read the override property directly and got
-	# null every time - the same bug documented at length on _space_state() - so _do_pick()
-	# returned before it raycast and CLICKING A PART SELECTED NOTHING. It failed silently for the
-	# same reason the placement bug did: an early return on a null world looks like "the ray hit
-	# nothing", which is a legal answer.
-	var space: PhysicsDirectSpaceState3D = _space_state()
-	if space == null:
-		return
-	var query: PhysicsRayQueryParameters3D = PhysicsRayQueryParameters3D.create(
-		from, from + dir * PICK_RAY_LENGTH, ShipSceneBuilder.PICK_LAYER
-	)
-	query.collide_with_areas = false
-	query.collide_with_bodies = true
-	var hit: Dictionary = space.intersect_ray(query)
-	if hit.is_empty():
-		pick_cleared.emit()
-		return
-	var pid: String = _scene.part_id_for(hit.get("collider", null))
 	if pid == "":
 		pick_cleared.emit()
 		return
@@ -1518,6 +1629,31 @@ func _do_pick(local_pos: Vector2, additive: bool) -> void:
 	# synchronously, so the builder's selection is already the new one by the time this runs.
 	if _break_symmetry_held and _placement != null:
 		_placement.break_symmetry_selected()
+
+
+## The part id under [param local_pos], through the pick layer; "" when nothing is there.
+## local_pos is this Control's local coordinate, which with stretch = true is also the inner
+## viewport coordinate - exactly what project_ray_* expects. No global anything.
+func _pid_under(local_pos: Vector2) -> String:
+	if _viewport == null or _camera_rig == null or _scene == null:
+		return ""
+	var cam: Camera3D = _camera_rig.get_camera()
+	if cam == null:
+		return ""
+	var from: Vector3 = cam.project_ray_origin(local_pos)
+	var dir: Vector3 = cam.project_ray_normal(local_pos)
+	var space: PhysicsDirectSpaceState3D = _space_state()
+	if space == null:
+		return ""
+	var query: PhysicsRayQueryParameters3D = PhysicsRayQueryParameters3D.create(
+		from, from + dir * PICK_RAY_LENGTH, ShipSceneBuilder.PICK_LAYER
+	)
+	query.collide_with_areas = false
+	query.collide_with_bodies = true
+	var hit: Dictionary = space.intersect_ray(query)
+	if hit.is_empty():
+		return ""
+	return _scene.part_id_for(hit.get("collider", null))
 
 
 # ---------------------------------------------------------------- decor

@@ -74,7 +74,19 @@ uniform float rim_power : hint_range(0.5, 8.0) = 2.5;
 // a lit face still climbed to the top band on lambert alone and the rim had nowhere left to go.
 uniform float lambert_strength : hint_range(0.0, 1.0) = 1.0;
 
+// THE CUTAWAY (ADR 0028). The INTERIOR mode discards every fragment on the camera's side of this
+// plane (xyz the normal, w the distance): the near half of the ship is gone and the far half
+// shows as a section - the cavity walls, the wall thickness at the cut, the open passages between
+// rooms. The default plane is infinitely far behind everything, so every other mode is untouched.
+// Measured before this: a closed shell's far cavity wall, lit evenly, is indistinguishable from a
+// solid - "only shows the outer shell filled solid".
+uniform vec4 cut_plane = vec4(0.0, 0.0, 0.0, -1.0e9);
+
 void fragment() {
+	vec3 world_pos = (INV_VIEW_MATRIX * vec4(VERTEX, 1.0)).xyz;
+	if (dot(world_pos, cut_plane.xyz) < cut_plane.w) {
+		discard;
+	}
 	// NORMAL is view-space in fragment(); INV_VIEW_MATRIX takes it back to world so the lighting
 	// is anchored to the ship rather than to the camera.
 	// cull_disabled + FRONT_FACING instead of cull_back: a mirrored twin has a

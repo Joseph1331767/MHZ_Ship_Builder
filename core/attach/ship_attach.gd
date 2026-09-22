@@ -722,19 +722,18 @@ static func resolve_all_from_shapes(
 			var part: ShipPart = doc.parts[id]
 			if _can_place(doc, out, id, part):
 				out[id] = _place_part(doc, shapes, cfg, out, id, part)
+				# The inner parts of a placed instance, keyed like their shapes: hung from the
+				# instance's transform with the same attach maths as the ship tree, so a
+				# definition is placed exactly as the subtree it was lifted from would have
+				# been. Expanded HERE, not after the loop, so a part that hangs off one of them
+				# ("<instance>/<inner>" as its parent, ADR 0024) finds its parent placed.
+				if part.kind == KIND_COMPONENT_INSTANCE:
+					_expand_instance_transforms(doc, cfg, shapes, id, part, out[id], 0, out)
 			else:
 				blocked.append(id)
 		if blocked.size() == pending.size():
 			break
 		pending = blocked
-	# The inner parts of every placed instance, keyed like their shapes: hung from the
-	# instance's transform with the same attach maths as the ship tree, so a definition is
-	# placed exactly as the subtree it was lifted from would have been.
-	for id: String in ordered_part_ids(doc):
-		var part: ShipPart = doc.parts[id]
-		if part.kind != KIND_COMPONENT_INSTANCE or not out.has(id):
-			continue
-		_expand_instance_transforms(doc, cfg, shapes, id, part, out[id], 0, out)
 	_add_symmetry_twins(doc, cfg, out)
 	return out
 
@@ -1086,7 +1085,13 @@ static func _can_place(doc: ShipDoc, placed: Dictionary, id: String, part: ShipP
 		return true
 	if part.is_mirror() and doc.parts.has(part.mirror_source):
 		return placed.has(part.mirror_source)
-	if part.parent == "" or not doc.parts.has(part.parent):
+	if part.parent == "":
+		return true
+	# An inner part of an instance is a legal parent (ADR 0024): wait for its instance to be
+	# placed and expanded. A parent that is neither a part nor an inner part is simply missing.
+	if ShipComponents.is_expanded_id(part.parent):
+		return placed.has(part.parent)
+	if not doc.parts.has(part.parent):
 		return true
 	return placed.has(part.parent)
 

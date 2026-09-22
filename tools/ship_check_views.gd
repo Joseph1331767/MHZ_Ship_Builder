@@ -20,6 +20,13 @@ func _init(builder: Node, failures: PackedStringArray) -> void:
 	_failures = failures
 
 
+## What went wrong in here. The same list the caller holds - a PackedStringArray handed to a
+## function is SHARED, not copied (measured: merging it back doubled every line) - so this is
+## for reading, never for merging.
+func failures() -> PackedStringArray:
+	return _failures
+
+
 func check_fresnel(histograms: Array, palette: PackedStringArray, mode_names: Array) -> void:
 	var fresnel: int = mode_names.find("fresnel")
 	var shaded: int = mode_names.find("shaded_wire")
@@ -347,3 +354,158 @@ func _press_seam(view: Object, menu: Object, style: String) -> bool:
 	var pressed: bool = bool(menu.call("press", style))
 	menu.call("close")
 	return pressed
+
+
+## The baked view after UPDATE MESHES (ADR 0023), read back off the scene: the baked view up
+## and assembled, as many module meshes as the field has modules and every one at its own place
+## (no offsets), the button no longer lit, the bar down, every part visual hidden, the ghost
+## carrying the ship's parts - and, on leaving the baked view, the primitives back.
+func check_update_finish(view: Object, scene: Object, explode: Object, expected: int) -> void:
+	if not bool(_builder.get("_baked")) or not bool(view.call("is_baked")):
+		_failures.append("update: the baked view did not come up")
+	if not bool(explode.call("is_assembled")):
+		_failures.append("update: the modules are exploded, not assembled")
+	var count: int = int(explode.call("module_count"))
+	if count != expected:
+		_failures.append(
+			"update: %d module meshes on screen, the field has %d modules" % [count, expected]
+		)
+	var nodes: Array = explode.call("module_nodes")
+	for node: MeshInstance3D in nodes:
+		if node.transform.origin.length() > 1.0e-4:
+			_failures.append("update: module %s is offset in the assembled view" % node.name)
+			break
+	var button: Button = _builder.get("_update_button")
+	if button != null and button.text.ends_with("*"):
+		_failures.append("update: the button is still lit after the update")
+	var bar: ProgressBar = _builder.get("_progress")
+	if bar != null and bar.visible:
+		_failures.append("update: the progress bar is still up after the update")
+	if _shown_visuals(scene) != 0:
+		_failures.append("update: part visuals are still visible under the baked view")
+	_builder.call("_set_baked", false)
+	if bool(_builder.get("_baked")) or int(explode.call("module_count")) != 0:
+		_failures.append("update: leaving the baked view left modules behind")
+	var shown: int = _shown_visuals(scene)
+	if shown == 0:
+		_failures.append("update: no part visual came back after leaving the baked view")
+	print(
+		(
+			"  update: %d modules baked assembled, button lit then cleared, %d visuals back"
+			% [count, shown]
+		)
+	)
+
+
+func _shown_visuals(scene: Object) -> int:
+	var visuals: Dictionary = scene.get("_visuals")
+	var shown: int = 0
+	for key: Variant in visuals.keys():
+		var solid: MeshInstance3D = visuals[key].get("solid")
+		if solid != null and solid.visible:
+			shown += 1
+	return shown
+
+
+## How many modules the exact bake makes of [param doc] right now: one per placed id, a
+## component's inner pieces included (ADR 0024).
+func module_count(doc: ShipDoc) -> int:
+	var data: ShipData = _builder.call("get_data")
+	var cfg: ShipConfig = _builder.call("get_config")
+	var sdf: ShipSdf = ShipSdf.build(doc, data, cfg)
+	return sdf.part_count()
+
+
+## ISOLATION (ADR 0024): a leaf part is lifted into a component of its own; opening the
+## instance washes every visual outside it out and leaves its own alone; a pick body inside
+## resolves to the inner part; ESC (cancel_placement) closes it and the materials come back.
+func check_isolation() -> void:
+	var doc: ShipDoc = _builder.call("get_doc")
+	var view: Object = _builder.call("get_view")
+	var scene: Object = view.call("get_scene_builder") if view != null else null
+	if doc == null or scene == null:
+		return
+	# A small subtree - a part whose children are all leaves - so the instance has inner parts
+	# and the pick inside it has something to resolve to.
+	var head: String = ""
+	for pid: String in doc.part_order():
+		var part: ShipPart = doc.parts[pid]
+		if pid == doc.root or part.is_mirror() or part.kind == ShipPart.KIND_COMPONENT_INSTANCE:
+			continue
+		var kids: PackedStringArray = doc.children_of(pid)
+		if kids.is_empty():
+			continue
+		var shallow: bool = true
+		for kid: String in kids:
+			if not doc.children_of(kid).is_empty() or (doc.parts[kid] as ShipPart).is_mirror():
+				shallow = false
+		if shallow:
+			head = pid
+			break
+	if head == "":
+		_failures.append("isolation: no shallow subtree to lift")
+		return
+	var lifted: PackedStringArray = PackedStringArray([head])
+	lifted.append_array(doc.children_of(head))
+	_builder.call("begin_edit", "lift for isolation")
+	var component_id: String = ShipComponents.make_component(doc, lifted, "ISO")
+	_builder.call("commit_edit", PackedStringArray())
+	var instance: String = ""
+	for pid: String in doc.part_order():
+		var part: ShipPart = doc.parts[pid]
+		if part.kind == ShipPart.KIND_COMPONENT_INSTANCE and part.family == component_id:
+			instance = pid
+			break
+	if instance == "":
+		_failures.append("isolation: no component instance to open")
+		return
+	_builder.call("_isolate", instance)
+	if str(scene.get("_isolated")) != instance:
+		_failures.append("isolation: the scene did not open %s" % instance)
+	var visuals: Dictionary = scene.get("_visuals")
+	var washed: int = 0
+	var kept: int = 0
+	var inner_pick: String = ""
+	for key: Variant in visuals.keys():
+		var v: Object = visuals[key]
+		var solid: MeshInstance3D = v.get("solid")
+		var pid: String = str(v.get("pid"))
+		var inside: bool = ShipSymmetry.source_of_twin(ShipComponents.instance_of(pid)) == instance
+		if solid == null:
+			continue
+		if inside:
+			kept += 1
+			if inner_pick == "" and ShipComponents.is_expanded_id(pid):
+				var body: Node = v.get("body")
+				if body != null:
+					inner_pick = str(scene.call("part_id_for", body))
+		elif solid.material_override == scene.get("_washed"):
+			washed += 1
+		else:
+			_failures.append("isolation: %s outside the component is not washed out" % pid)
+			break
+	if kept == 0:
+		_failures.append("isolation: nothing of the component stayed visible")
+	if inner_pick != "" and not ShipComponents.is_expanded_id(inner_pick):
+		_failures.append("isolation: a pick inside resolved to %s, not the inner part" % inner_pick)
+	_builder.call("cancel_placement")
+	if str(scene.get("_isolated")) != "":
+		_failures.append("isolation: ESC did not close the component")
+	for key: Variant in visuals.keys():
+		var solid: MeshInstance3D = visuals[key].get("solid")
+		if solid != null and solid.material_override == scene.get("_washed"):
+			_failures.append("isolation: a visual stayed washed out after closing")
+			break
+	print(
+		(
+			"  isolation: opened %s - %d visuals washed, %d kept, inner pick %s, closed on ESC"
+			% [instance, washed, kept, inner_pick if inner_pick != "" else "(none)"]
+		)
+	)
+
+
+## One frame of [param vp] to [param path]; a failure names [param what].
+func save_frame(vp: SubViewport, path: String, what: String) -> void:
+	var img: Image = vp.get_texture().get_image() if vp != null else null
+	if img == null or img.save_png(path) != OK:
+		_failures.append("update: could not save %s" % what)

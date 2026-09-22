@@ -34,7 +34,10 @@ var max_cost: float = INF
 var areal_density_kg_m2: float = 120.0
 
 ## Hull shell thickness. The interior isosurface is the -hull_thickness_m level set.
-var hull_thickness_m: float = 0.2
+## 0.10 m: "we need the shell to be about 10-20cm for now, and the thickness will be configurable
+## in future" (2026-09-05) - it is configurable now, here and in data/tuning.json. Two walls meet at
+## every seam, so this is half of what a seam reads as. RETIRED(ADR 0020): 0.20.
+var hull_thickness_m: float = 0.1
 
 ## Voxel edge for the surface-nets bake grid.
 var bake_cell_m: float = 0.25
@@ -141,6 +144,11 @@ var attach_embed_max_fraction: float = 0.5
 var doorway_width_m: float = 0.8
 var doorway_height_m: float = 1.9
 
+## The smallest clear width or height a hatch or doorway should have, in metres: "min a person
+## could squeeze through" (ADR 0029). A panel clamps its fields to it; the bake still bores a
+## smaller hole when the seam has no room for this one, and reports it TIGHT.
+var hatch_min_m: float = 0.5
+
 ## EXPLODE view: the fixed gap, in metres, each module is pulled away from the module it stands
 ## on, along its own seam normal, on top of half its extent along that normal
 ## ([method ShipSeams.explode_offsets]).
@@ -209,6 +217,7 @@ static func from_dict(d: Dictionary) -> ShipConfig:
 	)
 	c.doorway_width_m = _as_float(_lookup(d, "doorway_width_m"), c.doorway_width_m)
 	c.doorway_height_m = _as_float(_lookup(d, "doorway_height_m"), c.doorway_height_m)
+	c.hatch_min_m = _as_float(_lookup(d, "hatch_min_m"), c.hatch_min_m)
 	c.explode_gap_m = _as_float(_lookup(d, "explode_gap_m"), c.explode_gap_m)
 	c.template_volume_m3 = _as_float(_lookup(d, "template_volume_m3"), c.template_volume_m3)
 	c.explode_cells_per_axis = _as_int(
@@ -253,6 +262,7 @@ func snapshot() -> Dictionary:
 		"attach_embed_max_fraction": attach_embed_max_fraction,
 		"doorway_width_m": doorway_width_m,
 		"doorway_height_m": doorway_height_m,
+		"hatch_min_m": hatch_min_m,
 		"explode_gap_m": explode_gap_m,
 		"template_volume_m3": template_volume_m3,
 		"explode_cells_per_axis": explode_cells_per_axis,

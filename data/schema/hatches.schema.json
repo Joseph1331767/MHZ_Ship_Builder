@@ -2,14 +2,14 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "mhz://ship-builder/schema/hatches.schema.json",
   "title": "MHZ Ship Builder - hatches pack",
-  "description": "Schema for data/shapes/hatches.json. Hatch families authored in Phase 1; their SDF geometry is not built until Phase 2 (see the required top-level '_note'). Enforced by tools/ship_validate_data.gd.",
+  "description": "Schema for data/shapes/hatches.json. Hatch families are presets - an opening shape, a door style, and the params that size them (see the required top-level '_note'); ADR 0029 bores and doors them. Enforced by tools/ship_validate_data.gd.",
   "type": "object",
   "required": ["_note"],
   "properties": {
     "_note": {
       "type": "string",
       "minLength": 20,
-      "description": "Must explain that hatch geometry is authored but not yet built (Phase 1 bakes the all-open studio hull regardless of hatch selection)."
+      "description": "Must explain what a hatch family is - a preset naming the opening's shape and the door's style, bored and doored since ADR 0029 - and that before that every joint baked as the open studio hull."
     }
   },
   "patternProperties": {
@@ -43,6 +43,16 @@
           "type": "string",
           "minLength": 20,
           "description": "What this hatch is, what it is for, what it looks like - real catalogue copy."
+        },
+        "shape": {
+          "type": "string",
+          "enum": ["circle", "rect", "ellipse", "square", "triangle", "polygon"],
+          "description": "The opening's outline (ShipSeams KIND_*), drawn inside the family's size params. A joint may override it."
+        },
+        "style": {
+          "type": "string",
+          "enum": ["none", "single", "double", "iris"],
+          "description": "The door over the opening (ShipSeams DOOR_*): one hinged leaf, two leaves meeting at the centre, or an iris of blades. A joint may override it."
         },
         "params": {
           "type": "object",

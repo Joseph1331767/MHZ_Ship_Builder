@@ -398,6 +398,50 @@ func to_array_mesh() -> ArrayMesh:
 	return mesh
 
 
+## [method to_array_mesh], with the faces divided into named surfaces by [param group_of] - one
+## group index per face - so a renderer can give each group its own material. A group with no
+## faces gets no surface; look surfaces up by NAME ([method ArrayMesh.surface_find_by_name]), not
+## index.
+##
+## What the exploded view's INTERIOR mode is built on: a baked piece's faces are the part's
+## exterior, its interior, or a cut the seams and the manufacturing split made, and the mode draws
+## the three differently.
+func to_array_mesh_grouped(group_of: PackedInt32Array, names: PackedStringArray) -> ArrayMesh:
+	var mesh: ArrayMesh = ArrayMesh.new()
+	for group: int in names.size():
+		var out_v: PackedVector3Array = PackedVector3Array()
+		var out_n: PackedVector3Array = PackedVector3Array()
+		var out_i: PackedInt32Array = PackedInt32Array()
+		for i: int in faces.size():
+			if i >= group_of.size() or group_of[i] != group:
+				continue
+			var plane: Plane = face_plane(i)
+			if plane.normal == Vector3.ZERO:
+				continue
+			var tri: PackedInt32Array = triangulate_face(i)
+			var local: Dictionary = {}
+			var k: int = 0
+			while k + 2 < tri.size():
+				for slot: int in [0, 2, 1]:
+					var id: int = tri[k + slot]
+					if not local.has(id):
+						local[id] = out_v.size()
+						out_v.append(vertices[id])
+						out_n.append(plane.normal)
+					out_i.append(int(local[id]))
+				k += 3
+		if out_v.is_empty() or out_i.is_empty():
+			continue
+		var arrays: Array = []
+		arrays.resize(Mesh.ARRAY_MAX)
+		arrays[Mesh.ARRAY_VERTEX] = out_v
+		arrays[Mesh.ARRAY_NORMAL] = out_n
+		arrays[Mesh.ARRAY_INDEX] = out_i
+		mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+		mesh.surface_set_name(mesh.get_surface_count() - 1, names[group])
+	return mesh
+
+
 ## A [Mesh.PRIMITIVE_LINES] [ArrayMesh] of this mesh MODEL edges - the outline a CAD viewport
 ## draws.
 ##

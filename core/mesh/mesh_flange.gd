@@ -42,6 +42,11 @@ const EDGE_MARGIN: float = 1.0e-4
 ## own extent. Only has to clear the larger solid.
 const CUTTER_REACH: float = 2.0
 
+## How close two volumes have to be to count as one size - see [method first_is_larger]. Well above
+## the noise two tessellations of one solid carry (about 1e-6 relative on a Vector3 pipeline) and
+## well below any difference the author could have meant.
+const TIE_REL: float = 1.0e-4
+
 
 ## One solid: its mesh, and the field that says where its surface is.
 ##
@@ -97,7 +102,7 @@ static func resolve(
 		return {}
 
 	# Larger and smaller by volume, and the axis oriented to point from the larger toward it.
-	var a_big: bool = a.mesh.volume() >= b.mesh.volume()
+	var a_big: bool = first_is_larger(a.mesh, b.mesh)
 	var large: Piece = a if a_big else b
 	var small: Piece = b if a_big else a
 	var up: Vector3 = axis.normalized()
@@ -139,7 +144,16 @@ static func resolve(
 	else:
 		# IN, flanged: only the smaller solid's own cross-section is let into the larger one, so
 		# the host keeps its shape everywhere the joint does not reach.
-		var cutter: PolyMesh = _footprint_cutter(small_cut, small_plane_face(plane, inset), up)
+		# THE PRISM STANDS ON THE LARGE SOLID SIDE OF THE SEAM, WHICH IS WHY IT IS DROPPED BY TWO
+		# INSETS. Its cap is read off the smaller solid, and that cap has already retreated to
+		# `plane + inset`; subtracting a prism from there would stop the larger solid CAVITY at
+		# `plane + inset` too - past the seam, not short of it - so the two cavities would meet and
+		# the smaller solid own plate would be left standing inside the larger one room. Dropping
+		# the base by 2 * inset puts it at `plane - inset`, which is where large_plane already says
+		# the larger solid has to stop. At inset 0 the drop is 0 and the outer cut is unchanged.
+		var cutter: PolyMesh = _footprint_cutter(
+			small_cut, small_plane_face(plane, inset), up, 2.0 * inset
+		)
 		if cutter.is_empty():
 			large_cut = MeshCsg.clip_to_plane(large_cut, large_plane)
 		else:
@@ -162,6 +176,22 @@ static func resolve(
 		"plane": plane,
 		"depth": depth,
 	}
+
+
+## Is [param a] the larger of the two by volume - with a TIE going to [param a]?
+##
+## ONE RULE, USED BY EVERY SEAM, WITH A TOLERANCE. Two protons of one class are the same solid
+## under two transforms, and their tessellated volumes differ in the last few bits: measured on a
+## carbon class, a plain `>=` sent some of a root's six children to one side of the tie and some
+## to the other, so the root was indented by three neighbours and indenting the other two, and came
+## out of the bake at 247 m3 - two and a half sealed shells' worth - with one child at 528. The
+## tie is a tie to within TIE_REL of the larger volume, and it goes to the first argument, which
+## every caller passes the CHILD as: a walled seam and an open one on the same pair then indent the
+## same way, whichever pass sees them.
+static func first_is_larger(a: PolyMesh, b: PolyMesh) -> bool:
+	var va: float = a.volume()
+	var vb: float = b.volume()
+	return va >= vb - TIE_REL * maxf(absf(va), absf(vb))
 
 
 ## How far along [param up] the two surfaces cross, as `(nearest, furthest)` measured from
@@ -217,8 +247,14 @@ static func _bisect(against: Piece, pa: Vector3, pb: Vector3, da: float) -> Vect
 ## its cap is the face lying in [param plane], so the two can never disagree about where the
 ## footprint is. Returns an empty mesh when no cap can be identified, which sends the caller to the
 ## plain plane cut.
-static func _footprint_cutter(cut: PolyMesh, plane: Plane, up: Vector3) -> PolyMesh:
-	var reach: float = maxf(cut.aabb().size.length(), 1.0) * CUTTER_REACH
+##
+## [param drop] lowers the prism base along -[param up] before it is extruded, without moving the
+## cross-section it is cut from. The interior pass needs the same footprint standing a wall-and-a-
+## half further back than the face it was read off - see the caller.
+static func _footprint_cutter(
+	cut: PolyMesh, plane: Plane, up: Vector3, drop: float = 0.0
+) -> PolyMesh:
+	var reach: float = maxf(cut.aabb().size.length(), 1.0) * CUTTER_REACH + maxf(drop, 0.0)
 	var best: int = -1
 	var best_area: float = 0.0
 	for i: int in cut.face_count():
@@ -237,7 +273,7 @@ static func _footprint_cutter(cut: PolyMesh, plane: Plane, up: Vector3) -> PolyM
 	var loop: PackedInt32Array = cut.faces[best]
 	var base: PackedVector3Array = PackedVector3Array()
 	for id: int in loop:
-		base.append(cut.vertices[id])
+		base.append(cut.vertices[id] - up * drop)
 	var polys: Array = []
 	# The cap face already points along +up, so it is the prism's top once lifted.
 	var top: PackedVector3Array = PackedVector3Array()

@@ -224,11 +224,16 @@ func test_joining_parts_keeps_the_outside_joints_and_drops_the_inside_walls() ->
 	assert_bool(doc.parts.has(hand)).is_false()
 
 	# Two outside joints survive, re-seated on the instance under their own ids with their hatch
-	# fields intact; the wall between arm and hand is gone.
+	# fields intact; the link between arm and hand moves INTO the definition (ADR 0025).
 	(
 		assert_int(doc.joints.size())
 		. append_failure_message("joints after the lift: %s" % [str(doc.joints.keys())])
 		. is_equal(2)
+	)
+	var inside: Dictionary = (doc.components[component_id] as Dictionary).get("joints", {})
+	assert_int(inside.size()).is_equal(1)
+	assert_str(str((inside.values()[0] as Dictionary).get("mode", ""))).is_equal(
+		ShipJoint.MODE_OPEN
 	)
 	assert_bool(doc.joints.has(arm_hand)).is_false()
 	var to_root: ShipJoint = _joint_between(doc, doc.root, instance)
@@ -348,3 +353,142 @@ func test_the_validator_and_the_panel_ask_the_same_question() -> void:
 	assert_bool(bool(panel["overlaps"])).is_equal(bool(validator["overlaps"]))
 	assert_bool(bool(panel["merges"])).is_equal(bool(validator["merges"]))
 	assert_int(ShipValidate.JOINT_SAMPLE_STEPS).is_equal(ShipJoints.SOLID_SAMPLE_STEPS)
+
+
+# ---------------------------------------------------------------- the nucleus layout (ADR 0017)
+
+
+func test_the_nucleus_has_no_body_at_its_centre() -> void:
+	# "which has 5 protons around a central one which is wrong, the central one should be the
+	# singular top, and the 4 rim and lower added." A carbon class is six bodies on an octahedron:
+	# the root takes the top slot and every other body is placed FROM it, so nothing is buried
+	# under its own neighbours. The rim hangs 30 degrees below level, not 45: at one seating
+	# depth that is what puts it halfway between the top body and the bottom one (ADR 0018), and
+	# on a box root it strikes a side face rather than an edge.
+	var dirs: Array[Vector3] = ShipTemplates.nucleus_dirs(_data, 6)
+	assert_int(dirs.size()).is_equal(5)
+	var rim: int = 0
+	var lower: int = 0
+	for dir: Vector3 in dirs:
+		# Everything hangs BELOW the root: nothing is placed upward, or it would be the top.
+		(
+			assert_float(dir.y)
+			. append_failure_message("a nucleus body was placed above the root: %s" % [str(dir)])
+			. is_less(0.001)
+		)
+		if is_equal_approx(dir.y, -1.0):
+			lower += 1
+		elif absf(dir.y + 0.5) < 0.01:
+			rim += 1
+	(
+		assert_int(rim)
+		. append_failure_message("expected four rim bodies at 30 degrees below level, got %d" % rim)
+		. is_equal(4)
+	)
+	assert_int(lower).append_failure_message("expected one body straight below").is_equal(1)
+
+
+func test_the_pods_take_slots_of_the_nucleus_arrangement() -> void:
+	# "the valance electron count should be half or full resonant to the structure of protons at
+	# all times." Carbon's four pods take the four RIM slots of the same octahedron its six protons
+	# sit on - the slots most perpendicular to the root's own.
+	var carbon: Dictionary = ShipTemplates.entry(_data, "carbon")
+	var pods: Array[Vector3] = ShipTemplates.extremity_dirs(_data, carbon)
+	assert_int(pods.size()).is_equal(4)
+	for dir: Vector3 in pods:
+		(
+			assert_float(absf(dir.y))
+			. append_failure_message(
+				"a carbon pod took a pole slot, not the waist: %s" % [str(dir)]
+			)
+			. is_less(0.001)
+		)
+	# Neon fills its whole cube: eight pods, eight slots, none repeated.
+	var neon: Array[Vector3] = ShipTemplates.extremity_dirs(
+		_data, ShipTemplates.entry(_data, "neon")
+	)
+	assert_int(neon.size()).is_equal(8)
+	var seen: Dictionary = {}
+	for dir: Vector3 in neon:
+		seen[str(dir.snapped(Vector3.ONE * 0.001))] = true
+	assert_int(seen.size()).append_failure_message("neon repeated a slot").is_equal(8)
+
+
+func test_a_pod_is_built_on_the_proton_whose_slot_it_shares() -> void:
+	# A pod's tunnel continues the line its proton is already on, rather than setting off from the
+	# root straight through it. Read off the document: no tunnel on a carbon class stands on the
+	# root, because every one of its four slots is occupied by a proton.
+	var doc: ShipDoc = ShipTemplates.build(_data, _cfg, "carbon", {})
+	var tunnels: int = 0
+	for pid: String in doc.part_order():
+		var part: ShipPart = doc.parts[pid]
+		if part.role != ShipPart.ROLE_HALLWAY:
+			continue
+		tunnels += 1
+		(
+			assert_str(part.parent)
+			. append_failure_message("a carbon pod's tunnel still stands on the root")
+			. is_not_equal(doc.root)
+		)
+	assert_int(tunnels).is_equal(4)
+
+
+## "the proton should be classified as a component (by default)" (ADR 0024): a template's
+## nucleus is the ship's ROOT COMPONENT - one instance whose definition holds the six protons -
+## its tunnels hang off the inner protons they were laid out for, every part still places, the
+## tree has nothing floating, and the definition's own OPEN joints (ADR 0025) plan it as ONE room.
+func test_the_nucleus_is_the_root_component_and_one_room() -> void:
+	for family: String in ["sphere_pod", "box_hull"]:
+		var doc: ShipDoc = ShipTemplates.build(
+			_data, _cfg, "carbon", {ShipTemplates.OPT_ROOM_FAMILY: family}
+		)
+		var root: ShipPart = doc.parts[doc.root]
+		assert_str(root.kind).append_failure_message(family).is_equal(
+			ShipPart.KIND_COMPONENT_INSTANCE
+		)
+		var definition: Dictionary = doc.components[root.family]
+		(
+			assert_int((definition["parts"] as Dictionary).size())
+			. append_failure_message(family)
+			. is_equal(6)
+		)
+		var on_inner: int = 0
+		for pid: String in doc.part_order():
+			var part: ShipPart = doc.parts[pid]
+			if part.role == ShipPart.ROLE_HALLWAY and part.parent.begins_with(doc.root + "/"):
+				on_inner += 1
+		(
+			assert_int(on_inner)
+			. append_failure_message("%s: tunnels hung off inner protons" % family)
+			. is_greater_equal(4)
+		)
+		for jid: String in doc.joints:
+			assert_str((doc.joints[jid] as ShipJoint).mode).is_not_equal(ShipJoint.MODE_OPEN)
+		# OPEN by default, IN the definition (ADR 0025): every touching pair of the clump.
+		var inner_joints: Dictionary = definition.get("joints", {})
+		assert_int(inner_joints.size()).append_failure_message(family).is_greater_equal(5)
+		for jid: String in inner_joints:
+			assert_str(str((inner_joints[jid] as Dictionary).get("mode", ""))).is_equal(
+				ShipJoint.MODE_OPEN
+			)
+		var xforms: Dictionary = ShipAttach.resolve_all(doc, _data, _cfg)
+		for pid: String in doc.part_order():
+			(
+				assert_bool(xforms.has(pid))
+				. append_failure_message("%s: %s not placed" % [family, pid])
+				. is_true()
+			)
+		assert_int(doc.floating_part_ids().size()).append_failure_message(family).is_equal(0)
+		var rooms: Array = ShipMeshBake.plan(doc, _data, _cfg)["rooms"]
+		var biggest: int = 0
+		for members: PackedStringArray in rooms:
+			biggest = maxi(biggest, members.size())
+		(
+			assert_int(biggest)
+			. append_failure_message(
+				"%s: the nucleus did not plan as one room: %s" % [family, str(rooms)]
+			)
+			. is_equal(6)
+		)
+	var lone: ShipDoc = ShipTemplates.build(_data, _cfg, "hydrogen", {})
+	assert_str((lone.parts[lone.root] as ShipPart).kind).is_equal(ShipPart.KIND_PRIMITIVE)
