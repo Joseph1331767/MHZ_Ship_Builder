@@ -36,6 +36,12 @@ const _ALLOWED_EVENTS := [
 	"dev_server_toggle",
 ]
 
+## Runtime opt-out sent over the authenticated WebSocket (#913). Twinned
+## with `transport/websocket.py::TELEMETRY_OPT_OUT_EVENT`. Outside
+## `_ALLOWED_EVENTS` on purpose: that list gates events the server records,
+## and this one tells it to stop.
+const OPT_OUT_EVENT := "telemetry_opt_out"
+
 const _MAX_BUFFER := 32
 
 ## EditorSetting key used to defer a ``plugin_reload`` event across the
@@ -126,7 +132,27 @@ func record_event(name: String, data: Dictionary = {}) -> void:
 
 func _on_connection_state_changed(is_open: bool) -> void:
 	if is_open:
+		## Before the flush: a server we adopted must hear our preference
+		## before it records anything else on this session.
+		assert_opt_out()
 		_flush()
+
+
+## Tell the connected server to stop sending telemetry, if this editor is
+## opted out (#913). Spawn-time env injection only reaches a server the
+## plugin started; this reaches one it adopted, over the same authenticated
+## WebSocket every command uses. The server latches it — off until that
+## process is replaced, never back on.
+##
+## Reads the setting live rather than the `_disabled` snapshot so the dock
+## can call this the moment the user applies a change, before the plugin
+## reload swaps this instance out. Returns whether anything was sent.
+func assert_opt_out() -> bool:
+	if McpSettings.telemetry_enabled():
+		return false
+	if _connection == null or not _connection.is_connected:
+		return false
+	return bool(_connection.send_event(OPT_OUT_EVENT, {}))
 
 func _flush() -> void:
 	if _pending.is_empty():
@@ -145,12 +171,6 @@ func _send_one(name: String, data: Dictionary) -> void:
 
 func record_dock_startup(extra: Dictionary = {}) -> void:
 	record_event("dock_startup", extra)
-
-func record_plugin_reload(success: bool, error: String = "") -> void:
-	var data := {"success": success}
-	if error != "":
-		data["error"] = error.substr(0, 200)
-	record_event("plugin_reload", data)
 
 func record_self_update(
 	status: String,
@@ -172,7 +192,12 @@ func record_dev_server_toggle(action: String) -> void:
 
 
 ## Drain a pending ``plugin_reload`` event written by the previous
-## instance before it disabled itself.
+## instance before it disabled itself. Pending events are currently
+## always success=true — ``record_pending_plugin_reload`` above is the
+## only writer and hardcodes it (a reload that fails never reaches the
+## flush anyway; there is no new instance to drain the key). The
+## error/success parsing below stays tolerant for forward compat with
+## a writer that records failures.
 func flush_pending_plugin_reload() -> void:
 	var parsed = _drain_editor_setting_dict(PENDING_PLUGIN_RELOAD_KEY)
 	if parsed == null:

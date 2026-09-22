@@ -1,5 +1,5 @@
 @tool
-extends RefCounted
+extends "res://addons/godot_ai/handlers/command_handler.gd"
 
 const ErrorCodes := preload("res://addons/godot_ai/utils/error_codes.gd")
 
@@ -770,7 +770,7 @@ func _instantiate_player(player_path: String, scene_root: Node) -> Dictionary:
 	else:
 		parent = McpScenePath.resolve(parent_path, scene_root)
 	if parent == null:
-		return ErrorCodes.make(ErrorCodes.INVALID_PARAMS,
+		return ErrorCodes.make(ErrorCodes.NODE_NOT_FOUND,
 			"Cannot auto-create AnimationPlayer at %s: %s" % [
 				player_path, McpScenePath.format_parent_error(parent_path, scene_root)])
 	var new_player := AnimationPlayer.new()

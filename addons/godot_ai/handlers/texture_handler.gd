@@ -1,5 +1,5 @@
 @tool
-extends RefCounted
+extends "res://addons/godot_ai/handlers/command_handler.gd"
 
 const ErrorCodes := preload("res://addons/godot_ai/utils/error_codes.gd")
 
@@ -170,7 +170,7 @@ func _assign_texture(tex: Resource, sub_resources: Array, node_path: String, pro
 	if not found:
 		return ErrorCodes.make(
 			ErrorCodes.PROPERTY_NOT_ON_CLASS,
-			"Property '%s' not found on %s" % [property, node.get_class()]
+			McpPropertyErrors.build_message(node, property)
 		)
 	if prop_type != TYPE_NIL and prop_type != TYPE_OBJECT:
 		return ErrorCodes.make(
@@ -195,5 +195,4 @@ func _assign_texture(tex: Resource, sub_resources: Array, node_path: String, pro
 	}
 	data.merge(extra)
 	return {"data": data}
-
 

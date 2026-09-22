@@ -1,5 +1,5 @@
 @tool
-extends RefCounted
+extends "res://addons/godot_ai/handlers/command_handler.gd"
 
 const ErrorCodes := preload("res://addons/godot_ai/utils/error_codes.gd")
 
@@ -269,7 +269,9 @@ func list_streams(params: Dictionary) -> Dictionary:
 
 	var efs := EditorInterface.get_resource_filesystem()
 	if efs == null:
-		return ErrorCodes.make(ErrorCodes.EDITOR_NOT_READY, "EditorFileSystem not available")
+		return ErrorCodes.make_not_ready(
+			ErrorCodes.SUB_EDITOR_UNAVAILABLE,
+			"EditorFileSystem not available", false)
 
 	var results: Array[Dictionary] = []
 	var start_dir := efs.get_filesystem_path(root)
@@ -342,14 +344,16 @@ func _resolve_player(player_path: String) -> Dictionary:
 	return {"player": node}
 
 
-## Coerce a playback param value to the expected type. int→float is allowed
-## so JSON integers pass through; everything else requires the exact type.
+## Coerce a playback param value to the expected type. int→float and
+## strictly-numeric strings are allowed so JSON integers and stringified
+## floats (#964) pass through; everything else requires the exact type.
 ## Returns the coerced value, or null on type mismatch.
 static func _coerce_playback_value(value: Variant, expected_type: int) -> Variant:
 	match expected_type:
 		TYPE_FLOAT:
-			if value is float or value is int:
-				return float(value)
+			var parsed: Variant = McpJsonValues.parse_float(value)
+			if parsed != null:
+				return parsed
 		TYPE_BOOL:
 			if value is bool:
 				return value

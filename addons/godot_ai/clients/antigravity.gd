@@ -6,7 +6,6 @@ func _init() -> void:
 	id = "antigravity"
 	display_name = "Antigravity"
 	config_type = "json"
-	doc_url = "https://www.antigravity.dev/"
 	## Antigravity moved its shared MCP config from `~/.gemini/antigravity/`
 	## to `~/.gemini/config/` (IDE + CLI now read the same file there); the
 	## old path is left in `detect_paths` below so an existing install is
@@ -20,6 +19,19 @@ func _init() -> void:
 	## `disabled` is user-state (they may have flipped the entry off in the
 	## UI); seeded on first Configure but preserved across reconfigure.
 	entry_initial_fields = {"disabled": false}
+	## Attach migration (#838). Antigravity stdio entries are flat
+	## command/args/env with no type discriminator — transport is inferred
+	## from `command` vs `serverUrl` presence (antigravity.google/docs/mcp),
+	## so the legacy `serverUrl` must not survive next to a command.
+	command_shape = McpClient.CommandShape.FLAT
+	command_legacy_keys = PackedStringArray(["serverUrl"])
+	command_initial_fields = {"disabled": false}
+	command_user_fields = PackedStringArray(["disabled", "disabledTools", "authProviderType", "env"])
+	## Antigravity's spawner hangs stdio tool calls when the entry launches a
+	## GUI-subsystem pythonw.exe (#863), and it hides child console windows
+	## itself, so the visible-terminal problem the bootstrap solves (#827)
+	## never applies. Write the plain console launcher on Windows.
+	needs_consoleless_launcher = false
 	detect_paths = PackedStringArray(path_template.values() + [
 		"~/.gemini/antigravity/mcp_config.json",
 		"$USERPROFILE/.gemini/antigravity/mcp_config.json",

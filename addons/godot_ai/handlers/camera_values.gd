@@ -56,27 +56,16 @@ static func enum_keys(property: String) -> Array:
 
 
 static func parse_vector2(value: Variant) -> Variant:
-	if value is Vector2:
-		return value
-	if value is Dictionary:
-		var d: Dictionary = value
-		return Vector2(float(d.get("x", 0)), float(d.get("y", 0)))
-	if value is Array and value.size() >= 2:
-		return Vector2(float(value[0]), float(value[1]))
+	## Camera-specific sugar kept from the pre-#714 copy: a bare number is
+	## a uniform zoom, splatted to both axes. Everything else goes through
+	## the canonical strict parser.
 	if value is int or value is float:
 		return Vector2(float(value), float(value))
-	return null
+	return McpJsonValues.parse_vector2(value)
 
 
 static func parse_vector3(value: Variant) -> Variant:
-	if value is Vector3:
-		return value
-	if value is Dictionary:
-		var d: Dictionary = value
-		return Vector3(float(d.get("x", 0)), float(d.get("y", 0)), float(d.get("z", 0)))
-	if value is Array and value.size() >= 3:
-		return Vector3(float(value[0]), float(value[1]), float(value[2]))
-	return null
+	return McpJsonValues.parse_vector3(value)
 
 
 ## Coerce a JSON-shaped value for a camera property against the declared type.
@@ -121,10 +110,10 @@ static func coerce(property: String, value: Variant, target_type: int) -> Dictio
 				return {"ok": true, "value": int(value)}
 			return {"ok": false, "error": "Expected int for %s" % property}
 		TYPE_FLOAT:
-			if value is float:
-				return {"ok": true, "value": value}
-			if value is int:
-				return {"ok": true, "value": float(value)}
+			## Canonical scalar parser (#964): numeric strings coerce too.
+			var parsed: Variant = McpJsonValues.parse_float(value)
+			if parsed != null:
+				return {"ok": true, "value": parsed}
 			return {"ok": false, "error": "Expected number for %s" % property}
 		TYPE_STRING:
 			return {"ok": true, "value": String(value)}

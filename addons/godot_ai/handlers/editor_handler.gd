@@ -1,12 +1,12 @@
 @tool
-extends RefCounted
+extends "res://addons/godot_ai/handlers/command_handler.gd"
 
 const ErrorCodes := preload("res://addons/godot_ai/utils/error_codes.gd")
 const Telemetry := preload("res://addons/godot_ai/telemetry.gd")
+const PluginReload := preload("res://addons/godot_ai/utils/plugin_reload.gd")
+const VisionRoutingScript := preload("res://addons/godot_ai/vision_routing.gd")
 
 ## Handles editor state, selection, log, screenshot, and performance commands.
-
-const UpdateMixedState := preload("res://addons/godot_ai/utils/update_mixed_state.gd")
 
 var _log_buffer: McpLogBuffer
 var _connection: McpConnection
@@ -15,9 +15,10 @@ var _game_log_buffer: McpGameLogBuffer
 var _editor_log_buffer: McpEditorLogBuffer
 var _debugger_errors_root: Node
 var _surfaced_error_tracker
+var _vision_routing: VisionRoutingScript = null
 
 
-func _init(log_buffer: McpLogBuffer, connection: McpConnection = null, debugger_plugin: McpDebuggerPlugin = null, game_log_buffer: McpGameLogBuffer = null, editor_log_buffer: McpEditorLogBuffer = null, debugger_errors_root: Node = null, surfaced_error_tracker = null) -> void:
+func _init(log_buffer: McpLogBuffer, connection: McpConnection = null, debugger_plugin: McpDebuggerPlugin = null, game_log_buffer: McpGameLogBuffer = null, editor_log_buffer: McpEditorLogBuffer = null, debugger_errors_root: Node = null, surfaced_error_tracker = null, vision_routing: VisionRoutingScript = null) -> void:
 	_log_buffer = log_buffer
 	_connection = connection
 	_debugger_plugin = debugger_plugin
@@ -25,6 +26,7 @@ func _init(log_buffer: McpLogBuffer, connection: McpConnection = null, debugger_
 	_editor_log_buffer = editor_log_buffer
 	_debugger_errors_root = debugger_errors_root
 	_surfaced_error_tracker = surfaced_error_tracker
+	_vision_routing = vision_routing
 	if _surfaced_error_tracker == null:
 		_surfaced_error_tracker = McpSurfacedErrorTracker.new(_editor_log_buffer, _game_log_buffer, _debugger_errors_root)
 
@@ -46,14 +48,6 @@ func get_editor_state(_params: Dictionary) -> Dictionary:
 		"helper_live": bool(game_status.get("helper_live", false)),
 		"session_active": bool(game_status.get("session_active", false)),
 	}
-	## Half-installed addon tree from a failed self-update rollback. When
-	## non-empty, the agent / dock paint the operator-facing recovery copy
-	## from `update_mixed_state.gd::diagnose`. Field omitted when the
-	## addons tree is clean so editor_state's normal payload stays small.
-	## See issue #354 / audit-v2 #10.
-	var mixed_state := UpdateMixedState.diagnose()
-	if not mixed_state.is_empty():
-		data["mixed_state"] = mixed_state
 	return {"data": data}
 
 
@@ -67,6 +61,13 @@ func get_selection(_params: Dictionary) -> Dictionary:
 
 
 const VALID_LOG_SOURCES := ["plugin", "game", "editor", "all"]
+
+## Deferred budget for the `input_sequence` game op. Unlike the one-shot game
+## ops (covered by game_command's 15s entry), it drives the game forward one
+## frame per step, so the reply legitimately takes seconds. The game side caps
+## the sequence length (GameHelper.MAX_SEQUENCE_FRAMES) well inside this; the
+## budget is the backstop for a frozen game loop, mirroring take_screenshot.
+const INPUT_SEQUENCE_TIMEOUT_SEC := 30.0
 
 
 func get_logs(params: Dictionary) -> Dictionary:
@@ -213,8 +214,8 @@ func _format_editor_error_summary(entry: Dictionary) -> String:
 func _get_editor_logs(count: int, offset: int, include_details: bool, has_since_cursor: bool = false, since_cursor: int = 0) -> Dictionary:
 	## Editor-process script errors (parse errors, @tool runtime errors,
 	## EditorPlugin errors, push_error/push_warning). Captured by
-	## editor_logger.gd via OS.add_logger and gated on Godot 4.5+; on older
-	## engines the buffer can be null. Godot also sends GDScript reload
+	## editor_logger.gd via OS.add_logger on every v4-supported engine. During
+	## partial initialization the buffer can still be null. Godot also sends GDScript reload
 	## warnings/errors straight to the Debugger dock's Errors tab; those do
 	## not flow through OS.add_logger, so merge the visible tree rows here.
 	if has_since_cursor:
@@ -412,6 +413,18 @@ func _compute_coverage_angles(aabb: AABB) -> Array[Dictionary]:
 
 
 func take_screenshot(params: Dictionary) -> Dictionary:
+	## Vision Routing hook: when enabled, the capture is described by the
+	## configured vision provider on a worker thread and the text description
+	## is returned instead of the raw image (see vision_routing.gd). Off, no
+	## key, or non-image results keep the original behavior. The single source
+	## of truth for the `match source:` dispatch lives in _take_screenshot_impl
+	## (pinned by tests/unit/test_docs_screenshot_sources.py).
+	if _vision_routing != null and _vision_routing.is_routing_enabled():
+		return _vision_routing.route_editor_screenshot(params, Callable(self, "_take_screenshot_impl"), _connection)
+	return _take_screenshot_impl(params)
+
+
+func _take_screenshot_impl(params: Dictionary) -> Dictionary:
 	var source: String = params.get("source", "viewport")
 	var max_resolution: int = params.get("max_resolution", 0)
 	var view_target: String = params.get("view_target", "")
@@ -425,7 +438,9 @@ func take_screenshot(params: Dictionary) -> Dictionary:
 		"viewport":
 			viewport = EditorInterface.get_editor_viewport_3d()
 			if viewport == null:
-				return ErrorCodes.make(ErrorCodes.EDITOR_NOT_READY, "No 3D viewport available")
+				return ErrorCodes.make_not_ready(
+					ErrorCodes.SUB_EDITOR_VIEWPORT_UNAVAILABLE,
+					"No 3D viewport available", false)
 			## The 3D viewport's texture is empty when the edited scene
 			## has no Node3D content (2D-only scene, or no scene open),
 			## and the empty-image guard further down used to surface
@@ -438,7 +453,13 @@ func take_screenshot(params: Dictionary) -> Dictionary:
 				return precheck
 		"game":
 			if not EditorInterface.is_playing_scene():
-				return ErrorCodes.make(ErrorCodes.INVALID_PARAMS, "Game is not running — use source='viewport' or start the project first")
+				## Same editor state as game_eval/game_command's gate below —
+				## same EDITOR_NOT_READY shape, not INVALID_PARAMS (the params
+				## were fine; the editor just isn't in the required state).
+				return ErrorCodes.make_not_ready(
+					ErrorCodes.SUB_EDITOR_GAME_NOT_RUNNING,
+					"Game is not running — start the project first", false,
+					"Use source='viewport' for the editor viewport, or start the game with project_run and retry.")
 			## The game is always a separate OS process (embedded mode just
 			## reparents its window into the editor). Reach the framebuffer
 			## via the debugger channel: the `_mcp_game_helper` autoload
@@ -457,11 +478,15 @@ func take_screenshot(params: Dictionary) -> Dictionary:
 		"viewport_2d":
 			viewport = EditorInterface.get_editor_viewport_2d()
 			if viewport == null:
-				return ErrorCodes.make(ErrorCodes.EDITOR_NOT_READY, "No 2D viewport available")
+				return ErrorCodes.make_not_ready(
+					ErrorCodes.SUB_EDITOR_VIEWPORT_UNAVAILABLE,
+					"No 2D viewport available", false)
 			var scene_root_2d := EditorInterface.get_edited_scene_root()
 			if scene_root_2d == null:
-				return ErrorCodes.make(ErrorCodes.EDITOR_NOT_READY,
-					"No scene open — open a scene first")
+				return ErrorCodes.make_not_ready(
+					ErrorCodes.SUB_EDITOR_NO_SCENE,
+					"No scene open — open a scene first", false,
+					"Call scene_open with a scene path (e.g. \"res://main.tscn\") first.")
 			if not view_target.is_empty() or coverage or custom_elevation != null or custom_azimuth != null or custom_fov != null:
 				return ErrorCodes.make(
 					ErrorCodes.INVALID_PARAMS,
@@ -514,7 +539,9 @@ func take_screenshot(params: Dictionary) -> Dictionary:
 
 		var cam := viewport.get_camera_3d()
 		if cam == null:
-			return ErrorCodes.make(ErrorCodes.EDITOR_NOT_READY, "No camera in 3D viewport")
+			return ErrorCodes.make_not_ready(
+				ErrorCodes.SUB_EDITOR_VIEWPORT_UNAVAILABLE,
+				"No camera in 3D viewport", false)
 
 		## Merge AABBs from all targets
 		var combined_aabb := _get_visual_aabb(targets[0])
@@ -687,6 +714,12 @@ func _take_cinematic_screenshot(max_resolution: int) -> Dictionary:
 	## global_transform is resolved against the ancestor Node3D chain, so it
 	## must be set after parenting — otherwise the camera ends up at origin.
 	cam.global_transform = scene_camera.global_transform
+	## NOTIFICATION_TRANSFORM_CHANGED is delivered deferred (next frame's
+	## flush_transform_notifications), but force_draw renders immediately —
+	## without this flush the RenderingServer still has the identity
+	## transform pushed at ENTER_WORLD and the capture shows only sky
+	## instead of the camera's actual view (issue #650).
+	cam.force_update_transform()
 
 	RenderingServer.force_draw(false)
 	var image: Image = sub_vp.get_texture().get_image()
@@ -718,10 +751,15 @@ func _take_cinematic_screenshot(max_resolution: int) -> Dictionary:
 ## without driving the editor.
 static func viewport_screenshot_precheck(scene_root: Node) -> Dictionary:
 	if scene_root == null:
-		return _make_viewport_not_3d_error(
+		var no_scene_err := _make_viewport_not_3d_error(
 			"",
 			"The editor 3D viewport is empty because no scene is open. Open a scene with `scene_open` first."
 		)
+		## The honest state here is "no scene", not "scene lacks 3D content"
+		## — relabel the sub-code so telemetry doesn't conflate the two.
+		## `editor_state` stays "viewport_not_3d" for pre-#651 consumers.
+		no_scene_err["error"]["data"]["sub_code"] = ErrorCodes.SUB_EDITOR_NO_SCENE
+		return no_scene_err
 	## A scene with any Node3D content — root or descendant — has
 	## something the 3D viewport can render. Walking the tree (rather
 	## than only checking the root type) avoids a false reject on the
@@ -771,11 +809,10 @@ static func _make_viewport_not_3d_error(scene_root_type: String, hint: String) -
 	## `hint` becomes `error.message`; not duplicated into `data` because
 	## `GodotCommandError`'s string form already appends every `data` key
 	## as a suffix on the agent-visible error.
-	var err := ErrorCodes.make(ErrorCodes.EDITOR_NOT_READY, hint)
-	err["error"]["data"] = {
-		"editor_state": "viewport_not_3d",
-		"scene_root_type": scene_root_type,
-	}
+	var err := ErrorCodes.make_not_ready(
+		ErrorCodes.SUB_EDITOR_VIEWPORT_NOT_3D, hint, false)
+	err["error"]["data"]["editor_state"] = "viewport_not_3d"
+	err["error"]["data"]["scene_root_type"] = scene_root_type
 	return err
 
 
@@ -783,11 +820,13 @@ static func _make_viewport_not_3d_error(scene_root_type: String, hint: String) -
 ## back empty — headless rendering, a freshly opened editor whose 3D
 ## viewport hasn't drawn a frame, or a SubViewport that lost its target.
 static func _empty_image_error(source: String, hint: String) -> Dictionary:
-	var err := ErrorCodes.make(ErrorCodes.EDITOR_NOT_READY, hint)
-	err["error"]["data"] = {
-		"editor_state": "viewport_empty",
-		"source": source,
-	}
+	## retryable=false: an empty capture is usually headless mode, where a
+	## retry loops forever — the not-yet-drawn-frame case is transient but
+	## indistinguishable from here, so don't invite a retry loop.
+	var err := ErrorCodes.make_not_ready(
+		ErrorCodes.SUB_EDITOR_VIEWPORT_EMPTY, hint, false)
+	err["error"]["data"]["editor_state"] = "viewport_empty"
+	err["error"]["data"]["source"] = source
 	return err
 
 
@@ -810,31 +849,17 @@ func _find_current_camera_3d(root: Node) -> Camera3D:
 
 
 func _finalize_image(image: Image, source: String, max_resolution: int) -> Dictionary:
-	var original_width := image.get_width()
-	var original_height := image.get_height()
-
-	if max_resolution > 0:
-		var longest := maxi(original_width, original_height)
-		if longest > max_resolution:
-			var scale := float(max_resolution) / float(longest)
-			## Clamp to 1px min: extreme aspect ratios at very small max_resolution
-			## could otherwise compute a zero dimension and crash image.resize().
-			var new_w := maxi(1, int(original_width * scale))
-			var new_h := maxi(1, int(original_height * scale))
-			image.resize(new_w, new_h, Image.INTERPOLATE_LANCZOS)
-
-	var img_bytes := image.save_png_to_buffer()
-	var base64_str := Marshalls.raw_to_base64(img_bytes)
-
+	## Shared with the game-process copy in runtime/game_helper.gd (#716).
+	var encoded := McpScreenshotEncode.downscale_and_encode(image, max_resolution)
 	return {
 		"data": {
 			"source": source,
-			"width": image.get_width(),
-			"height": image.get_height(),
-			"original_width": original_width,
-			"original_height": original_height,
+			"width": encoded.width,
+			"height": encoded.height,
+			"original_width": encoded.original_width,
+			"original_height": encoded.original_height,
 			"format": "png",
-			"image_base64": base64_str,
+			"image_base64": encoded.base64,
 		}
 	}
 
@@ -923,12 +948,15 @@ func _clear_debugger_error_trees() -> int:
 
 
 func reload_plugin(_params: Dictionary) -> Dictionary:
+	var work := PluginReload.reserve_reload()
+	if work == 0:
+		return ErrorCodes.make(ErrorCodes.EDITOR_NOT_READY, "A plugin reload is already pending.")
 	_log_buffer.log("reload_plugin requested, reloading next frame")
 	## Persist a pending plugin_reload telemetry event *before* the
 	## disable kills the live WebSocket. The re-enabled plugin's
 	## _enter_tree flushes via `_telemetry.flush_pending_plugin_reload()`.
 	Telemetry.record_pending_plugin_reload("mcp_tool")
-	_do_reload_plugin.call_deferred()
+	_do_reload_plugin.call_deferred(work)
 	return {"data": {"status": "reloading", "message": "Plugin reload initiated"}}
 
 
@@ -938,16 +966,12 @@ func reload_plugin(_params: Dictionary) -> Dictionary:
 ## fail with "Could not find type X" when new class_name scripts are on disk
 ## but not yet registered, leaving the plugin disabled with no recovery path
 ## short of killing the editor. See issue #83.
-func _do_reload_plugin() -> void:
-	var fs := EditorInterface.get_resource_filesystem()
-	fs.scan()
-	var tree := Engine.get_main_loop() as SceneTree
-	# Cap the wait so a long scan (huge project) doesn't hang reload.
-	var deadline_ms := Time.get_ticks_msec() + 5000
-	while fs.is_scanning() and Time.get_ticks_msec() < deadline_ms:
-		await tree.process_frame
-	EditorInterface.set_plugin_enabled("res://addons/godot_ai/plugin.cfg", false)
-	EditorInterface.set_plugin_enabled("res://addons/godot_ai/plugin.cfg", true)
+# The deferred entry captures no handler. The helper owns the bounded native
+# signal handoff: is_scanning() can become false before resource reloads and
+# filesystem_changed run on the main thread. No suspended GDScript frame may
+# span a scan which can recompile that very frame's script.
+static func _do_reload_plugin(work: int = 0) -> void:
+	PluginReload.reload_after_scan(work)
 
 
 func quit_editor(_params: Dictionary) -> Dictionary:
@@ -967,8 +991,10 @@ func game_eval(params: Dictionary) -> Dictionary:
 			"Debugger bridge unavailable — plugin may not be fully initialised")
 
 	if not EditorInterface.is_playing_scene():
-		return ErrorCodes.make(ErrorCodes.EDITOR_NOT_READY,
-			"Game is not running — start the project first")
+		return ErrorCodes.make_not_ready(
+			ErrorCodes.SUB_EDITOR_GAME_NOT_RUNNING,
+			"Game is not running — start the project first", false,
+			"Start the game with project_run (or wait for the user to run it), then retry.")
 
 	var request_id: String = params.get("_request_id", "")
 	if request_id.is_empty():
@@ -976,6 +1002,29 @@ func game_eval(params: Dictionary) -> Dictionary:
 			"Missing request_id — cannot correlate deferred response")
 
 	_debugger_plugin.request_game_eval(code, request_id, _connection)
+	return McpDispatcher.DEFERRED_RESPONSE
+
+
+func game_debug_control(params: Dictionary) -> Dictionary:
+	var action := str(params.get("action", ""))
+	if action not in ["suspend", "resume", "next_frame", "debug_status"]:
+		return ErrorCodes.make(
+			ErrorCodes.VALUE_OUT_OF_RANGE,
+			"Invalid game debug action '%s' — use suspend, resume, next_frame, or debug_status" % action,
+		)
+	if _debugger_plugin == null or _connection == null:
+		return ErrorCodes.make(ErrorCodes.INTERNAL_ERROR,
+			"Debugger bridge unavailable — plugin may not be fully initialised")
+	if not EditorInterface.is_playing_scene():
+		return ErrorCodes.make_not_ready(
+			ErrorCodes.SUB_EDITOR_GAME_NOT_RUNNING,
+			"Game is not running — start the project first", false,
+			"Start the game with project_run (or wait for the user to run it), then retry.")
+	var request_id := str(params.get("_request_id", ""))
+	if request_id.is_empty():
+		return ErrorCodes.make(ErrorCodes.INTERNAL_ERROR,
+			"Missing internal _request_id — cannot correlate deferred response")
+	_debugger_plugin.request_game_debug_control(action, request_id, _connection)
 	return McpDispatcher.DEFERRED_RESPONSE
 
 
@@ -989,8 +1038,10 @@ func game_command(params: Dictionary) -> Dictionary:
 			"Debugger bridge unavailable — plugin may not be fully initialised")
 
 	if not EditorInterface.is_playing_scene():
-		return ErrorCodes.make(ErrorCodes.EDITOR_NOT_READY,
-			"Game is not running — start the project first")
+		return ErrorCodes.make_not_ready(
+			ErrorCodes.SUB_EDITOR_GAME_NOT_RUNNING,
+			"Game is not running — start the project first", false,
+			"Start the game with project_run (or wait for the user to run it), then retry.")
 
 	var request_id: String = params.get("_request_id", "")
 	if request_id.is_empty():
@@ -998,5 +1049,21 @@ func game_command(params: Dictionary) -> Dictionary:
 			"Missing request_id — cannot correlate deferred response")
 
 	var command_params: Dictionary = params.get("params", {})
+
+	## input_sequence steps the game forward frame-by-frame in one call, so it
+	## needs a far larger budget than the one-shot game ops that share the
+	## `game_command` deferred entry (15s). Widen both timers only for it: the
+	## debugger-side pending timer (below) and the dispatcher-side deferred
+	## budget (via the sentinel's `_deferred_timeout_ms`). Every other op keeps
+	## request_game_command's tight default.
+	if op == "input_sequence":
+		_debugger_plugin.request_game_command(
+			op, command_params, request_id, _connection, INPUT_SEQUENCE_TIMEOUT_SEC
+		)
+		return {
+			"_deferred": true,
+			"_deferred_timeout_ms": int(INPUT_SEQUENCE_TIMEOUT_SEC * 1000.0),
+		}
+
 	_debugger_plugin.request_game_command(op, command_params, request_id, _connection)
 	return McpDispatcher.DEFERRED_RESPONSE

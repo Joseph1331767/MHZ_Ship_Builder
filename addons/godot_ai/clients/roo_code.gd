@@ -6,7 +6,6 @@ func _init() -> void:
 	id = "roo_code"
 	display_name = "Roo Code"
 	config_type = "json"
-	doc_url = "https://docs.roocode.com/features/mcp/using-mcp-in-roo"
 	path_template = {
 		"darwin": "~/Library/Application Support/Code/User/globalStorage/rooveterinaryinc.roo-cline/settings/mcp_settings.json",
 		"windows": "$APPDATA/Code/User/globalStorage/rooveterinaryinc.roo-cline/settings/mcp_settings.json",
@@ -26,4 +25,17 @@ func _init() -> void:
 	## split, the Configure-All-Mismatched sweep silently wipes the user's
 	## auto-approval list every time the type pin or URL drifts.
 	entry_initial_fields = {"disabled": false, "alwaysAllow": []}
-	detect_paths = PackedStringArray(path_template.values())
+	## Attach migration (#838). Roo stdio entries are flat command/args/env
+	## (+cwd); docs state `type` defaults to "stdio" for command configs and
+	## the stdio schema forbids url/headers. Pin type=stdio — it is documented
+	## and repins the legacy "streamable-http" value in place.
+	command_shape = McpClient.CommandShape.FLAT
+	command_transport_key = "type"
+	command_transport_value = "stdio"
+	command_legacy_keys = PackedStringArray(["url", "headers"])
+	command_initial_fields = {"disabled": false, "alwaysAllow": []}
+	command_user_fields = PackedStringArray([
+		"disabled", "alwaysAllow", "timeout", "disabledTools", "watchPaths",
+		"env", "cwd",
+	])
+	command_timeout_fields = PackedStringArray(["timeout"])

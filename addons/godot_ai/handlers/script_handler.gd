@@ -1,5 +1,5 @@
 @tool
-extends RefCounted
+extends "res://addons/godot_ai/handlers/command_handler.gd"
 
 const ErrorCodes := preload("res://addons/godot_ai/utils/error_codes.gd")
 const DiagnosticsCapture := preload("res://addons/godot_ai/utils/diagnostics_capture.gd")
@@ -10,15 +10,9 @@ const ValidationLogger := preload("res://addons/godot_ai/runtime/validation_logg
 var _undo_redo: EditorUndoRedoManager
 var _connection: McpConnection
 
-# Bounded settle window for `ResourceLoader.exists(path)` after `scan()` so
-# that an agent calling create_script -> attach_script back-to-back doesn't
-# race the editor's import pipeline (#261). Polled once per frame, with an
-# elapsed-time cap below the dispatcher's create_script deferred timeout. If
-# import is still not visible at the cap, we still return committed=true
-# instead of letting the already-written file surface as DEFERRED_TIMEOUT.
-const _IMPORT_SETTLE_MAX_FRAMES := 300
-const _IMPORT_SETTLE_MAX_MSEC := 3500
-
+# The bounded import-settle window and the deferred completion coroutine
+# live on McpResourceIO since #714 — write_file's fresh-`.gd` path shares
+# them, so create_script and write_file can't drift apart again (#261).
 
 func _init(undo_redo: EditorUndoRedoManager, connection: McpConnection = null) -> void:
 	_undo_redo = undo_redo
@@ -36,21 +30,13 @@ func create_script(params: Dictionary) -> Dictionary:
 	if not path.ends_with(".gd"):
 		return ErrorCodes.make(ErrorCodes.VALUE_OUT_OF_RANGE, "Path must end with .gd")
 
-	# Ensure parent directory exists
-	var dir_path := path.get_base_dir()
-	if not DirAccess.dir_exists_absolute(dir_path):
-		var err := DirAccess.make_dir_recursive_absolute(dir_path)
-		if err != OK:
-			return ErrorCodes.make(ErrorCodes.INTERNAL_ERROR, "Failed to create directory: %s" % dir_path)
-
 	var existed_before := FileAccess.file_exists(path)
 
-	var file := FileAccess.open(path, FileAccess.WRITE)
-	if file == null:
-		return ErrorCodes.make(ErrorCodes.INTERNAL_ERROR, "Failed to open file for writing: %s" % path)
-
-	file.store_string(content)
-	file.close()
+	# Shared write path (#714): parent mkdir + write/flush + explicit error
+	# check live on McpResourceIO so write_file can't drift from this again.
+	var write_failure: Variant = McpResourceIO.write_text_to_disk(path, content)
+	if write_failure != null:
+		return write_failure
 
 	var data := {
 		"path": path,
@@ -90,16 +76,16 @@ func create_script(params: Dictionary) -> Dictionary:
 			+ "when its window regains focus."
 		)
 
-	# Register just this file with the editor instead of a full recursive
-	# scan(). A scan() per write stacks `update_scripts_classes` /
-	# `update_script_paths_documentation` WorkerThreadPool tasks under concurrent
-	# script creation ("Task ... already exists" / "!tasks.has(p_task)"), which
-	# races the global-class registry and can SIGABRT in
-	# ScriptServer::remove_global_class_by_path (see dsarno/godot#6).
-	# update_file() is the single-file path the rest of the plugin already uses.
-	var efs := EditorInterface.get_resource_filesystem()
-	if efs != null:
-		efs.update_file(path)
+	# An overwrite can target a script that is already loaded (attached to a
+	# node, preloaded, open in the script editor). Registering the bytes with
+	# the editor leaves that live GDScript on the old source (#937), so the very
+	# next call would run stale code after a "successful" write. Refresh it
+	# BEFORE registering the file: a GUI editor loads the script inside
+	# update_file() (see _refresh_loaded_gdscript for the ordering contract).
+	if existed_before:
+		_refresh_loaded_gdscript(data, path, content)
+
+	_register_written_file(path)
 
 	# `.gd.uid` is the sidecar Godot generates on scan; list both so the caller
 	# can rm the full set in one go.
@@ -112,61 +98,12 @@ func create_script(params: Dictionary) -> Dictionary:
 	# overwrite the resource was already known to ResourceLoader, so reply now.
 	var request_id: String = params.get("_request_id", "")
 	if not existed_before and _connection != null and not request_id.is_empty():
-		_finish_create_script_deferred(_connection, request_id, path, data)
+		McpResourceIO.finish_text_write_deferred(_connection, request_id, path, data)
 		return McpDispatcher.DEFERRED_RESPONSE
 
 	# Synchronous fallback: batch_execute (no request_id) and unit-test contexts
 	# (no connection) get the immediate reply that the previous behaviour gave.
 	return {"data": data}
-
-
-# `static` is load-bearing: the deferred completion captures no `self`, so the
-# coroutine survives even if the ScriptHandler RefCounted is freed mid-await.
-# Under concurrent script_create storms with editor_reload_plugin fired during
-# the burst, the handler instance is otherwise GC'd between `await` and resume,
-# producing "Resumed function '_finish_create_script_deferred()' after await,
-# but class instance is gone" errors and dropping the response. Keep this
-# function static and parameterise everything it needs explicitly — do not
-# reference instance state.
-static func _finish_create_script_deferred(
-	connection: McpConnection,
-	request_id: String,
-	path: String,
-	data: Dictionary,
-) -> void:
-	if not is_instance_valid(connection):
-		return
-	var tree := connection.get_tree()
-	if tree == null:
-		return
-	var deadline_ms := Time.get_ticks_msec() + _IMPORT_SETTLE_MAX_MSEC
-	# Let _dispatch() return DEFERRED_RESPONSE and register the request before
-	# this coroutine can send a committed result. ResourceLoader.exists(path)
-	# may already be true on fast imports; without this handoff the connection
-	# treats the response as late/unregistered and drops it, then the dispatcher
-	# times out a file that was already written (#324). The deadline starts
-	# before this await so a slow handoff frame is counted against the bounded
-	# settle window.
-	await tree.process_frame
-	var frames := 0
-	while (
-		frames < _IMPORT_SETTLE_MAX_FRAMES
-		and Time.get_ticks_msec() < deadline_ms
-		and not ResourceLoader.exists(path)
-	):
-		await tree.process_frame
-		frames += 1
-	# If the plugin tears down (_exit_tree frees the connection) during the
-	# await, is_instance_valid() goes false and we drop the response silently —
-	# the server's request timeout will surface the failure to the caller.
-	if not is_instance_valid(connection):
-		return
-	var payload := data.duplicate()
-	var settled := ResourceLoader.exists(path)
-	payload["import_settled"] = settled
-	payload["import_settle"] = "settled" if settled else "timeout"
-	payload["import_pending"] = not settled
-	connection.send_deferred_response(request_id, {"data": payload})
 
 
 ## Extract the `class_name` a script declares, or "" if none. A cheap line scan
@@ -238,6 +175,10 @@ func read_script(params: Dictionary) -> Dictionary:
 	}
 
 
+## Instance (not static) despite using no instance state: tests stub
+## `_capture_gdscript_load_diagnostics` via subclass override, and static
+## calls bind lexically — see test_script.gd. filesystem_handler shares
+## this by instantiating a bare ScriptHandler (#714).
 func _attach_gdscript_diagnostics(data: Dictionary, path: String, content: String) -> void:
 	var validation := _validate_gdscript_source(content)
 	var diagnostics: Array = []
@@ -256,6 +197,75 @@ func _attach_gdscript_diagnostics(data: Dictionary, path: String, content: Strin
 	data["diagnostics_detail"] = diagnostics_detail
 	data["diagnostics_scope"] = "this_file"
 	data["diagnostics_status"] = diagnostics_status
+
+
+## Register just this file with the editor instead of a full recursive
+## scan(). A scan() per write stacks `update_scripts_classes` /
+## `update_script_paths_documentation` WorkerThreadPool tasks under concurrent
+## script creation ("Task ... already exists" / "!tasks.has(p_task)"), which
+## races the global-class registry and can SIGABRT in
+## ScriptServer::remove_global_class_by_path (see dsarno/godot#6).
+## update_file() is the single-file path the rest of the plugin already uses.
+##
+## Call it only after `_refresh_loaded_gdscript` has taken its decision (see
+## the ordering contract there). Instance (not static) so a test can stand in
+## for what a GUI editor does inside update_file() — load or reload the
+## script — and lock that ordering from a headless run.
+func _register_written_file(path: String) -> void:
+	var efs := EditorInterface.get_resource_filesystem()
+	if efs != null:
+		efs.update_file(path)
+
+
+## Bring an already-loaded GDScript back in step with the bytes just written.
+##
+## ResourceLoader caches GDScript by path, and registering the write with
+## EditorFileSystem does not refresh that cache in a headless editor — so after
+## a successful write, a script that a node, a preload(), or the script editor
+## already holds keeps executing the previous source (#937). When the path is
+## cached and the new source parsed, push the source into the live object and
+## reload it in place (keep_state so existing instances survive). Reports
+## `reloaded` plus a `reload_reason` when it did not, so a caller can tell
+## "the file changed" from "the code changed".
+##
+## Ordering contract: this runs BEFORE `_register_written_file`. A GUI editor
+## (not a headless one — EditorNode's cmdline mode skips the step) runs its
+## script-documentation pass synchronously inside update_file(), which
+## ResourceLoader.load()s the script, caching a never-loaded one, and
+## reload_from_file()s a cached one that is not open in the script editor.
+## Deciding after that call reports a false `already_current` for a script
+## nobody held (instead of `not_loaded`) and for one this helper should have
+## refreshed itself. The question is what was loaded before the write, so it
+## is answered first; the editor's own pass then meets the same bytes.
+##
+## Skipped when validation failed: the diagnostics capture above has already
+## reloaded the shared GDScriptCache entry with the broken source, so there is
+## no good code to push; `reload_reason: parse_error` tells the caller the
+## loaded code did NOT change to something runnable.
+static func _refresh_loaded_gdscript(data: Dictionary, path: String, content: String) -> void:
+	data["reloaded"] = false
+	if _script_has_error_diagnostics(data):
+		data["reload_reason"] = "parse_error"
+		return
+	if not ResourceLoader.has_cached(path):
+		data["reload_reason"] = "not_loaded"
+		return
+	var loaded := ResourceLoader.load(path)
+	if not (loaded is GDScript):
+		data["reload_reason"] = "not_gdscript"
+		return
+	var script := loaded as GDScript
+	if script.source_code == content:
+		data["reloaded"] = true
+		data["reload_reason"] = "already_current"
+		return
+	script.source_code = content
+	var err := script.reload(true)
+	if err != OK:
+		data["reload_reason"] = "reload_failed"
+		data["reload_error"] = err
+		return
+	data["reloaded"] = true
 
 
 static func _validate_gdscript_source(content: String) -> Dictionary:
@@ -286,15 +296,6 @@ func _capture_gdscript_load_diagnostics(path: String) -> Dictionary:
 		return {}
 	)
 	return capture
-
-
-static func _empty_diagnostics_capture() -> Dictionary:
-	return {
-		"diagnostics": [],
-		"diagnostics_detail": "none",
-		"diagnostics_scope": "this_file",
-		"diagnostics_status": "checked",
-	}
 
 
 static func _fallback_gdscript_diagnostic(path: String, error_code: int, content: String) -> Dictionary:
@@ -369,11 +370,12 @@ func patch_script(params: Dictionary) -> Dictionary:
 		new_content = content.substr(0, idx) + new_text + content.substr(idx + old_text.length())
 		replacements = 1
 
-	var write := FileAccess.open(path, FileAccess.WRITE)
-	if write == null:
-		return ErrorCodes.make(ErrorCodes.INTERNAL_ERROR, "Failed to open file for writing: %s" % path)
-	write.store_string(new_content)
-	write.close()
+	# Shared write path (#714). No import-settle deferral here: the file
+	# already exists, so ResourceLoader knows it and there is no scan to wait
+	# for — same rationale as create_script's overwrite arm.
+	var write_failure: Variant = McpResourceIO.write_text_to_disk(path, new_content)
+	if write_failure != null:
+		return write_failure
 
 	var data := {
 		"path": path,
@@ -385,10 +387,12 @@ func patch_script(params: Dictionary) -> Dictionary:
 	}
 	_attach_gdscript_diagnostics(data, path, new_content)
 
-	# Single-file register, not a full scan() — see create_script (dsarno/godot#6).
-	var efs := EditorInterface.get_resource_filesystem()
-	if efs != null:
-		efs.update_file(path)
+	# The file is fresh but any already-loaded GDScript for it is not (#937);
+	# make "patch succeeded" mean the loaded code changed, not just the bytes.
+	# Decide and refresh before registering the file with the editor — a GUI
+	# editor loads the script inside update_file() (see _refresh_loaded_gdscript).
+	_refresh_loaded_gdscript(data, path, new_content)
+	_register_written_file(path)
 
 	return {"data": data}
 
@@ -494,9 +498,17 @@ func find_symbols(params: Dictionary) -> Dictionary:
 	for i in lines.size():
 		var line := lines[i].strip_edges()
 
-		# class_name
+		# class_name — same cut logic as _extract_class_name so the
+		# `extends Bar` / icon-form tails don't leak into the symbol name.
 		if line.begins_with("class_name "):
-			class_name_str = line.substr(11).strip_edges()
+			var cn_rest := line.substr(11).strip_edges()
+			var cn_cut := cn_rest.length()
+			for ci in cn_rest.length():
+				var cn_ch := cn_rest[ci]
+				if cn_ch == " " or cn_ch == "\t" or cn_ch == ",":
+					cn_cut = ci
+					break
+			class_name_str = cn_rest.substr(0, cn_cut)
 
 		# extends
 		if line.begins_with("extends "):

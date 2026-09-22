@@ -9,7 +9,6 @@ func _init() -> void:
 	id = "vscode"
 	display_name = "VS Code"
 	config_type = "json"
-	doc_url = "https://code.visualstudio.com/docs/copilot/chat/mcp-servers"
 	path_template = {
 		"darwin": "~/Library/Application Support/Code/User/mcp.json",
 		"windows": "$APPDATA/Code/User/mcp.json",
@@ -17,4 +16,14 @@ func _init() -> void:
 	}
 	server_key_path = PackedStringArray(["servers"])
 	entry_extra_fields = {"type": "http"}
-	detect_paths = PackedStringArray(path_template.values())
+	## Attach migration (#838). VS Code stdio entries are flat command/args/env
+	## under `servers` with a documented `type: "stdio"` discriminator
+	## (code.visualstudio.com/docs/agents/reference/mcp-configuration). The
+	## stdio schema is `additionalProperties: false` (mcpConfiguration.ts), so
+	## removing the legacy url/headers is load-bearing — leftovers invalidate
+	## the whole entry, and the pin flips the legacy `type: "http"` in place.
+	command_shape = McpClient.CommandShape.FLAT
+	command_transport_key = "type"
+	command_transport_value = "stdio"
+	command_legacy_keys = PackedStringArray(["url", "headers"])
+	command_user_fields = PackedStringArray(["env", "envFile", "cwd", "sandboxEnabled", "dev"])

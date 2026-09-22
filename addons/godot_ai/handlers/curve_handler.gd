@@ -1,5 +1,5 @@
 @tool
-extends RefCounted
+extends "res://addons/godot_ai/handlers/command_handler.gd"
 
 const ErrorCodes := preload("res://addons/godot_ai/utils/error_codes.gd")
 
@@ -69,7 +69,7 @@ func set_points(params: Dictionary) -> Dictionary:
 		if not (property in node):
 			return ErrorCodes.make(
 				ErrorCodes.PROPERTY_NOT_ON_CLASS,
-				"Property '%s' not found on %s" % [property, node.get_class()]
+				McpPropertyErrors.build_message(node, property)
 			)
 		curve = node.get(property)
 		# Auto-create a fresh Curve subclass if the slot is empty. Infer the

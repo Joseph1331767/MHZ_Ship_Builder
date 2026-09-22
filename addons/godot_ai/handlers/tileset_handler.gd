@@ -1,5 +1,5 @@
 @tool
-extends RefCounted
+extends "res://addons/godot_ai/handlers/command_handler.gd"
 
 ## TileSet management — atlas inspection helpers.
 
@@ -138,6 +138,10 @@ func _resolve_atlas_source(params: Dictionary) -> Dictionary:
 			ErrorCodes.MISSING_REQUIRED_PARAM,
 			"'source_id' parameter is required"
 		)
+
+	var tileset_path_err = McpPathValidator.loadable_error(tileset_path, "tileset_path")
+	if tileset_path_err != null:
+		return tileset_path_err
 
 	if not ResourceLoader.exists(tileset_path):
 		return ErrorCodes.make(
