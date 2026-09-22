@@ -17,6 +17,8 @@ which can be baked into a solid hull shell.
 **Phase 1 (this phase): craft a hull.** Out of scope, but designed for: working components
 (thrusters, sensors), a Phase 2 interior build with power/data/fuel routing, hull regions with
 material layers resolved from MHZ_Materials, and destructible per-layer damage.
+Ideas for those later phases are kept in `docs/future/` (not CONTRACT) so this phase does not
+preclude them — e.g. seam bands for texturing, `docs/future/texturing.md`.
 
 **This module renders to a texture.** The whole builder lives under one `SubViewport` so the real
 game can map it onto a diegetic device. See section 10 — this is structural, not cosmetic.
@@ -425,7 +427,7 @@ data/     JSON packs - families, manufacturers, hatches, palette, tuning, schema
 harness/  the builder, SubViewport-rooted; may depend on core/, never the reverse
 tools/    headless: validate, selfcheck, bake, screenshot
 tests/    gdUnit4
-docs/     this file, adr/, devlog/
+docs/     this file, adr/, devlog/, future/ (notes for unbuilt phases)
 scratch/  gitignored
 ```
 

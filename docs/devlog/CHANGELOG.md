@@ -2668,3 +2668,36 @@ Pick a carbon, wait for the bar. Select a tunnel: the HATCH section shows CRAWLW
 SINGLE, 0.70 x 0.70 M and the seam's maximum; press a DOOR button and the leaf swings into its
 module. INTERIOR: the hole through each tunnel cap with its rim capped. Change the shape to
 POLYGON and the style to IRIS, UPDATE MESHES, and press DOOR again.
+
+
+## [2026-09-21] Commits, the godot-ai updater, the MCP back, and a home for future phases
+
+> "the mcp must be working for advanced accurate development ... it claims i cannot update it"
+
+Everything from ADR 0016 to 0029 had never been committed; it is now (`bf17455`, one unit, the
+ADRs overlap hunk by hunk). The stop-lint hook was linting the vendored `addons/` tree after the
+godot-ai plugin self-updated there; it skips `addons/` now.
+
+The dock's Update refused godot-ai 4.1.0 for a reason in the plugin, not this repo: GitHub
+redirects a release download to `release-assets.githubusercontent.com/github-production-release-asset/...`
+and the plugin's allow-list expects `/github-production-release-asset-...`. Measured with the
+plugin's own `_is_trusted_download_url`: first hop true, redirect false. Still so on upstream main
+and in 4.1.0, and unreported. 4.1.0 was installed by hand: the plugin's `ReleaseVerifier` passed
+the signed manifest and archive, all 293 files matched the inventory, 4.0.0 kept in
+`addons/.godot_ai_update/backup/4.0.0` (`8785742`).
+
+The MCP had been failing with `TRANSPORT_AUTH_REQUIRED`: v4 authenticates HTTP with a capability
+that changes per server instance, so `.mcp.json`'s plain HTTP entry could never connect. It is
+removed; the dock's Configure registered the `godot-ai attach` stdio bridge at user scope.
+
+`docs/future/` is new: design notes for phases not built yet, not CONTRACT, read by no code, and
+promoted to SPEC + ADR when their phase starts. First note, `texturing.md`: seam bands (rivets,
+bolts, welds, hidden fastener ribbons, a growing catalogue the player picks per seam) and panels
+textured in their primitive's own coordinates, with what it asks of earlier phases - face
+provenance through the bake, a band field on the joint, a styles pack.
+
+### Verified
+
+Bridge driven over stdio: 46 tools, `editor_state` answered from the live editor; the same calls
+from this session's own tools; the editor error log empty after the plugin swap. No `core/`,
+`data/` or `harness/` change, so no test run was needed.

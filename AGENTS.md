@@ -68,7 +68,7 @@ The layout is SPEC §12, verbatim:
 | `harness/` | the builder, `SubViewport`-rooted | May depend on `core/`. `core/` may **never** depend on it. |
 | `tools/` | headless entry points: validate, selfcheck, bake, screenshot | Run via `$env:GODOT_BIN --headless --path . -s res://tools/<x>.gd`, or through `tools/ship_run.ps1` — see §8a. |
 | `tests/` | gdUnit4 | Determinism tests are non-negotiable — see §8b. |
-| `docs/` | this file, `adr/`, `devlog/` | |
+| `docs/` | this file, `adr/`, `devlog/`, `future/` | `future/` holds design notes for phases not built yet — not CONTRACT, read by no code; promoted to SPEC + ADR when their phase starts |
 | `scratch/` | throwaway (gitignored) | §4 |
 
 **Isolation is the whole point of this repo.** `core/` + `data/` is the drop-in unit that lifts into
