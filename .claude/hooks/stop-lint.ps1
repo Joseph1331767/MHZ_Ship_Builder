@@ -15,7 +15,7 @@ if (-not (Get-Command gdlint -ErrorAction SilentlyContinue)) { exit 0 }
 
 $changed = @(git -C $proj diff --name-only HEAD -- '*.gd' 2>$null) +
            @(git -C $proj ls-files --others --exclude-standard -- '*.gd' 2>$null) |
-           Where-Object { $_ } | Select-Object -Unique
+           Where-Object { $_ -and $_ -notlike 'addons/*' } | Select-Object -Unique  # addons/ is vendored
 if (-not $changed) { exit 0 }
 
 $failures = @()
