@@ -1,7 +1,8 @@
 # 0031 — Explode options: separations, and a slicer in each part's own axes
 
 - **Date**: 2026-09-21
-- **Status**: Accepted
+- **Status**: Accepted, amended by ADR 0032 (every piece is cut once into fundamental cells;
+  the slicer groups them, APPLY SLICES is retired)
 - **Ruleset**: unchanged (`4.0.0`) — measured: the selfcheck doc hashes `5536787c6c35d236` before
   and after. The plan gains a `frames` key; the document and its hash are untouched, and the
   explode settings are view state that never enters a ship file.
@@ -50,6 +51,8 @@ nothing changes for a player who never opens the panel.
 **The panel** (`ShipExplodePanel`) is an in-scene control docked top-right over the 3D view while it
 is exploded. **The glue** (`ShipExplodeControl`) keeps `ShipBuilder` inside its size budget.
 
+RETIRED(ADR 0032): "a slicer change ... lights APPLY SLICES" -> every piece is cut once into its
+64 fundamental cells and every setting only moves them (ShipExplodeView.GROUP_SIGN).
 **Two costs, two behaviours.** A separation only moves what is on screen: every visual remembers
 the module it hangs off, its slice direction and which gap scales it, and
 `ShipExplodeView.relayout()` repositions them with no rebuild and no bake. A slicer change decides

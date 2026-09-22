@@ -1,20 +1,21 @@
 extends SceneTree
-## THE EXPLODE OPTIONS (ADR 0031), driven the way a player drives them. Windowed (it renders); run
+## THE EXPLODE (ADR 0031/0032), driven the way a player drives it. Windowed (it renders); run
 ## through tools/ship_run.ps1 -Windowed.
 ##
-## A carbon of spheres resolves; EXPLODE brings the options panel up and the default slicing (every
-## piece bisected across its Z) on screen; the slicer is changed - parts trisected along their
-## radial Y, cluster chunks bisected across X - which lights APPLY SLICES, and APPLY re-cuts them;
-## then the separations are moved and switched off, which must move what is on screen WITHOUT a
-## rebake. Frames for the human: reports/visual_explode_{default,sliced,spread}.png.
+## A carbon of spheres resolves; EXPLODE cuts every piece into its fundamental cells once and the
+## pieces travel out; the slicer is changed - parts trisected along their radial Y, cluster chunks
+## bisected across X - which must only MOVE the cells, never bake; POSITION scrubs to halfway; the
+## gaps widen and separation switches off, again with no bake; ASSEMBLE plays it backwards and lands
+## on the whole baked pieces. Frames for the human: reports/visual_explode_{default,sliced,half,
+## spread}.png.
 ##
 ## Starts from the shipped defaults (ShipExplodeControl.use) and never calls the panel's handlers,
 ## which save: the player's own settings file is not touched by a check.
 
 const OUT_DIR: String = "res://reports"
 const SETTLE_FRAMES: int = 6
-const FRAME_FRAMES: int = 12
-const MAX_BAKE_FRAMES: int = 2400
+const FRAME_FRAMES: int = 8
+const MAX_BAKE_FRAMES: int = 3000
 const HOST_SCENE: String = "res://harness/dev_host.tscn"
 const PARTS_SLICES: Vector3i = Vector3i(0, 2, 0)
 const CLUSTER_SLICES: Vector3i = Vector3i(1, 0, 0)
@@ -24,6 +25,8 @@ var _builder: Node = null
 var _frames: int = 0
 var _stage: int = 0
 var _failures: PackedStringArray = PackedStringArray()
+var _exploded_ms: int = 0
+var _bake_before: Dictionary = {}
 
 
 func _init() -> void:
@@ -44,20 +47,22 @@ func _process(_delta: float) -> bool:
 	elif _stage == 1:
 		done = _when_idle(_explode_it)
 	elif _stage == 2:
-		done = _when_idle(_check_default)
+		done = _when_idle(_check_exploded)
 	elif _stage == 3 and _frames >= FRAME_FRAMES:
 		_save("visual_explode_default.png")
 		_reslice()
-	elif _stage == 4:
-		done = _when_idle(_check_sliced)
-	elif _stage == 5 and _frames >= FRAME_FRAMES:
+	elif _stage == 4 and _frames >= FRAME_FRAMES:
 		_save("visual_explode_sliced.png")
+		_scrub()
+	elif _stage == 5 and _frames >= FRAME_FRAMES:
+		_save("visual_explode_half.png")
 		_spread()
 	elif _stage == 6 and _frames >= FRAME_FRAMES:
 		_save("visual_explode_spread.png")
 		_separation_off()
-		_report()
-		done = true
+		_assemble()
+	elif _stage == 7:
+		done = _when_idle(_check_assembled)
 	return done
 
 
@@ -87,12 +92,13 @@ func _begin() -> bool:
 	return false
 
 
-## Calls [param next] once the engine and the view are both idle; aborts past MAX_BAKE_FRAMES.
+## Calls [param next] once the engine and the view are both idle - the bake done and the pieces
+## done travelling; aborts past MAX_BAKE_FRAMES.
 func _when_idle(next: Callable) -> bool:
-	if _session().busy or bool(_explode().call("is_busy")):
+	if _session().busy or _explode().is_busy():
 		if _frames <= MAX_BAKE_FRAMES:
 			return false
-		_failures.append("still baking after %d frames (stage %d)" % [_frames, _stage])
+		_failures.append("still busy after %d frames (stage %d)" % [_frames, _stage])
 		_report()
 		return true
 	next.call()
@@ -100,6 +106,7 @@ func _when_idle(next: Callable) -> bool:
 
 
 func _explode_it() -> void:
+	_exploded_ms = Time.get_ticks_msec()
 	_builder.call("_set_exploded", true)
 	var layer: Control = _control().get("_overlay")
 	if layer == null or not layer.visible:
@@ -107,96 +114,80 @@ func _explode_it() -> void:
 	_advance(2)
 
 
-## The default slicing on screen: every piece in two.
-func _check_default() -> void:
+## Every piece in its fundamental cells, fully out.
+func _check_exploded() -> void:
+	var ms: int = Time.get_ticks_msec() - _exploded_ms
 	var bake: Dictionary = _session().last
-	var chunks: Dictionary = bake.get("chunks", {})
-	var two: int = 0
-	for id: String in chunks:
-		if (chunks[id] as Array).size() == 2:
-			two += 1
+	var cells: Dictionary = bake.get("cells", {})
 	var pieces: int = (bake.get("solids", {}) as Dictionary).size()
-	if two != pieces:
-		_failures.append("default slicing: %d of %d pieces in two" % [two, pieces])
-	print("  default: %d of %d pieces bisected across Z" % [two, pieces])
+	var total: int = 0
+	for id: String in cells:
+		total += (cells[id] as Array).size()
+	if cells.size() != pieces or total < pieces * 8:
+		_failures.append("%d of %d pieces cut, %d cells" % [cells.size(), pieces, total])
+	if not _explode().has_cells_showing() or absf(_explode().amount() - 1.0) > 1.0e-3:
+		_failures.append("the explode did not run out to 1 (at %.3f)" % _explode().amount())
+	var nodes: int = _explode().module_nodes().size()
+	print(
+		(
+			"  exploded: %d pieces in %d cells, %d nodes, cut and carried out in %d ms"
+			% [pieces, total, nodes, ms]
+		)
+	)
 	_frame_all()
 	_advance(3)
 
 
-## Parts trisected along Y, cluster chunks bisected across X: APPLY lights, then APPLY re-cuts.
+## Parts trisected along Y, cluster chunks bisected across X: the cells move, nothing bakes.
 func _reslice() -> void:
+	_bake_before = _session().last
+	var probe: Node3D = _a_cell(false)
+	var was: Vector3 = probe.position if probe != null else Vector3.ZERO
 	var settings: ShipExplodeSettings = _control().settings
 	settings.slices = PARTS_SLICES
 	settings.cluster_slices = CLUSTER_SLICES
+	_explode().relayout()
 	_control().refresh()
-	var apply: Button = (_control().get("_panel") as Object).get("_apply")
-	if apply == null or not apply.text.ends_with("*"):
-		_failures.append("APPLY SLICES did not light when the slicer changed")
-	_builder.call("_show_bake")
+	_no_bake("a slicer change")
+	if probe == null or probe.position.is_equal_approx(was):
+		_failures.append("a slicer change did not move the cells")
+	print("  sliced: parts trisected on Y, cluster chunks bisected on X - moved, no bake")
 	_advance(4)
 
 
-func _check_sliced() -> void:
-	var bake: Dictionary = _session().last
-	var want: String = ShipCsgBake.slicing_key({"parts": PARTS_SLICES, "clusters": CLUSTER_SLICES})
-	if str(bake.get(ShipCsgBake.EXTRAS_SLICING, "")) != want:
-		_failures.append(
-			(
-				"APPLY did not re-cut the pieces (extras %s)"
-				% str(bake.get(ShipCsgBake.EXTRAS_SLICING))
-			)
-		)
-	var counts: Dictionary = bake.get("chunk_counts", {})
-	var chunks: Dictionary = bake.get("chunks", {})
-	var parts: int = 0
-	var clusters: int = 0
-	for members: PackedStringArray in bake.get("rooms", []):
-		for id: String in members:
-			var got: Vector3i = counts.get(id, Vector3i.ZERO)
-			var expected: Vector3i = CLUSTER_SLICES if members.size() > 1 else PARTS_SLICES
-			# The slices that EXIST, not only the counts asked for: a grid of n cells gives at
-			# least two and at most n (a cell wholly in a cavity has nothing in it).
-			var cells: int = (expected.x + 1) * (expected.y + 1) * (expected.z + 1)
-			var made: int = (chunks.get(id, []) as Array).size()
-			if got != expected:
-				_failures.append("%s sliced %s, expected %s" % [id, str(got), str(expected)])
-			elif made < 2 or made > cells:
-				_failures.append("%s came out in %d slices for a grid of %d" % [id, made, cells])
-			elif members.size() > 1:
-				clusters += 1
-			else:
-				parts += 1
-	var apply: Button = (_control().get("_panel") as Object).get("_apply")
-	if apply != null and apply.text.ends_with("*"):
-		_failures.append("APPLY SLICES still lit after the re-cut landed")
-	var nodes: int = (_explode().call("module_nodes") as Array).size()
-	print(
-		(
-			"  sliced: %d parts trisected along Y, %d cluster chunks bisected across X, %d nodes"
-			% [parts, clusters, nodes]
-		)
-	)
-	_frame_all()
+## POSITION to halfway: everything half out.
+func _scrub() -> void:
+	var probe: Node3D = _a_cell(true)
+	var full: Vector3 = probe.position if probe != null else Vector3.ZERO
+	_explode().set_amount(0.5)
+	if absf(_explode().amount() - 0.5) > 1.0e-4:
+		_failures.append("POSITION 0.5 left the explode at %.3f" % _explode().amount())
+	var slider: HSlider = (_control().get("_panel") as Object).get("_position")
+	if slider == null or absf(slider.value - 0.5) > 1.0e-3:
+		_failures.append("the POSITION slider did not follow the explode")
+	if probe == null or probe.position.is_equal_approx(full):
+		_failures.append("halfway left the pieces where they were")
+	_no_bake("POSITION")
+	print("  scrubbed: POSITION 50% - pieces halfway, no bake")
 	_advance(5)
 
 
-## Wider separations move what is on screen, and the engine is not asked for anything.
+## Wider gaps, fully out again: the pieces follow, nothing bakes.
 func _spread() -> void:
-	var before: Dictionary = _session().last
-	var probe: Node3D = _a_moving_node()
+	_explode().set_amount(1.0)
+	var probe: Node3D = _a_cell(true)
 	var was: Vector3 = probe.position if probe != null else Vector3.ZERO
 	var settings: ShipExplodeSettings = _control().settings
 	settings.separation_m = 4.0
 	settings.slice_separation_m = 2.0
 	settings.cluster_slice_separation_m = 1.5
-	_explode().call("relayout")
+	_explode().relayout()
 	if probe == null or probe.position.is_equal_approx(was):
 		_failures.append("a wider separation did not move the pieces")
-	if _session().busy or not is_same(_session().last, before):
-		_failures.append("a separation change started a bake")
+	_no_bake("a separation change")
 	print(
 		(
-			"  spread: a piece moved %.2f m with no rebake"
+			"  spread: a piece moved %.2f m, no bake"
 			% [probe.position.distance_to(was) if probe != null else 0.0]
 		)
 	)
@@ -204,10 +195,10 @@ func _spread() -> void:
 	_advance(6)
 
 
-## Separation off: every module back at its seam, the slices still apart.
+## Separation off: every module back on its seam, the slices still apart.
 func _separation_off() -> void:
 	_control().settings.separate = false
-	_explode().call("relayout")
+	_explode().relayout()
 	var offsets: Dictionary = _explode().get("_offsets")
 	if not offsets.is_empty():
 		_failures.append("separation off left %d modules pulled apart" % offsets.size())
@@ -215,18 +206,50 @@ func _separation_off() -> void:
 		print("  separation off: every module back on its seam")
 
 
-## A module node that a separation moves: one hanging off a module with an offset.
-func _a_moving_node() -> Node3D:
+## ASSEMBLE: plays backwards, then lands on the whole pieces.
+func _assemble() -> void:
+	_builder.call("_set_exploded", false)
+	if not _explode().is_busy():
+		_failures.append("ASSEMBLE did not play the explode backwards")
+	_advance(7)
+
+
+func _check_assembled() -> void:
+	if not bool(_builder.get("_baked")) or not _explode().is_assembled():
+		_failures.append("ASSEMBLE did not land on the baked view")
+	if _explode().has_cells_showing():
+		_failures.append("cells still on screen after ASSEMBLE")
+	var modules: int = _explode().module_count()
+	var nodes: int = _explode().module_nodes().size()
+	print("  assembled: back to %d whole pieces (%d nodes)" % [modules, nodes])
+	_report()
+
+
+func _no_bake(what: String) -> void:
+	if _session().busy or not is_same(_session().last, _bake_before):
+		_failures.append("%s started a bake" % what)
+
+
+## A cell visual that the explode moves: of a module with an offset when [param moving_module],
+## else any cell of a standalone piece.
+func _a_cell(moving_module: bool) -> Node3D:
 	var offsets: Dictionary = _explode().get("_offsets")
 	for child: Node in _explode().get_children():
-		if child is MeshInstance3D and child.has_meta(ShipExplodeView.META_MODULE):
-			if offsets.has(str(child.get_meta(ShipExplodeView.META_MODULE))):
-				return child
+		if not (child is MeshInstance3D) or not child.has_meta(ShipExplodeView.META_CELL):
+			continue
+		var cell: Vector3i = child.get_meta(ShipExplodeView.META_CELL)
+		if cell.x < 0 or cell.y != 0:
+			continue
+		if int(child.get_meta(ShipExplodeView.META_KIND)) != ShipExplodeView.SEP_PARTS:
+			continue
+		if moving_module and not offsets.has(str(child.get_meta(ShipExplodeView.META_MODULE))):
+			continue
+		return child
 	return null
 
 
 func _frame_all() -> void:
-	var box: AABB = _explode().call("bounds")
+	var box: AABB = _explode().bounds()
 	if box.size.length() > 0.0:
 		_builder.call("get_view").call("frame_aabb", box)
 
@@ -239,7 +262,7 @@ func _session() -> ShipBakeSession:
 	return _builder.get("_bake_session")
 
 
-func _explode() -> Node:
+func _explode() -> ShipExplodeView:
 	return _builder.call("get_view").call("get_explode_view")
 
 

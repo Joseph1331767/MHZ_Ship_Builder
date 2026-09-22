@@ -3,17 +3,17 @@ extends PanelContainer
 ## EXPLODE OPTIONS (ADR 0031): the player's controls for the exploded view, docked over the 3D
 ## view while it is exploded. An in-scene Control, never a Window (AGENTS section 7).
 ##
-## Edits a [ShipExplodeSettings] it holds by reference and says what kind of change it made:
-## [signal layout_changed] for the separations, which move what is on screen at once, and
-## [signal slicing_changed] for the slicer, which the engine has to cut - so APPLY SLICES lights,
-## and [signal apply_pressed] asks for it.
+## Edits a [ShipExplodeSettings] it holds by reference. Every change is a move, never a bake (ADR
+## 0032): the pieces are already cut into their fundamental cells, so a gap, a slicer axis or the
+## cluster toggle only relocates them - [signal layout_changed]. The POSITION slider scrubs the
+## explode itself ([signal position_changed]) and follows the animation ([method show_amount]).
 
-## A separation moved or was switched: relay out what is on screen.
+## A separation, a slicer axis or the cluster toggle changed: move what is on screen.
 signal layout_changed
-## A slice count or the cluster toggle changed: the slices on screen are no longer these.
-signal slicing_changed
-## APPLY SLICES: cut the pieces the way the settings now say.
-signal apply_pressed
+## The animation speed changed: remember it.
+signal speed_changed
+## The POSITION slider was dragged: put the pieces this far exploded, 0 to 1.
+signal position_changed(amount: float)
 
 const AXIS_LABELS: PackedStringArray = ["X", "Y RADIAL", "Z"]
 const COUNT_LABELS: PackedStringArray = ["OFF", "BISECT", "TRISECT"]
@@ -36,10 +36,13 @@ var _cluster: CheckButton = null
 var _cluster_options: Array[OptionButton] = []
 var _cluster_gap: HSlider = null
 var _cluster_gap_value: Label = null
-var _apply: Button = null
+var _speed: HSlider = null
+var _speed_value: Label = null
+var _position: HSlider = null
+var _position_value: Label = null
 
 
-## Builds the controls once, for [param settings]; [param theme] colours the APPLY button.
+## Builds the controls once, for [param settings].
 func setup(settings: ShipExplodeSettings, theme: ShipTheme) -> void:
 	_settings = settings
 	_theme = theme
@@ -69,20 +72,16 @@ func refresh() -> void:
 		_cluster_options[axis].select(_settings.cluster_slices[axis])
 		_cluster_options[axis].disabled = not _settings.cluster_slicing
 	_cluster_gap.editable = _settings.cluster_slicing
+	_speed.set_value_no_signal(_settings.speed)
 	_show_values()
 
 
-## APPLY SLICES lights, in the theme's warning role, while the slices on screen are not the ones
-## the settings ask for.
-func set_stale(stale: bool) -> void:
-	if _apply == null:
+## The POSITION slider shows how far exploded the view is, without emitting a change.
+func show_amount(amount: float) -> void:
+	if _position == null:
 		return
-	if stale and _theme != null:
-		_apply.add_theme_color_override("font_color", _theme.color_for_role("warning"))
-		_apply.text = "APPLY SLICES *"
-	else:
-		_apply.remove_theme_color_override("font_color")
-		_apply.text = "APPLY SLICES"
+	_position.set_value_no_signal(amount)
+	_position_value.text = "%d %%" % int(round(amount * 100.0))
 
 
 # --- building ------------------------------------------------------------------------------
@@ -147,9 +146,22 @@ func _build() -> void:
 	_cluster_gap_value = cluster_row[1]
 	_cluster_gap.value_changed.connect(_on_cluster_gap_changed)
 
-	_apply = _button("APPLY SLICES", _on_apply_pressed)
-	_apply.tooltip_text = "CUT THE PIECES THE WAY THE SLICER NOW SAYS - THE ENGINE TAKES SECONDS"
-	_body.add_child(_apply)
+	_body.add_child(HSeparator.new())
+	_body.add_child(_label("ANIMATION"))
+	var speed_row: Array = _slider_row(
+		"SPEED", ShipExplodeSettings.SPEED_MAX, "HOW FAST THE PIECES COME APART AND BACK TOGETHER"
+	)
+	_speed = speed_row[0]
+	_speed_value = speed_row[1]
+	_speed.min_value = ShipExplodeSettings.SPEED_MIN
+	_speed.value_changed.connect(_on_speed_changed)
+	var position_row: Array = _slider_row(
+		"POSITION", 1.0, "HOW FAR APART - DRAG TO SCRUB THE EXPLODE, 0 ASSEMBLED, 100 FULLY APART"
+	)
+	_position = position_row[0]
+	_position_value = position_row[1]
+	_position.step = 0.01
+	_position.value_changed.connect(_on_position_changed)
 
 
 ## Three rows - X, Y RADIAL, Z - each an OFF / BISECT / TRISECT choice; their selectors, in axis
@@ -227,6 +239,7 @@ func _show_values() -> void:
 	_separation_value.text = "%.2f M" % _settings.separation_m
 	_slice_gap_value.text = "%.2f M" % _settings.slice_separation_m
 	_cluster_gap_value.text = "%.2f M" % _settings.cluster_slice_separation_m
+	_speed_value.text = "%.2f X" % _settings.speed
 
 
 # --- edits ---------------------------------------------------------------------------------
@@ -265,14 +278,14 @@ func _on_slice_selected(count: int, axis: int) -> void:
 	var slices: Vector3i = _settings.slices
 	slices[axis] = count
 	_settings.slices = slices
-	slicing_changed.emit()
+	layout_changed.emit()
 
 
 func _on_cluster_selected(count: int, axis: int) -> void:
 	var slices: Vector3i = _settings.cluster_slices
 	slices[axis] = count
 	_settings.cluster_slices = slices
-	slicing_changed.emit()
+	layout_changed.emit()
 
 
 func _on_cluster_toggled(on: bool) -> void:
@@ -280,8 +293,15 @@ func _on_cluster_toggled(on: bool) -> void:
 	for option: OptionButton in _cluster_options:
 		option.disabled = not on
 	_cluster_gap.editable = on
-	slicing_changed.emit()
+	layout_changed.emit()
 
 
-func _on_apply_pressed() -> void:
-	apply_pressed.emit()
+func _on_speed_changed(value: float) -> void:
+	_settings.speed = value
+	_show_values()
+	speed_changed.emit()
+
+
+func _on_position_changed(value: float) -> void:
+	_position_value.text = "%d %%" % int(round(value * 100.0))
+	position_changed.emit(value)

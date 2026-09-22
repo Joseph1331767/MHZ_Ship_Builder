@@ -11,9 +11,9 @@ extends RefCounted
 ## VIEW STATE, NEVER DOCUMENT STATE. Nothing here is written into a ship file or enters its hash;
 ## it lives in the player's own user:// file, so every ship explodes the way this player likes.
 ##
-## TWO KINDS OF SETTING, TWO COSTS. The separations only move what is already on screen and take
-## effect at once. The slice counts decide what the engine cuts, so they are made by the next
-## extras bake, behind APPLY (the no-automatic-heavy-work rule, ADR 0028).
+## EVERY SETTING IS A MOVE, NEVER A BAKE (ADR 0032). The engine cuts every piece into its 64
+## fundamental cells once; the slicer only decides how those cells group - "changing a setting is
+## simply relocating the positions of those fundamental pieces" (2026-09-21).
 
 const SAVE_PATH: String = "user://explode_settings.json"
 const FILE_VERSION: int = 1
@@ -31,6 +31,10 @@ const SLICE_SEPARATION_MAX_M: float = 5.0
 ## otherwise - the half gap the exploded view always used.
 const SLICE_GAP_FRACTION: float = 0.35
 
+## Animation speed bounds, as a multiple of the view's own pace.
+const SPEED_MIN: float = 0.25
+const SPEED_MAX: float = 4.0
+
 ## Modules, and the chunks of a room of several, are pulled apart at their seams.
 var separate: bool = true
 ## How much clear space each seam opens, beyond the module's own extent.
@@ -44,6 +48,8 @@ var slice_separation_m: float = 0.525
 var cluster_slicing: bool = true
 var cluster_slices: Vector3i = Vector3i(OFF, OFF, BISECT)
 var cluster_slice_separation_m: float = 0.525
+## How fast the pieces come apart and back together, as a multiple of the view's own pace.
+var speed: float = 1.0
 
 
 ## The shipped defaults, the separations scaled off the tuning pack's explode gap.
@@ -86,6 +92,7 @@ static func from_dict(d: Dictionary, base: ShipExplodeSettings) -> ShipExplodeSe
 		0.0,
 		SLICE_SEPARATION_MAX_M
 	)
+	s.speed = clampf(float(d.get("speed", s.speed)), SPEED_MIN, SPEED_MAX)
 	return s
 
 
@@ -99,6 +106,7 @@ func to_dict() -> Dictionary:
 		"cluster_slicing": cluster_slicing,
 		"cluster_slices": [cluster_slices.x, cluster_slices.y, cluster_slices.z],
 		"cluster_slice_separation_m": cluster_slice_separation_m,
+		"speed": speed,
 	}
 
 
@@ -111,6 +119,7 @@ func copy() -> ShipExplodeSettings:
 	s.cluster_slicing = cluster_slicing
 	s.cluster_slices = cluster_slices
 	s.cluster_slice_separation_m = cluster_slice_separation_m
+	s.speed = speed
 	return s
 
 
@@ -125,10 +134,12 @@ func save(path: String = SAVE_PATH) -> bool:
 	return true
 
 
-## The slicing the engine is asked for (ShipCsgBake.bake_extras): a cluster whose chunks are not
-## included is not sliced at all.
-func slicing() -> Dictionary:
-	return {"parts": slices, "clusters": cluster_slices if cluster_slicing else Vector3i.ZERO}
+## How [param axis] of a piece is grouped: its cluster settings for a chunk of a room of several
+## (all OFF when the player does not slice cluster chunks), the parts' otherwise.
+func mode_for(axis: int, cluster: bool) -> int:
+	if cluster:
+		return cluster_slices[axis] if cluster_slicing else OFF
+	return slices[axis]
 
 
 ## A three-entry array of counts, each clamped to OFF..TRISECT, or [param fallback].

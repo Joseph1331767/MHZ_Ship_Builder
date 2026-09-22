@@ -1468,6 +1468,8 @@ ADR 0031.
 
 1. **Cost grows with the grid**: a combiner and a read-back per cell. Three axes trisected is 27
    cells a piece, minutes on a carbon. The room cache is the answer.
+   RETIRED(ADR 0032): per-setting grids -> one fixed 64-cell cut per piece, 9.6 s on a carbon,
+   and every setting a move (F44).
 2. **A cell wholly inside a cavity is dropped**, so a piece can show fewer slices than its grid.
    The cell index still says where each one sits.
 3. **The slices of a piece are placed by its frame, not by its seam**: a cluster chunk's slices pull
@@ -1477,3 +1479,46 @@ ADR 0031.
    the checks refresh where they read it.
 5. **The door leaves ride their module's offset, not a slice's**: a sliced piece's door stays where
    the whole piece would have carried it.
+
+
+## F44 — Additive extensions of 2026-09-21c: the fundamental cells and the animated explode — OPEN, DELIBERATE
+
+ADR 0032.
+
+- **`ShipSeams.explode_offsets(seams, cfg, boxes, still = {})`**: `still` modules ride their host
+  and sit out the relaxation pass. Core, additive; `_relaxed` gains the same optional argument.
+- **`ShipCsgBake.bake_extras(host, bake, progress)`**: no slicing argument. Returns `cells` and
+  `room_cells` (id -> `[{"cell", "solid", "mesh", "wire"}]`), `frames`, `room_shells`,
+  `room_meshes`. New: `FINE_CUTS`, `WIRE_FEATURE_DEG`, `_read_cell`, `_feature_wire`; `_slice` and
+  `_slab` cut every job on every axis. **Retired**: `DEFAULT_SLICING`, `EXTRAS_SLICING`,
+  `MAX_CUTS`, `slicing_key`, `_counts`, the `chunk*` keys.
+- **`ShipBakeSession.has_extras()` / `request_extras()`**: no slicing argument again.
+- **`ShipExplodeSettings`**: `speed`, `SPEED_MIN/MAX`, `mode_for()`; `slicing()` retired.
+- **`ShipExplodePanel`**: SPEED and POSITION; `speed_changed`, `position_changed`,
+  `show_amount()`; APPLY SLICES, `slicing_changed`, `apply_pressed`, `set_stale()` retired.
+- **`ShipExplodeControl`**: `_init(frame, view, cfg, theme)` (no session, no reslice).
+- **`ShipExplodeView`**: `collapse()`, `has_cells_showing()`, `set_amount()`, `amount()`,
+  `amount_changed`; `EXPLODE_S`, `GROUP_SIGN`, `NO_CELL`, `META_CELL`, `META_FRAME` (`META_SHIFT`
+  retired); `_build`, `_place_all`, `_measure_target`, `_placed_meta`, `_stages`, `_modes`,
+  `_compute_offsets`, `_riders`, `_cell_shift` (`_shift_unit` retired); an exact bake builds at
+  once, not a module a frame.
+- **`ShipView3D.set_exploded(false)`** calls `collapse()` rather than `clear()`.
+- **Tools**: `tools/ship_explode_check.gd` rewritten (`reports/visual_explode_{default,sliced,half,
+  spread}.png`).
+- Tests: `test_explode_slicing.gd` rewritten (eight); the CSG halving test groups cells. Suite
+  **309/309**.
+
+**No hash moves.** Measured: `5536787c6c35d236` either side.
+
+**Known limits, recorded rather than hidden.**
+
+1. **About 1,100 mesh nodes a carbon**, plus a wire node and a pick box per cell. A ship several
+   times a carbon will want the cells batched per piece (a MultiMesh or one mesh per group).
+2. **The internal cut faces show in the translucent modes** (X-RAY, FRESNEL, the INTERIOR ghost),
+   and every seam shows in the wireframe. The author wanted the seams; the translucent faces are the
+   price of drawing every cell.
+3. **A cell picks by its box.**
+4. **The first EXPLODE after an update pays the cut** (9.6 s on a carbon of spheres); the room cache
+   and its disk copy are the next piece of work.
+5. **A module that is not a cluster chunk can move a little in the second stage**: the relaxation
+   pass settles modules differently with and without the chunks riding.

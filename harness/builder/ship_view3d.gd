@@ -637,7 +637,9 @@ func set_exploded(
 		_explode.show_modules(sdf, _cfg, selected, solids)
 		_explode.set_doors_open(_door_open)
 	else:
-		_explode.clear()
+		# ASSEMBLE plays the explode backwards (ADR 0032); the baked view the builder shows next
+		# lands when it is done, and with none to show the explode view empties itself.
+		_explode.collapse()
 		_scene.set_exploded(false)
 		frame_all()
 	_refresh_hints()

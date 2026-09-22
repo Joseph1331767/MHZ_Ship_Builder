@@ -207,7 +207,7 @@ func _ready() -> void:
 	_build_post_process()
 	_view.setup(_ship_theme, self)
 	_explode_opts = ShipExplodeControl.new(
-		_view.get_parent() as Control, _view, _bake_session, _config, _ship_theme, _show_bake
+		_view.get_parent() as Control, _view, _config, _ship_theme
 	)
 	_build_placement()
 
@@ -865,11 +865,7 @@ func _on_rooms_pressed() -> void:
 	if _view == null:
 		return
 	# A whole room is an extra (ADR 0030): shown once made, by _show_bake when it lands.
-	if (
-		_rooms_whole
-		and (_baked or _exploded)
-		and not _bake_session.has_extras(_explode_opts.slicing())
-	):
+	if _rooms_whole and (_baked or _exploded) and not _bake_session.has_extras():
 		_show_bake()
 		return
 	_view.set_rooms_whole(_rooms_whole)
@@ -896,9 +892,9 @@ func _update_meshes() -> void:
 func _show_bake() -> void:
 	if _view == null or _doc == null or _bake_session.last.is_empty():
 		return
-	if (_exploded or _rooms_whole) and not _bake_session.has_extras(_explode_opts.slicing()):
-		set_status("SLICING THE PIECES...")
-		_bake_session.request_extras(_explode_opts.slicing())
+	if (_exploded or _rooms_whole) and not _bake_session.has_extras():
+		set_status("CUTTING THE PIECES INTO CELLS...")
+		_bake_session.request_extras()
 		return
 	_connect_explode()
 	var sdf: ShipSdf = ShipSdf.build(_doc, _data, _config)

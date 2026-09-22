@@ -1,13 +1,14 @@
 class_name ShipExplodeControl
 extends RefCounted
-## The explode options (ADR 0031) as one unit the builder composes: the player's settings, the
+## The explode options (ADR 0031/0032) as one unit the builder composes: the player's settings, the
 ## panel that edits them over the 3D view, the file that keeps them, and what each change does.
 ## Lifted out of ShipBuilder, which is at its size budget, the way ShipBakeHud and ShipBakeSession
 ## were.
 ##
-## A separation moves what is on screen at once ([method ShipExplodeView.relayout]). A slicer
-## change only lights APPLY SLICES; APPLY hands back to the builder, whose next show of the bake
-## asks the session for extras made with the new slicing.
+## EVERY CHANGE IS A MOVE (ADR 0032). The pieces are cut into their fundamental cells once, so a
+## gap, a slicer axis or the cluster toggle relays out what is on screen
+## ([method ShipExplodeView.relayout]) and the POSITION slider scrubs the explode
+## ([method ShipExplodeView.set_amount]); the slider follows the animation back.
 
 ## The settings the panel edits and the exploded view reads - one object, shared.
 var settings: ShipExplodeSettings = null
@@ -15,23 +16,12 @@ var settings: ShipExplodeSettings = null
 var _panel: ShipExplodePanel = null
 var _overlay: Control = null
 var _explode: ShipExplodeView = null
-var _session: ShipBakeSession = null
-var _reslice: Callable = Callable()
 var _save_path: String = ShipExplodeSettings.SAVE_PATH
 
 
 ## Docks the panel over [param frame] (the 3D view's frame), top right, hidden until the view
-## explodes. [param reslice] is called when the player presses APPLY SLICES.
-func _init(
-	frame: Control,
-	view: ShipView3D,
-	session: ShipBakeSession,
-	cfg: ShipConfig,
-	theme: ShipTheme,
-	reslice: Callable
-) -> void:
-	_session = session
-	_reslice = reslice
+## explodes.
+func _init(frame: Control, view: ShipView3D, cfg: ShipConfig, theme: ShipTheme) -> void:
 	settings = ShipExplodeSettings.load_or_defaults(cfg, _save_path)
 	# A full-rect layer that lets every click through to the 3D view except those on the panel.
 	_overlay = Control.new()
@@ -50,11 +40,12 @@ func _init(
 	_panel.offset_right = -margin
 	_panel.offset_top = margin
 	_panel.layout_changed.connect(_on_layout_changed)
-	_panel.slicing_changed.connect(_on_slicing_changed)
-	_panel.apply_pressed.connect(_on_apply_pressed)
+	_panel.speed_changed.connect(_on_speed_changed)
+	_panel.position_changed.connect(_on_position_changed)
 	_explode = view.get_explode_view() if view != null else null
 	if _explode != null:
 		_explode.set_settings(settings)
+		_explode.amount_changed.connect(_panel.show_amount)
 
 
 ## The panel is on screen while the view is exploded.
@@ -64,19 +55,11 @@ func set_shown(on: bool) -> void:
 		refresh()
 
 
-## The slicing the extras should be made with, from the settings.
-func slicing() -> Dictionary:
-	return settings.slicing()
-
-
-## The panel shows the settings as they are, and APPLY SLICES lights while the bake on hand
-## carries extras made with some other slicing.
+## The panel shows the settings and the explode amount as they are.
 func refresh() -> void:
-	if _session == null:
-		return
-	var has_bake: bool = not _session.last.is_empty()
 	_panel.refresh()
-	_panel.set_stale(has_bake and not _session.has_extras(settings.slicing()))
+	if _explode != null:
+		_panel.show_amount(_explode.amount())
 
 
 ## Use [param next] from now on, unsaved - what a check calls to start from known settings rather
@@ -96,12 +79,10 @@ func _on_layout_changed() -> void:
 		_explode.relayout()
 
 
-func _on_slicing_changed() -> void:
+func _on_speed_changed() -> void:
 	settings.save(_save_path)
-	refresh()
 
 
-func _on_apply_pressed() -> void:
-	if _reslice.is_valid():
-		_reslice.call()
-	refresh()
+func _on_position_changed(amount: float) -> void:
+	if _explode != null:
+		_explode.set_amount(amount)

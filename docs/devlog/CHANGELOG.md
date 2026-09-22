@@ -2772,3 +2772,41 @@ Pick a carbon and press EXPLODE: the panel in the top right. Drag GAP and SLICE 
 follow live. Set Y RADIAL to TRISECT: APPLY SLICES lights; press it and wait for the bar: every pod
 in three bands along the way it points. Turn SLICE CLUSTER CHUNKS off and APPLY: the nucleus chunks
 whole, the pods still sliced. Close the builder and reopen: the settings are as you left them.
+
+
+## [2026-09-21d] The ship lives in its fundamental cells; the explode is animated
+
+> "no the animation doesnt work, it is like a slow pop in ... it bakes when i change a setting.
+> this is incorrect. all nodes should be both bisected, and trisected leaving 4 total chunks ...
+> changing a setting is simply relocating the positions of those fundamental pieces" / "i dont care
+> if the seams are shown in wireframe mode"
+
+ADR 0032, amending ADR 0031 the same day. Every piece, cluster chunks and whole rooms included, is
+cut once at 1/3, 1/2 and 2/3 along each axis of its own frame: 64 fundamental cells, independent of
+every setting. BISECT and TRISECT are groupings of those cells, APPLY SLICES is gone, and every
+setting only moves them. The explode is animated in the author's three stages: modules part, then a
+room's chunks, then the slices. It has SPEED and POSITION sliders, and ASSEMBLE plays it backwards
+before handing back to the whole pieces. The one-module-a-frame queue that read as a pop-in now only
+serves the field fallback.
+
+Measured first, so the cost was known before it was built. On the carbon the engine cut 713 cells in
+about 4 s, but reading them back with the n-gon merge took 30.7 s. Cells are read back welded
+instead, with a feature-edge wireframe: 9.6 s in all, the same as the two-halves extras.
+
+One slip, caught and fixed: a PowerShell `Set-Content -Encoding utf8` wrote a BOM into
+`ship_csg_bake.gd`; stripped with python, and the memory note now says so.
+
+### Verified
+
+**gdUnit4 309/309** (`test_explode_slicing.gd` rewritten, eight tests); selfcheck PASSED, hash
+unchanged at `5536787c6c35d236`; data validator PASSED; gdformat and gdlint clean; windowed visual
+check and resolve check PASSED; the windowed explode check PASSED: 14 pieces in 656 cells built in
+474 ms and carried out; a slicer change, a POSITION scrub and wider gaps each moved the pieces with
+no bake; separation off; ASSEMBLE played back and landed on the 14 whole pieces. Frames:
+`reports/visual_explode_{default,sliced,half,spread}.png`.
+
+### Still the human's to check
+
+Pick a carbon and press EXPLODE: after the cut, the pieces fly apart in three beats. Drag POSITION
+back and forth. Change the slicer axes: the pieces regroup at once, no bar. Drag SPEED down and press
+ASSEMBLE: it comes back together slowly, then shows the whole pieces.

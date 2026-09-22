@@ -1,7 +1,7 @@
-# The exploded view's slicer (ADR 0031): every part cut in its own axes - Y its placement normal -
-# off, bisected or trisected per axis; a cluster's chunks by their own settings or not at all; and
-# the settings the player keeps. A lone sphere where the rooms do not matter, a carbon where they
-# do.
+# The exploded view's fundamental cells (ADR 0031/0032): every piece cut once, in its own axes (Y
+# its placement normal), at 1/3, 1/2 and 2/3 along each - 64 cells - so every slicer setting is a
+# grouping of cells that exist and every setting, like the animation, only moves them. A lone
+# sphere where the rooms do not matter, a carbon where they do.
 class_name TestExplodeSlicing
 extends GdUnitTestSuite
 
@@ -30,16 +30,18 @@ func _carbon() -> ShipDoc:
 	return ShipTemplates.build(_data, _cfg, "carbon", {ShipTemplates.OPT_ROOM_FAMILY: "sphere_pod"})
 
 
-func _sliced(doc: ShipDoc, parts: Vector3i, clusters: Vector3i) -> Dictionary:
+func _cut(doc: ShipDoc) -> Dictionary:
 	var report: Dictionary = await ShipCsgBake.bake(self, doc, _data, _cfg)
-	return await ShipCsgBake.bake_extras(self, report, {"parts": parts, "clusters": clusters})
+	return await ShipCsgBake.bake_extras(self, report)
 
 
-func _volume(polys: Array) -> float:
-	var total: float = 0.0
-	for poly: PolyMesh in polys:
-		total += poly.volume()
-	return total
+## The volume of each group [param modes] makes of [param cells]: group key -> m3.
+func _groups(cells: Array, modes: Vector3i) -> Dictionary:
+	var out: Dictionary = {}
+	for entry: Dictionary in cells:
+		var key: Vector3 = ShipExplodeView._cell_shift(Basis.IDENTITY, entry["cell"], modes)
+		out[key] = float(out.get(key, 0.0)) + (entry["solid"] as PolyMesh).volume()
+	return out
 
 
 ## "choose orthogonal axes where one points radially with the parts placement, so alignment is
@@ -67,111 +69,154 @@ func test_the_slicing_frame_is_the_parts_own_with_y_its_placement_normal() -> vo
 		)
 
 
-## A trisection: three closed slices along the axis, cells 0, 1 and 2, that together are the piece.
-func test_a_trisection_cuts_three_closed_slices_that_make_the_piece() -> void:
+## "all nodes should be both bisected, and trisected leaving 4 total chunks after both bi and tri
+## are dissected, in all orthogonal directions" (2026-09-21): at most 64 closed cells, each at four
+## slabs an axis, that together are the piece - a cell wholly inside the cavity is simply not there.
+func test_every_piece_is_cut_into_its_fundamental_cells() -> void:
 	var doc: ShipDoc = _lone_sphere()
-	var out: Dictionary = await _sliced(doc, Vector3i(0, 2, 0), Vector3i.ZERO)
-	var id: String = doc.root
-	var chunks: Array = out["chunks"][id]
-	var cells: Array = out["chunk_cells"][id]
-	assert_int(chunks.size()).is_equal(3)
-	assert_that(out["chunk_counts"][id]).is_equal(Vector3i(0, 2, 0))
-	var ys: Array = []
-	for i: int in chunks.size():
-		var cell: Vector3i = cells[i]
-		assert_int(cell.x + cell.z).is_equal(0)
-		ys.append(cell.y)
-		assert_int((chunks[i] as PolyMesh).open_edges()).is_equal(0)
-	ys.sort()
-	assert_array(ys).is_equal([0, 1, 2])
-	var piece: float = (out["solids"][id] as PolyMesh).volume()
-	assert_float(_volume(chunks)).is_equal_approx(piece, piece * 0.02)
-	assert_str(str(out[ShipCsgBake.EXTRAS_SLICING])).is_equal(
-		ShipCsgBake.slicing_key({"parts": Vector3i(0, 2, 0), "clusters": Vector3i.ZERO})
-	)
-
-
-## All three axes bisected: eight closed octants of about an eighth each.
-func test_three_bisections_make_eight_octants() -> void:
-	var doc: ShipDoc = _lone_sphere()
-	var out: Dictionary = await _sliced(doc, Vector3i(1, 1, 1), Vector3i.ZERO)
-	var chunks: Array = out["chunks"][doc.root]
-	assert_int(chunks.size()).is_equal(8)
+	var out: Dictionary = await _cut(doc)
+	var cells: Array = out["cells"][doc.root]
+	assert_int(cells.size()).is_between(40, 64)
+	var total: float = 0.0
+	for entry: Dictionary in cells:
+		var cell: Vector3i = entry["cell"]
+		for axis: int in 3:
+			assert_int(cell[axis]).is_between(0, 3)
+		var solid: PolyMesh = entry["solid"]
+		assert_int(solid.open_edges()).is_equal(0)
+		assert_object(entry["mesh"]).is_not_null()
+		assert_object(entry["wire"]).is_not_null()
+		total += solid.volume()
 	var piece: float = (out["solids"][doc.root] as PolyMesh).volume()
-	for chunk: PolyMesh in chunks:
-		assert_int(chunk.open_edges()).is_equal(0)
-		assert_float(chunk.volume()).is_equal_approx(piece / 8.0, piece / 8.0 * 0.15)
+	assert_float(total).is_equal_approx(piece, piece * 0.001)
 
 
-## "a nodecluster bisector includer toggle that lets chunks from nodes get sliced with its own
-## isolated slicing settings" (2026-09-21): not included, a cluster's chunks are drawn whole while
-## the modules around them are sliced; included, they take their own counts. A room shown whole
-## keeps the parts' slicing either way.
-func test_a_clusters_chunks_take_their_own_slicing_or_none() -> void:
+## Every slicer setting is a grouping of the same cells: OFF one group, BISECT two halves, TRISECT
+## three thirds; three axes bisected, eight octants of about an eighth each. Nothing is re-cut.
+func test_every_slicing_is_a_grouping_of_the_cells() -> void:
+	var doc: ShipDoc = _lone_sphere()
+	var out: Dictionary = await _cut(doc)
+	var cells: Array = out["cells"][doc.root]
+	var piece: float = (out["solids"][doc.root] as PolyMesh).volume()
+	assert_int(_groups(cells, Vector3i.ZERO).size()).is_equal(1)
+	var halves: Dictionary = _groups(cells, Vector3i(0, 1, 0))
+	assert_int(halves.size()).is_equal(2)
+	for key: Vector3 in halves:
+		assert_float(float(halves[key])).is_equal_approx(piece * 0.5, piece * 0.05)
+	assert_int(_groups(cells, Vector3i(0, 2, 0)).size()).is_equal(3)
+	var octants: Dictionary = _groups(cells, Vector3i(1, 1, 1))
+	assert_int(octants.size()).is_equal(8)
+	for key: Vector3 in octants:
+		assert_float(float(octants[key])).is_equal_approx(piece / 8.0, piece / 8.0 * 0.15)
+
+
+## A cluster's chunks are cut like any piece ("including each node cluster chunks splicing",
+## 2026-09-21), and a room shown whole has cells of its own in its keeper's frame.
+func test_cluster_chunks_and_whole_rooms_are_cut_too() -> void:
 	var doc: ShipDoc = _carbon()
-	var report: Dictionary = await ShipCsgBake.bake(self, doc, _data, _cfg)
-	var parts: Vector3i = Vector3i(0, 0, 1)
-	var none: Dictionary = await ShipCsgBake.bake_extras(
-		self, report, {"parts": parts, "clusters": Vector3i.ZERO}
-	)
-	# The clusters cut on a DIFFERENT axis from the parts: each job keeps its own cells.
-	var own: Dictionary = await ShipCsgBake.bake_extras(
-		self, report, {"parts": parts, "clusters": Vector3i(1, 0, 0)}
-	)
-	var clusters: int = 0
-	for members: PackedStringArray in report["rooms"]:
+	var out: Dictionary = await _cut(doc)
+	var cells: Dictionary = out["cells"]
+	for members: PackedStringArray in out["rooms"]:
 		for id: String in members:
-			var piece: float = (report["solids"][id] as PolyMesh).volume()
-			if members.size() == 1:
-				assert_int((none["chunks"][id] as Array).size()).is_equal(2)
-				(
-					assert_int((own["chunks"][id] as Array).size())
-					. append_failure_message("%s lost its slices beside an X-cut cluster" % id)
-					. is_equal(2)
-				)
-				continue
-			clusters += 1
-			assert_bool((none["chunks"] as Dictionary).has(id)).is_false()
-			var cut: Array = own["chunks"][id]
-			assert_int(cut.size()).is_between(1, 2)
-			assert_that(own["chunk_counts"][id]).is_equal(Vector3i(1, 0, 0))
-			assert_float(_volume(cut)).is_equal_approx(piece, maxf(piece * 0.02, 0.01))
+			assert_bool(cells.has(id)).append_failure_message(id).is_true()
+			var piece: float = (out["solids"][id] as PolyMesh).volume()
+			var total: float = 0.0
+			for entry: Dictionary in cells[id]:
+				total += (entry["solid"] as PolyMesh).volume()
+			assert_float(total).append_failure_message(id).is_equal_approx(piece, piece * 0.001)
 		if members.size() > 1:
-			assert_that(own["room_chunk_counts"][members[0]]).is_equal(parts)
-	assert_int(clusters).is_equal(6)
+			assert_int((out["room_cells"][members[0]] as Array).size()).is_greater(8)
 
 
-## A slice is pulled away from the middle along each sliced axis of its frame: a trisection's
-## outer slices outward and its middle one not at all, a bisection's halves each their own way.
-func test_a_slice_is_pulled_away_from_the_middle() -> void:
-	var frame: Transform3D = Transform3D.IDENTITY
+## A cell is pulled the way its group goes along each axis of its frame: a trisection's outer
+## slabs outward and its two middle slabs not at all, a bisection's two halves each their own way,
+## an axis left whole not at all. A visual that is not a cell never moves.
+func test_a_cell_is_pulled_the_way_its_group_goes() -> void:
+	var frame: Basis = Basis.IDENTITY
 	var tri: Vector3i = Vector3i(0, 2, 0)
-	assert_vector(ShipExplodeView._shift_unit(frame, Vector3i(0, 0, 0), tri)).is_equal(Vector3.DOWN)
-	assert_vector(ShipExplodeView._shift_unit(frame, Vector3i(0, 1, 0), tri)).is_equal(Vector3.ZERO)
-	assert_vector(ShipExplodeView._shift_unit(frame, Vector3i(0, 2, 0), tri)).is_equal(Vector3.UP)
-	var bi: Vector3i = Vector3i(1, 0, 1)
-	assert_vector(ShipExplodeView._shift_unit(frame, Vector3i(1, 0, 0), bi)).is_equal(
-		Vector3(1.0, 0.0, -1.0)
+	assert_vector(ShipExplodeView._cell_shift(frame, Vector3i(0, 0, 0), tri)).is_equal(Vector3.DOWN)
+	assert_vector(ShipExplodeView._cell_shift(frame, Vector3i(0, 1, 0), tri)).is_equal(Vector3.ZERO)
+	assert_vector(ShipExplodeView._cell_shift(frame, Vector3i(0, 2, 0), tri)).is_equal(Vector3.ZERO)
+	assert_vector(ShipExplodeView._cell_shift(frame, Vector3i(0, 3, 0), tri)).is_equal(Vector3.UP)
+	var bi: Vector3i = Vector3i(0, 1, 0)
+	assert_vector(ShipExplodeView._cell_shift(frame, Vector3i(0, 1, 0), bi)).is_equal(Vector3.DOWN)
+	assert_vector(ShipExplodeView._cell_shift(frame, Vector3i(0, 2, 0), bi)).is_equal(Vector3.UP)
+	assert_vector(ShipExplodeView._cell_shift(frame, Vector3i(3, 3, 3), Vector3i.ZERO)).is_equal(
+		Vector3.ZERO
+	)
+	assert_vector(ShipExplodeView._cell_shift(frame, ShipExplodeView.NO_CELL, tri)).is_equal(
+		Vector3.ZERO
 	)
 	# In the part's own frame, not the ship's.
-	var turned: Transform3D = Transform3D(Basis(Vector3.FORWARD, PI * 0.5), Vector3.ZERO)
-	assert_vector(ShipExplodeView._shift_unit(turned, Vector3i(0, 2, 0), tri)).is_equal_approx(
-		turned.basis.y, Vector3.ONE * 1.0e-6
+	var turned: Basis = Basis(Vector3.FORWARD, PI * 0.5)
+	assert_vector(ShipExplodeView._cell_shift(turned, Vector3i(0, 3, 0), tri)).is_equal_approx(
+		turned.y, Vector3.ONE * 1.0e-6
 	)
 
 
-## The player's settings survive the file, clamp what they cannot hold, and a separation is not a
-## slicing: moving a gap never asks the engine for anything.
+## "modules split from modules, then module chunk clusters separate, then parts 'slice' separate"
+## (2026-09-21): three stages, a third of the explode each, in that order.
+func test_the_explode_runs_in_three_stages() -> void:
+	assert_vector(ShipExplodeView._stages(0.0)).is_equal(Vector3.ZERO)
+	assert_vector(ShipExplodeView._stages(1.0 / 3.0)).is_equal_approx(
+		Vector3(1.0, 0.0, 0.0), Vector3.ONE * 1.0e-5
+	)
+	assert_vector(ShipExplodeView._stages(0.5)).is_equal_approx(
+		Vector3(1.0, 0.5, 0.0), Vector3.ONE * 1.0e-5
+	)
+	assert_vector(ShipExplodeView._stages(1.0)).is_equal(Vector3.ONE)
+
+
+## The first stage moves a room as one body: every chunk held to another member of its room RIDES
+## its host there, while the modules around the room still travel.
+func test_in_the_first_stage_a_rooms_chunks_ride_it() -> void:
+	var doc: ShipDoc = _carbon()
+	var sdf: ShipSdf = ShipSdf.build(doc, _data, _cfg)
+	var rooms: Array = ShipMeshBake.plan(doc, _data, _cfg)["rooms"]
+	var room_of: Dictionary = {}
+	for members: PackedStringArray in rooms:
+		for id: String in members:
+			room_of[id] = members[0]
+	var riders: Dictionary = {}
+	for seam: Dictionary in sdf.seams():
+		var child: String = seam[ShipSeams.SEAM_CHILD]
+		var host: String = seam[ShipSeams.SEAM_HOST]
+		if str(room_of.get(child, child)) == str(room_of.get(host, host)):
+			riders[child] = host
+	assert_int(riders.size()).is_equal(5)
+	var boxes: Dictionary = {}
+	for i: int in sdf.part_count():
+		boxes[sdf.part_id_at(i)] = sdf.part_aabb(i)
+	var full: Dictionary = ShipSeams.explode_offsets(sdf.seams(), _cfg, boxes)
+	var first: Dictionary = ShipSeams.explode_offsets(sdf.seams(), _cfg, boxes, riders)
+	for child: String in riders:
+		var rides: Vector3 = first.get(child, Vector3.ZERO)
+		var host_at: Vector3 = first.get(riders[child], Vector3.ZERO)
+		assert_vector(rides).append_failure_message(child).is_equal_approx(
+			host_at, Vector3.ONE * 1.0e-5
+		)
+		assert_float((full.get(child, Vector3.ZERO) as Vector3).length()).is_greater(0.1)
+	var travelling: int = 0
+	for id: String in first:
+		if not riders.has(id) and (first[id] as Vector3).length() > 0.1:
+			travelling += 1
+	assert_int(travelling).is_greater_equal(8)
+
+
+## The player's settings survive the file, clamp what they cannot hold, and group a cluster's
+## chunks by its own settings - or not at all when they are not included.
 func test_the_settings_keep_what_the_player_chose() -> void:
 	var base: ShipExplodeSettings = ShipExplodeSettings.defaults(_cfg)
 	assert_float(base.separation_m).is_equal_approx(_cfg.explode_gap_m, 1.0e-6)
-	assert_that(base.slicing()["parts"]).is_equal(Vector3i(0, 0, 1))
+	assert_int(base.mode_for(2, false)).is_equal(ShipExplodeSettings.BISECT)
 	var chosen: ShipExplodeSettings = base.copy()
 	chosen.separate = false
 	chosen.separation_m = 3.5
 	chosen.slices = Vector3i(2, 0, 1)
 	chosen.cluster_slicing = false
-	assert_that(chosen.slicing()["clusters"]).is_equal(Vector3i.ZERO)
+	chosen.speed = 2.5
+	assert_int(chosen.mode_for(0, true)).is_equal(ShipExplodeSettings.OFF)
+	assert_int(chosen.mode_for(0, false)).is_equal(ShipExplodeSettings.TRISECT)
 	assert_bool(chosen.save(SETTINGS_TEST_PATH)).is_true()
 	var back: ShipExplodeSettings = ShipExplodeSettings.load_or_defaults(_cfg, SETTINGS_TEST_PATH)
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(SETTINGS_TEST_PATH))
@@ -179,18 +224,12 @@ func test_the_settings_keep_what_the_player_chose() -> void:
 	assert_float(back.separation_m).is_equal_approx(3.5, 1.0e-6)
 	assert_that(back.slices).is_equal(Vector3i(2, 0, 1))
 	assert_bool(back.cluster_slicing).is_false()
-	var gap: ShipExplodeSettings = base.copy()
-	gap.separation_m = 9.0
-	gap.slice_separation_m = 4.0
-	assert_str(ShipCsgBake.slicing_key(gap.slicing())).is_equal(
-		ShipCsgBake.slicing_key(base.slicing())
-	)
-	assert_str(ShipCsgBake.slicing_key(chosen.slicing())).is_not_equal(
-		ShipCsgBake.slicing_key(base.slicing())
-	)
+	assert_float(back.speed).is_equal_approx(2.5, 1.0e-6)
 	var junk: ShipExplodeSettings = ShipExplodeSettings.from_dict(
-		{"separation_m": 99.0, "slices": [7, -3, 1], "cluster_slices": "nonsense"}, base
+		{"separation_m": 99.0, "slices": [7, -3, 1], "cluster_slices": "nonsense", "speed": 40.0},
+		base
 	)
 	assert_float(junk.separation_m).is_equal(ShipExplodeSettings.SEPARATION_MAX_M)
 	assert_that(junk.slices).is_equal(Vector3i(2, 0, 1))
 	assert_that(junk.cluster_slices).is_equal(base.cluster_slices)
+	assert_float(junk.speed).is_equal(ShipExplodeSettings.SPEED_MAX)

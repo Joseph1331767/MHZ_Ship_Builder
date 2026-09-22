@@ -29,6 +29,9 @@ extends Node3D
 signal progress(done: int, total: int)
 ## Every module has baked. `modules` is how many are on screen, `seams` how many the field had.
 signal finished(modules: int, seams: int, ms: int)
+## How far exploded the view is now, 0 (assembled) to 1 - on every animation frame and every
+## position override, so a panel can follow.
+signal amount_changed(amount: float)
 
 const NODE_PREFIX: String = "module_"
 ## Floor on the per-module grid resolution, whatever the lever says.
@@ -52,12 +55,24 @@ const HALF_GAP_FRACTION: float = 0.35
 const SEP_NONE: int = 0
 const SEP_PARTS: int = 1
 const SEP_CLUSTER: int = 2
-## Every visual remembers where it hangs, so [method relayout] can move it without a rebuild: the
-## module whose offset it rides, the unit direction its slice is pulled along, and which
-## separation scales that.
+## Every visual remembers where it hangs, so the view can move it without a rebuild: the module
+## whose offset it rides, its fundamental cell (ADR 0032) and the frame that cell was cut in, and
+## which separation pulls it off its cut.
 const META_MODULE: String = "explode_module"
-const META_SHIFT: String = "explode_shift"
+const META_CELL: String = "explode_cell"
+const META_FRAME: String = "explode_frame"
 const META_KIND: String = "explode_kind"
+## The cell of a visual that is not a cell - a whole piece, a door: it never slices.
+const NO_CELL: Vector3i = Vector3i(-1, -1, -1)
+## How the four slabs along an axis group, per slicer setting (ShipExplodeSettings OFF, BISECT,
+## TRISECT): the way each slab is pulled. A bisection is slabs {0, 1 | 2, 3}, a trisection
+## {0 | 1, 2 | 3} - the cuts at 1/3, 1/2 and 2/3 that every piece already carries (ShipCsgBake).
+const GROUP_SIGN: Array = [[0, 0, 0, 0], [-1, -1, 1, 1], [-1, 0, 0, 1]]
+
+## THE EXPLODE, ANIMATED (ADR 0032): the pieces travel from where they stand to where the settings
+## put them over this long at speed 1 - "modules split from modules, then module chunk clusters
+## separate, then parts 'slice' separate" (2026-09-21), a third of the way each.
+const EXPLODE_S: float = 2.4
 
 ## THE DOORS (ADR 0029). Every piece at a hatched or doorway seam carries its own door over the
 ## opening - one per module, "so one can be closed or both" - built from the bake's door records
@@ -122,6 +137,20 @@ var _settings: ShipExplodeSettings = null
 ## Module id -> ship-space box, kept from [method show_modules] so [method relayout] can work the
 ## offsets out again.
 var _boxes: Dictionary = {}
+## The first stage's offsets (ADR 0032): every room parting from its neighbours as one body, its
+## chunks riding it. [member _offsets] is the whole explode; the second stage is the difference.
+var _stage_one: Dictionary = {}
+## How far exploded, 0..1, and the tween moving it.
+var _amount: float = 0.0
+var _tween: Tween = null
+## Cells are on screen (an exploded exact bake), so there is something to animate.
+var _cells_built: bool = false
+## ASSEMBLE is playing backwards; what to show when it lands (show_modules' arguments), if anything.
+var _collapsing: bool = false
+var _pending_whole: Array = []
+## Where everything will be once fully exploded - what the camera frames while the pieces travel.
+var _target_bounds: AABB = AABB()
+var _has_target: bool = false
 ## The bake's door records (ADR 0029), and how far open each door is: key -> {side -> 0..1}.
 ## The amounts outlive [method clear] - a rebake does not shut every door.
 var _doors: Array = []
@@ -152,15 +181,115 @@ func setup(scene: ShipSceneBuilder) -> void:
 		_mode = scene.get_display_mode()
 
 
-## Start showing `sdf` exploded. `selected` are the builder's selected doc ids; their modules
-## wear the selection ramp so the player keeps their bearings among the pieces. Bakes one
-## module per frame from here on; `finished` fires when the last one is placed.
+## Start showing `sdf` exploded - or, with [param assembled], every piece where it stands (the
+## baked view, ADR 0023). `selected` are the builder's selected doc ids; their modules wear the
+## selection ramp so the player keeps their bearings among the pieces. `finished` fires when the
+## last module is placed.
+##
+## AN EXPLODE OF CELLS IS ANIMATED (ADR 0032): built at once where the pieces stand, then carried
+## out over EXPLODE_S / speed. Asked for the assembled view while an ASSEMBLE is playing backwards,
+## the view waits for it to land; asked to explode the same bake again mid-way, it turns round.
 func show_modules(
 	sdf: ShipSdf,
 	cfg: ShipConfig,
 	selected: PackedStringArray,
 	solids: Dictionary = {},
 	assembled: bool = false
+) -> void:
+	if assembled and _collapsing:
+		_pending_whole = [sdf, cfg, selected, solids]
+		return
+	if not assembled and _collapsing and is_same(solids, _bake):
+		_collapsing = false
+		_pending_whole = []
+		_animate_to(1.0, Callable())
+		return
+	_kill_tween()
+	_collapsing = false
+	_pending_whole = []
+	var cells: bool = not assembled and not (solids.get("cells", {}) as Dictionary).is_empty()
+	_amount = 0.0 if assembled or cells else 1.0
+	_build(sdf, cfg, selected, solids, assembled)
+	amount_changed.emit(_amount)
+	if cells and _cells_built:
+		_animate_to(1.0, Callable())
+
+
+## ASSEMBLE, animated (ADR 0032): the cells travel back to where the pieces stand, then the view
+## shows the whole pieces a following [method show_modules] asked for, or empties.
+func collapse() -> void:
+	if not has_cells_showing() or _amount <= 0.0 or not is_inside_tree():
+		clear()
+		return
+	_collapsing = true
+	_animate_to(0.0, _land_collapse)
+
+
+## Cells of an exploded exact bake are on screen.
+func has_cells_showing() -> bool:
+	return _showing and _cells_built and not _assembled and not _collapsing
+
+
+## The POSITION override: put everything [param amount] of the way exploded (0 assembled, 1 as the
+## settings say), stopping any animation. Only an exploded view of cells moves.
+func set_amount(amount: float) -> void:
+	if not has_cells_showing():
+		return
+	_kill_tween()
+	_set_amount(amount)
+
+
+## How far exploded the view is, 0..1.
+func amount() -> float:
+	return _amount
+
+
+func _set_amount(amount: float) -> void:
+	_amount = clampf(amount, 0.0, 1.0)
+	_place_all()
+	amount_changed.emit(_amount)
+
+
+## Tween [member _amount] to [param target] at the settings' speed, then call [param done].
+func _animate_to(target: float, done: Callable) -> void:
+	_kill_tween()
+	var span: float = absf(target - _amount)
+	if span <= 1.0e-4 or not is_inside_tree():
+		_set_amount(target)
+		if done.is_valid():
+			done.call()
+		return
+	var speed: float = _settings.speed if _settings != null else 1.0
+	_tween = create_tween()
+	_tween.tween_method(_set_amount, _amount, target, EXPLODE_S * span / maxf(speed, 0.01))
+	if done.is_valid():
+		_tween.tween_callback(done)
+
+
+func _kill_tween() -> void:
+	if _tween != null and _tween.is_valid():
+		_tween.kill()
+	_tween = null
+
+
+func _land_collapse() -> void:
+	_collapsing = false
+	var args: Array = _pending_whole
+	_pending_whole = []
+	if args.is_empty():
+		clear()
+		return
+	_amount = 0.0
+	_build(args[0], args[1], args[2], args[3], true)
+	amount_changed.emit(_amount)
+
+
+## Everything [method show_modules] puts on screen, built at once for an exact bake - every piece
+## and every cell is already made, so there is nothing to spread over frames (the one-module-a-frame
+## queue is the field fallback's, whose modules are baked here; for the exact path it read as "a
+## slow pop in", 2026-09-21). Placed at the current [member _amount].
+func _build(
+	sdf: ShipSdf, cfg: ShipConfig, selected: PackedStringArray, solids: Dictionary, assembled: bool
 ) -> void:
 	clear()
 	_assembled = assembled
@@ -194,7 +323,8 @@ func show_modules(
 			boxes[module] = sdf.part_aabb(i)
 	# Assembled, nothing moves: the pieces sit exactly where the document puts them.
 	_boxes = boxes
-	_offsets = {} if assembled else _offsets_for(boxes)
+	if not assembled:
+		_compute_offsets()
 	# A room shown WHOLE is one module under its first member; the other members wait unseen.
 	if _rooms_whole and _bake.has("rooms"):
 		for members: PackedStringArray in _bake["rooms"]:
@@ -211,7 +341,16 @@ func show_modules(
 	if _queue.is_empty():
 		finished.emit(0, sdf.seam_count(), 0)
 		return
-	set_process(true)
+	for id: String in _queue:
+		if not _solids.has(id):
+			set_process(true)
+			return
+	while not _queue.is_empty():
+		var id: String = _queue[0]
+		_queue.remove_at(0)
+		_bake_module(id)
+	_measure_target()
+	finished.emit(_modules.size(), sdf.seam_count(), Time.get_ticks_msec() - _started_ms)
 
 
 func _process(_delta: float) -> void:
@@ -227,9 +366,16 @@ func _process(_delta: float) -> void:
 		finished.emit(_modules.size(), _sdf.seam_count(), Time.get_ticks_msec() - _started_ms)
 
 
-## Take every module down. Safe to call when nothing is showing.
+## Take every module down. Safe to call when nothing is showing. The explode amount is left as it
+## is: [method show_modules] sets it for what it builds next.
 func clear() -> void:
 	set_process(false)
+	_kill_tween()
+	_cells_built = false
+	_collapsing = false
+	_pending_whole = []
+	_stage_one = {}
+	_has_target = false
 	for module: Module in _modules:
 		for node: MeshInstance3D in module.solids:
 			if is_instance_valid(node):
@@ -262,23 +408,27 @@ func is_showing() -> bool:
 	return _showing
 
 
-## Showing the pieces assembled (no offsets, no halves) rather than exploded.
+## Showing the pieces assembled (no offsets, no slices) rather than exploded - or on the way there.
 func is_assembled() -> bool:
-	return _assembled
+	return _assembled or _collapsing
 
 
-## Still baking modules.
+## Still baking modules, or the pieces are still travelling.
 func is_busy() -> bool:
-	return _showing and not _queue.is_empty()
+	if _showing and not _queue.is_empty():
+		return true
+	return _tween != null and _tween.is_valid() and _tween.is_running()
 
 
 func module_count() -> int:
 	return _modules.size()
 
 
-## The ship-space box round every module placed so far; empty before the first.
+## The ship-space box round every module placed so far - or, exploding, round where they will be
+## once fully apart, so the camera frames the spread while the pieces travel. Empty before the
+## first.
 func bounds() -> AABB:
-	return _bounds
+	return _target_bounds if _has_target else _bounds
 
 
 ## Which display mode the modules wear. Forwarded from ShipView3D so the dropdown means the same
@@ -328,26 +478,55 @@ func set_settings(settings: ShipExplodeSettings) -> void:
 
 
 ## Move everything on screen to where the settings now put it - module offsets, cluster chunks and
-## slices - without rebuilding a node. What a separation slider calls on every change.
+## slices - without rebuilding a node. What every explode setting calls on every change (ADR 0032).
 func relayout() -> void:
 	if not _showing or _sdf == null or _cfg == null:
 		return
-	_offsets = {} if _assembled else _offsets_for(_boxes)
+	if not _assembled and not _collapsing:
+		_compute_offsets()
+		_measure_target()
+	_place_all()
+
+
+## Every visual to where it hangs at the current amount.
+func _place_all() -> void:
 	_bounds = AABB()
 	_has_bounds = false
 	for child: Node in get_children():
 		if not (child is Node3D) or not child.has_meta(META_MODULE):
 			continue
 		var node: Node3D = child
-		node.position = _placed_at(
-			str(node.get_meta(META_MODULE)),
-			node.get_meta(META_SHIFT, Vector3.ZERO) as Vector3,
-			int(node.get_meta(META_KIND, SEP_NONE))
-		)
+		node.position = _placed_meta(node, _amount)
 		if node is MeshInstance3D and (node as MeshInstance3D).mesh != null:
 			var box: AABB = node.transform * (node as MeshInstance3D).mesh.get_aabb()
 			_bounds = _bounds.merge(box) if _has_bounds else box
 			_has_bounds = true
+
+
+## The box round every visual as it will stand fully exploded.
+func _measure_target() -> void:
+	_has_target = false
+	if _assembled:
+		return
+	for child: Node in get_children():
+		if not (child is MeshInstance3D) or not child.has_meta(META_MODULE):
+			continue
+		var node: MeshInstance3D = child
+		if node.mesh == null:
+			continue
+		var box: AABB = Transform3D(Basis.IDENTITY, _placed_meta(node, 1.0)) * node.mesh.get_aabb()
+		_target_bounds = _target_bounds.merge(box) if _has_target else box
+		_has_target = true
+
+
+func _placed_meta(node: Node3D, amount: float) -> Vector3:
+	return _placed_at(
+		str(node.get_meta(META_MODULE)),
+		node.get_meta(META_CELL, NO_CELL) as Vector3i,
+		node.get_meta(META_FRAME, Basis.IDENTITY) as Basis,
+		int(node.get_meta(META_KIND, SEP_NONE)),
+		amount
+	)
 
 
 ## Whether an exploded room shows as its pieces or as one whole shell. When one is showing it
@@ -356,12 +535,16 @@ func set_rooms_whole(on: bool) -> void:
 	if on == _rooms_whole:
 		return
 	_rooms_whole = on
-	if _showing and _sdf != null and _cfg != null:
+	# Rebuilt where the pieces are now - no animation from the start again.
+	if _showing and _sdf != null and _cfg != null and not _collapsing:
 		var selected: PackedStringArray = PackedStringArray()
 		for id: String in _selected:
 			selected.append(id)
 		var bake: Dictionary = _bake if not _bake.is_empty() else _solids
-		show_modules(_sdf, _cfg, selected, bake, _assembled)
+		var travelling: bool = is_busy()
+		_build(_sdf, _cfg, selected, bake, _assembled)
+		if travelling and _cells_built:
+			_animate_to(1.0, Callable())
 
 
 # --- internals -----------------------------------------------------------------------------
@@ -397,9 +580,9 @@ func _bake_module(id: String) -> void:
 
 
 ## The exact path: the piece - or, with rooms shown whole, the room's shell under its first
-## member - drawn whole when ASSEMBLED (the baked view, ADR 0023) or when the bake brought no
-## halves, and otherwise as its two halves each pulled a little off the split plane, so the
-## inside of every exploded module is open to the camera.
+## member - drawn whole when ASSEMBLED (the baked view, ADR 0023) or when the bake brought no cells,
+## and otherwise as its 64 fundamental cells (ADR 0032), each its own visual, grouped and pulled
+## apart by the settings at every relayout.
 func _bake_exact(id: String, exact: PolyMesh) -> void:
 	_bake_exact_as(id, id, exact)
 
@@ -408,50 +591,40 @@ func _bake_exact(id: String, exact: PolyMesh) -> void:
 ## where it sits, [param id] which piece of the bake it is (its own pick id).
 func _bake_exact_as(module_id: String, id: String, exact: PolyMesh) -> void:
 	# Which solid this module shows: with rooms whole and this id keeping a room's shell, the
-	# shell; otherwise the piece. Each comes with its drawn (named-surface) mesh and its slices.
+	# shell; otherwise the piece. Each comes with its drawn (named-surface) mesh and its cells.
 	var whole: PolyMesh = exact
 	var whole_mesh: ArrayMesh = _bake.get("meshes", {}).get(id, null)
-	var chunks: Array = _bake.get("chunks", {}).get(id, [])
-	var meshes: Array = _bake.get("chunk_meshes", {}).get(id, [])
-	var cells: Array = _bake.get("chunk_cells", {}).get(id, [])
-	var counts: Vector3i = _bake.get("chunk_counts", {}).get(id, Vector3i.ZERO)
+	var cells: Array = _bake.get("cells", {}).get(id, [])
 	var kind: int = SEP_CLUSTER if _in_cluster(id) else SEP_PARTS
 	if _rooms_whole and _bake.get("room_shells", {}).has(id):
 		whole = _bake["room_shells"][id]
 		whole_mesh = _bake.get("room_meshes", {}).get(id, null)
-		chunks = _bake.get("room_chunks", {}).get(id, [])
-		meshes = _bake.get("room_chunk_meshes", {}).get(id, [])
-		cells = _bake.get("room_chunk_cells", {}).get(id, [])
-		counts = _bake.get("room_chunk_counts", {}).get(id, Vector3i.ZERO)
+		cells = _bake.get("room_cells", {}).get(id, [])
 		kind = SEP_PARTS
 	if whole_mesh == null:
 		whole_mesh = whole.to_array_mesh()
-	var frame: Transform3D = _bake.get("frames", {}).get(id, Transform3D.IDENTITY)
-	if _assembled or chunks.size() < 2 or cells.size() != chunks.size():
+	if _assembled or cells.is_empty():
 		_place_module_at(module_id, id, whole_mesh, whole.to_wire_mesh())
 		return
+	var frame: Basis = (_bake.get("frames", {}).get(id, Transform3D.IDENTITY) as Transform3D).basis
 	var module: Module = Module.new()
 	module.id = id
 	module.selected = _is_selected(id)
-	for i: int in chunks.size():
-		var chunk: PolyMesh = chunks[i]
-		if chunk.is_empty():
-			continue
-		var mesh: ArrayMesh = meshes[i] if meshes.size() == chunks.size() else chunk.to_array_mesh()
-		var cell: Vector3i = cells[i]
+	for entry: Dictionary in cells:
+		var cell: Vector3i = entry["cell"]
 		_add_visual_at(
 			module,
 			module_id,
 			id,
-			mesh,
-			chunk.to_wire_mesh(),
-			_shift_unit(frame, cell, counts),
+			entry["mesh"],
+			entry["wire"],
+			cell,
+			frame,
 			"_c%d%d%d" % [cell.x, cell.y, cell.z],
-			kind
+			kind,
+			true
 		)
-	if module.solids.is_empty():
-		_place_module_at(module_id, id, whole_mesh, whole.to_wire_mesh())
-		return
+	_cells_built = true
 	_add_doors(module, module_id)
 	_apply_materials(module)
 	_modules.append(module)
@@ -467,7 +640,7 @@ func _place_module_at(module_id: String, id: String, mesh: ArrayMesh, wire: Mesh
 	var module: Module = Module.new()
 	module.id = id
 	module.selected = _is_selected(id)
-	_add_visual_at(module, module_id, id, mesh, wire, Vector3.ZERO, "", SEP_NONE)
+	_add_visual_at(module, module_id, id, mesh, wire, NO_CELL, Basis.IDENTITY, "", SEP_NONE, false)
 	_add_doors(module, module_id)
 	_apply_materials(module)
 	_modules.append(module)
@@ -484,22 +657,27 @@ func _is_selected(id: String) -> bool:
 	return _selected.has(ShipSymmetry.source_of_twin(ShipComponents.instance_of(id)))
 
 
-## One visual of [param module] - a whole piece, or one slice - at module [param module_id]'s
-## explode offset, pulled along [param unit] by the separation [param kind] names, with its
-## wireframe and its pick body, picked as [param id].
+## One visual of [param module] - a whole piece, or one fundamental cell - at module
+## [param module_id]'s explode offset, the cell [param cell] of [param frame] pulled off its cut by
+## the separation [param kind] names, with its wireframe and its pick body, picked as [param id].
+## A cell picks by its box ([param box_pick]): a convex hull per cell is hundreds of hulls a ship.
 func _add_visual_at(
 	module: Module,
 	module_id: String,
 	id: String,
 	mesh: ArrayMesh,
 	wire: Mesh,
-	unit: Vector3,
+	cell: Vector3i,
+	frame: Basis,
 	suffix: String,
-	kind: int
+	kind: int,
+	box_pick: bool
 ) -> void:
 	# A node name cannot hold the slash of an expanded id or the tilde of a twin.
 	var node_name: String = id.replace("/", "__").replace("~", "_") + suffix
-	var placed: Transform3D = Transform3D(Basis.IDENTITY, _placed_at(module_id, unit, kind))
+	var placed: Transform3D = Transform3D(
+		Basis.IDENTITY, _placed_at(module_id, cell, frame, kind, _amount)
+	)
 
 	# The exterior (with the cuts) and the interior are SEPARATE meshes (ADR 0028): the bake
 	# names them as surfaces of one ArrayMesh, and the split here gives each its own node, so
@@ -509,7 +687,7 @@ func _add_visual_at(
 	solid.name = NODE_PREFIX + node_name
 	solid.mesh = split[0]
 	solid.transform = placed
-	_hang(solid, module_id, unit, kind)
+	_hang(solid, module_id, cell, frame, kind)
 	add_child(solid)
 	module.solids.append(solid)
 	if split[1] != null:
@@ -517,7 +695,7 @@ func _add_visual_at(
 		inner.name = NODE_PREFIX + node_name + "_inner"
 		inner.mesh = split[1]
 		inner.transform = placed
-		_hang(inner, module_id, unit, kind)
+		_hang(inner, module_id, cell, frame, kind)
 		add_child(inner)
 		module.solids.append(inner)
 
@@ -525,7 +703,7 @@ func _add_visual_at(
 	wire_node.name = NODE_PREFIX + node_name + "_wire"
 	wire_node.mesh = wire
 	wire_node.transform = placed
-	_hang(wire_node, module_id, unit, kind)
+	_hang(wire_node, module_id, cell, frame, kind)
 	add_child(wire_node)
 	module.wires.append(wire_node)
 
@@ -545,9 +723,16 @@ func _add_visual_at(
 	body.collision_mask = 0
 	body.set_meta(ShipSceneBuilder.PART_META, id)
 	body.transform = placed
-	_hang(body, module_id, unit, kind)
+	_hang(body, module_id, cell, frame, kind)
 	var collider: CollisionShape3D = CollisionShape3D.new()
-	collider.shape = mesh.create_convex_shape(true, true)
+	if box_pick:
+		var local: AABB = mesh.get_aabb()
+		var box: BoxShape3D = BoxShape3D.new()
+		box.size = local.size.max(Vector3.ONE * 0.01)
+		collider.shape = box
+		collider.position = local.get_center()
+	else:
+		collider.shape = mesh.create_convex_shape(true, true)
 	body.add_child(collider)
 	add_child(body)
 	module.bodies.append(body)
@@ -730,14 +915,14 @@ func _add_doors(module: Module, module_id: String) -> void:
 				solid.name = node_name
 				solid.mesh = leaf.to_array_mesh()
 				solid.transform = placed
-				_hang(solid, module_id, Vector3.ZERO, SEP_NONE)
+				_hang(solid, module_id, NO_CELL, Basis.IDENTITY, SEP_NONE)
 				add_child(solid)
 				module.doors.append(solid)
 				var wire: MeshInstance3D = MeshInstance3D.new()
 				wire.name = node_name + "_wire"
 				wire.mesh = leaf.to_wire_mesh()
 				wire.transform = placed
-				_hang(wire, module_id, Vector3.ZERO, SEP_NONE)
+				_hang(wire, module_id, NO_CELL, Basis.IDENTITY, SEP_NONE)
 				add_child(wire)
 				module.door_wires.append(wire)
 
@@ -788,10 +973,24 @@ func _door_material(base: Material) -> Material:
 	return out
 
 
-## Where a visual of module [param module_id] sits: the module's offset, plus [param unit] times the
-## separation [param kind] names.
-func _placed_at(module_id: String, unit: Vector3, kind: int) -> Vector3:
-	return (_offsets.get(module_id, Vector3.ZERO) as Vector3) + unit * _separation(kind)
+## Where a visual sits [param amount] of the way exploded, in the three stages of ADR 0032:
+## modules part from modules (the first third), then a room's chunks separate (the second), then
+## the slices (the last) - "modules split from modules, then module chunk clusters separate, then
+## parts 'slice' separate" (2026-09-21).
+func _placed_at(
+	module_id: String, cell: Vector3i, frame: Basis, kind: int, amount: float
+) -> Vector3:
+	var stage: Vector3 = _stages(amount)
+	var full: Vector3 = _offsets.get(module_id, Vector3.ZERO)
+	var first: Vector3 = _stage_one.get(module_id, Vector3.ZERO)
+	var slice: Vector3 = _cell_shift(frame, cell, _modes(kind)) * _separation(kind)
+	return first * stage.x + (full - first) * stage.y + slice * stage.z
+
+
+## How far each of the three stages has run at [param amount]: a third of the way each.
+static func _stages(amount: float) -> Vector3:
+	var t: float = clampf(amount, 0.0, 1.0) * 3.0
+	return Vector3(clampf(t, 0.0, 1.0), clampf(t - 1.0, 0.0, 1.0), clampf(t - 2.0, 0.0, 1.0))
 
 
 ## The distance a separation of [param kind] pulls a slice off its cut, from the settings.
@@ -805,37 +1004,81 @@ func _separation(kind: int) -> float:
 	return _settings.slice_separation_m
 
 
-## The module offsets for [param boxes], at the settings' separation: none when the player turned
-## separation off, the tuning pack's explode gap when no settings were handed over.
-func _offsets_for(boxes: Dictionary) -> Dictionary:
+## The slicer settings a visual of [param kind] groups by, per axis (ShipExplodeSettings OFF,
+## BISECT, TRISECT); the old single cut across Z when no settings were handed over.
+func _modes(kind: int) -> Vector3i:
+	if kind == SEP_NONE:
+		return Vector3i.ZERO
+	if _settings == null:
+		return Vector3i(0, 0, ShipExplodeSettings.BISECT)
+	var cluster: bool = kind == SEP_CLUSTER
+	return Vector3i(
+		_settings.mode_for(0, cluster),
+		_settings.mode_for(1, cluster),
+		_settings.mode_for(2, cluster)
+	)
+
+
+## Both stages' offsets from the current settings: the whole explode, and the first stage with
+## every cluster chunk riding its room.
+func _compute_offsets() -> void:
+	_offsets = _offsets_for(_boxes, {})
+	_stage_one = _offsets_for(_boxes, _riders())
+
+
+## The module offsets for [param boxes], at the settings' separation, [param still] riding their
+## hosts: none when the player turned separation off, the tuning pack's gap with no settings.
+func _offsets_for(boxes: Dictionary, still: Dictionary) -> Dictionary:
 	if _sdf == null or _cfg == null:
 		return {}
 	if _settings == null:
-		return ShipSeams.explode_offsets(_sdf.seams(), _cfg, boxes)
+		return ShipSeams.explode_offsets(_sdf.seams(), _cfg, boxes, still)
 	if not _settings.separate:
 		return {}
 	var cfg: ShipConfig = ShipConfig.from_dict(_cfg.snapshot())
 	cfg.explode_gap_m = _settings.separation_m
-	return ShipSeams.explode_offsets(_sdf.seams(), cfg, boxes)
+	return ShipSeams.explode_offsets(_sdf.seams(), cfg, boxes, still)
 
 
-## Remember on [param node] where it hangs, for [method relayout].
-static func _hang(node: Node3D, module_id: String, unit: Vector3, kind: int) -> void:
+## The chunks of every room of several whose seam holds them to another member of it: in the first
+## stage they ride their room (ShipSeams.explode_offsets, `still`).
+func _riders() -> Dictionary:
+	var room_of: Dictionary = {}
+	for members: PackedStringArray in _bake.get("rooms", []):
+		if members.size() > 1:
+			for id: String in members:
+				room_of[id] = members[0]
+	var out: Dictionary = {}
+	if room_of.is_empty() or _sdf == null:
+		return out
+	for seam: Dictionary in _sdf.seams():
+		var child: String = str(seam.get(ShipSeams.SEAM_CHILD, ""))
+		var host: String = str(seam.get(ShipSeams.SEAM_HOST, ""))
+		if room_of.has(child) and str(room_of.get(host, "")) == str(room_of[child]):
+			out[child] = true
+	return out
+
+
+## Remember on [param node] where it hangs.
+static func _hang(node: Node3D, module_id: String, cell: Vector3i, frame: Basis, kind: int) -> void:
 	node.set_meta(META_MODULE, module_id)
-	node.set_meta(META_SHIFT, unit)
+	node.set_meta(META_CELL, cell)
+	node.set_meta(META_FRAME, frame)
 	node.set_meta(META_KIND, kind)
 
 
-## The direction a slice in [param cell] of a grid of [param counts] is pulled: along each sliced
-## axis of [param frame], away from the middle - an outer slice of a trisection outward, the middle
-## one not at all, each half of a bisection its own way. Diagonal when several axes are sliced.
-static func _shift_unit(frame: Transform3D, cell: Vector3i, counts: Vector3i) -> Vector3:
-	var axes: Array[Vector3] = [frame.basis.x, frame.basis.y, frame.basis.z]
+## The direction the fundamental [param cell] of [param frame] is pulled under the slicer settings
+## [param modes]: along each axis, the way its slab's group goes (GROUP_SIGN) - away from the middle
+## for an outer group, not at all for the middle one or an axis left whole. Diagonal when several
+## axes slice. Zero for a visual that is not a cell.
+static func _cell_shift(frame: Basis, cell: Vector3i, modes: Vector3i) -> Vector3:
+	if cell.x < 0:
+		return Vector3.ZERO
+	var axes: Array[Vector3] = [frame.x, frame.y, frame.z]
 	var out: Vector3 = Vector3.ZERO
 	for axis: int in 3:
-		if counts[axis] <= 0:
-			continue
-		out += axes[axis] * signf(float(cell[axis]) - float(counts[axis]) * 0.5)
+		var signs: Array = GROUP_SIGN[clampi(modes[axis], 0, GROUP_SIGN.size() - 1)]
+		out += axes[axis] * float(signs[clampi(cell[axis], 0, signs.size() - 1)])
 	return out
 
 

@@ -528,8 +528,13 @@ static func module_of(id: String) -> String:
 ## `gap = cfg.explode_gap_m + half the child's extent along its seam normal`, the extent read
 ## off `boxes` (module id -> ship-space AABB): a long spar pulls further than a stud, so no
 ## module ends up still overlapping the one it left.
+##
+## [param still] (id -> true) names modules that RIDE their host instead of leaving it: no travel
+## of their own, and no part in the pass that pushes overlapping modules apart. The exploded
+## view's first stage (ADR 0032) passes the chunks of every room of several, so a room parts from
+## its neighbours as one body before its chunks separate.
 static func explode_offsets(
-	seams_list: Array[Dictionary], cfg: ShipConfig, boxes: Dictionary
+	seams_list: Array[Dictionary], cfg: ShipConfig, boxes: Dictionary, still: Dictionary = {}
 ) -> Dictionary:
 	var out: Dictionary = {}
 	if cfg == null:
@@ -562,13 +567,15 @@ static func explode_offsets(
 			order.append(child)
 			host_of[child] = host
 			dir_of[child] = n
-			travel[child] = gap + 0.5 * _extent_along(boxes.get(child, AABB()), n)
+			travel[child] = (
+				0.0 if still.has(child) else gap + 0.5 * _extent_along(boxes.get(child, AABB()), n)
+			)
 		if blocked.size() == pending.size():
 			break
 		pending = blocked
 
 	out = _positions(order, host_of, dir_of, travel)
-	return _relaxed(order, host_of, dir_of, travel, boxes, gap, out)
+	return _relaxed(order, host_of, dir_of, travel, boxes, gap, out, still)
 
 
 ## Where every module sits, walking each chain from its host outward.
@@ -603,7 +610,8 @@ static func _relaxed(
 	travel: Dictionary,
 	boxes: Dictionary,
 	gap: float,
-	placed: Dictionary
+	placed: Dictionary,
+	still: Dictionary = {}
 ) -> Dictionary:
 	var out: Dictionary = placed
 	var margin: float = maxf(gap, 0.05) * 0.25
@@ -613,6 +621,8 @@ static func _relaxed(
 			for j: int in range(i + 1, order.size()):
 				var a: String = order[i]
 				var b: String = order[j]
+				if still.has(a) or still.has(b):
+					continue
 				var deep: float = _overlap_depth(boxes, out, a, b)
 				if deep <= 0.0:
 					continue
@@ -643,6 +653,8 @@ static func _relaxed(
 				travel[push] = float(travel[push]) + deep + margin
 		# The root carries no seam and never moves, so a module can also overlap IT.
 		for id: String in order:
+			if still.has(id):
+				continue
 			var root_deep: float = _overlap_depth(boxes, out, id, _root_of(host_of, id))
 			if root_deep > 0.0:
 				moved = true
