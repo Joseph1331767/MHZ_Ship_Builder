@@ -742,3 +742,52 @@ func test_a_class_with_many_open_seams_still_bakes_quickly_and_closed() -> void:
 		. append_failure_message("a nucleus made one room took %d ms" % [int(report["ms"])])
 		. is_less(20000)
 	)
+
+
+## A CONCAVE FACE IS NOT A FAN (ADR 0037). Merging coplanar triangles back into n-gons makes
+## concave faces routinely - an L where two bodies part, a wall beside a doorway - and a fan from
+## vertex zero then lays triangles OUTSIDE the polygon. The measure is the face's own area.
+func test_a_concave_face_triangulates_to_its_own_area() -> void:
+	# An L, anticlockwise about +Y, whose fan from vertex zero would sweep over the notch.
+	var mesh := PolyMesh.new()
+	for corner: Vector2 in [
+		Vector2(0.0, 0.0),
+		Vector2(3.0, 0.0),
+		Vector2(3.0, 1.0),
+		Vector2(1.0, 1.0),
+		Vector2(1.0, 3.0),
+		Vector2(0.0, 3.0)
+	]:
+		mesh.vertices.append(Vector3(corner.x, 0.0, -corner.y))
+	mesh.faces.append(PackedInt32Array([0, 1, 2, 3, 4, 5]))
+	# 3x1 plus 1x2: five square metres, and not one more.
+	var tri: PackedInt32Array = mesh.triangulate_face(0)
+	var area: float = 0.0
+	var k: int = 0
+	while k + 2 < tri.size():
+		var a: Vector3 = mesh.vertices[tri[k]]
+		area += 0.5 * (mesh.vertices[tri[k + 1]] - a).cross(mesh.vertices[tri[k + 2]] - a).length()
+		k += 3
+	(
+		assert_float(area)
+		. append_failure_message("the L covers 5 m2; its triangles cover %.3f" % area)
+		. is_equal_approx(5.0, 1.0e-4)
+	)
+
+
+## WHICH WAY ROUND A SOLID IS, asserted on the signed volume rather than the absolute one, which
+## cannot tell a solid from its inside-out twin (ADR 0037).
+func test_a_hand_built_solid_is_wound_outward() -> void:
+	var box: PolyMesh = MeshCsg.box_mesh(Vector3(2.0, 2.0, 2.0))
+	assert_float(box.signed_volume()).is_greater(0.0)
+	assert_float(box.volume()).is_equal_approx(64.0, 1.0e-4)
+	# The same box turned inside out: the same volume, the opposite sign.
+	var flipped := PolyMesh.new()
+	flipped.vertices = box.vertices.duplicate()
+	for face: PackedInt32Array in box.faces:
+		var loop := PackedInt32Array()
+		for i: int in range(face.size() - 1, -1, -1):
+			loop.append(face[i])
+		flipped.faces.append(loop)
+	assert_float(flipped.signed_volume()).is_less(0.0)
+	assert_float(flipped.volume()).is_equal_approx(box.volume(), 1.0e-6)

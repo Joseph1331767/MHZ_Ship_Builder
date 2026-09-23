@@ -74,6 +74,7 @@ one of them dices into its cells. Its boron equivalent no longer notches.
 **A carbon of SPHERES does not split yet** and keeps the pieces it has always had. Its pieces come
 out closed and the right size but non-manifold, so the gate sends the room to the cut-back. That is
 the remaining work, and F48 has what was measured.
+RETIRED(ADR 0037): it splits. See the known limits below.
 
 **gdUnit4 322/322** with one new (`test_a_cube_nucleus_divides_at_its_seams`); selfcheck PASSED with
 the hash unchanged; validator clean; the windowed visual, resolve and explode checks all pass.
@@ -98,6 +99,9 @@ opening.
 **Known limits, recorded rather than hidden.**
 
 1. **Spheres fall back** (above). The gate makes that safe rather than wrong.
+   RETIRED(ADR 0037): spheres split. The pieces were non-manifold because the shell they were
+   split from was read INSIDE OUT; with the read turned round a sphere carbon comes out as six
+   closed pieces summing to 250.809 m3 against a room of 250.821.
 2. **A lone boundary loop is capped flat.** Where the two surfaces bound a different number of
    holes - a tiny triangle where three cavities meet - the loop is closed by one face of its own.
    Small, and measured as small; on a sphere carbon it costs 0.4% of the room.

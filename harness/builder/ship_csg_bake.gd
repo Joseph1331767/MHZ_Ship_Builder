@@ -652,13 +652,14 @@ static func _read_cell(mesh: Mesh) -> PolyMesh:
 		var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
 		var index_v: Variant = arrays[Mesh.ARRAY_INDEX]
 		var index: PackedInt32Array = index_v if index_v is PackedInt32Array else PackedInt32Array()
+		# Turned round on the way in, for the reason [method _read_raw] gives at length.
 		if index.is_empty():
 			for i: int in range(0, verts.size() - 2, 3):
-				polys.append(PackedVector3Array([verts[i], verts[i + 1], verts[i + 2]]))
+				polys.append(PackedVector3Array([verts[i + 2], verts[i + 1], verts[i]]))
 		else:
 			for i: int in range(0, index.size() - 2, 3):
 				polys.append(
-					PackedVector3Array([verts[index[i]], verts[index[i + 1]], verts[index[i + 2]]])
+					PackedVector3Array([verts[index[i + 2]], verts[index[i + 1]], verts[index[i]]])
 				)
 	return PolyMesh.from_polygons(polys, READ_WELD_M) if not polys.is_empty() else PolyMesh.new()
 
@@ -941,16 +942,28 @@ static func _read_raw(mesh: Mesh) -> PolyMesh:
 		var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
 		var index_v: Variant = arrays[Mesh.ARRAY_INDEX]
 		var index: PackedInt32Array = index_v if index_v is PackedInt32Array else PackedInt32Array()
-		# Read in the engine's own order. Measured: reading them reversed breaks the merge (two of
-		# fourteen halves no longer summed to their piece) and names no surface at all, so the
-		# engine's triangle order IS this class's outward winding.
+		# TURNED ROUND ON THE WAY IN. Godot's front face is clockwise seen from outside, which is
+		# what the engine hands back and what [method PolyMesh.to_array_mesh] reverses INTO; this
+		# class is anticlockwise-outward. Reading the engine's order as-is therefore hands back
+		# every baked solid INSIDE OUT.
+		#
+		# RETIRED(2026-09-23): "read in the engine's own order ... the engine's triangle order IS
+		# this class's outward winding". It is not, and the measurement that said so could not have
+		# seen it: [method PolyMesh.volume] returns an ABSOLUTE value, so a solid and its inside-out
+		# twin measure the same, and a whole pipeline of "the volume matches" checks was blind to
+		# the one thing that was wrong. Measured with a SIGNED volume: a hollow box built by hand
+		# reads +31.232 m3 and the same box through here read -31.232, as did every baked solid in
+		# the project. An inside-out solid handed back to the engine is intersected as its own
+		# COMPLEMENT - a cut through a hollow piece came back with a solid lid over the cavity
+		# instead of a ring, which is the author's "sensless infill slabs" - and drawn with
+		# CULL_BACK it loses its outside, which is their "the exterior surface is simply missing".
 		if index.is_empty():
 			for i: int in range(0, verts.size() - 2, 3):
-				polys.append(PackedVector3Array([verts[i], verts[i + 1], verts[i + 2]]))
+				polys.append(PackedVector3Array([verts[i + 2], verts[i + 1], verts[i]]))
 		else:
 			for i: int in range(0, index.size() - 2, 3):
 				polys.append(
-					PackedVector3Array([verts[index[i]], verts[index[i + 1]], verts[index[i + 2]]])
+					PackedVector3Array([verts[index[i + 2]], verts[index[i + 1]], verts[index[i]]])
 				)
 	if polys.is_empty():
 		return PolyMesh.new()

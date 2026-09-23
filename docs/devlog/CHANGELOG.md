@@ -3027,3 +3027,45 @@ always had. F48 carries what was measured.
 
 A carbon with CUBE rooms, exploded: six pieces of one shape, flat faces where they part, each with
 its own hatch opening in it. Then a sphere carbon, which should look exactly as it always has.
+
+
+## [2026-09-23] The engine hands its triangles back the other way round
+
+> "that internal shelfing is NOT supposed to be there ... it litewrally is sensless infill slabs that
+> ARENT supposed to be there... the exterior surface is simply missing, the only thing visible is
+> interioe, some exterior, with most exterior missing and welded to interior."
+
+ADR 0037. Both halves of that are one bug, and it had been there for the life of the project: Godot's
+front face is clockwise, `PolyMesh.to_array_mesh` reverses on the way out to meet it, and
+`ShipCsgBake._read_raw` read the engine's triangles back in the engine's own order. Every baked solid
+- every piece, every pod, every tunnel - was INSIDE OUT.
+
+Handed back to the engine, an inside-out solid is intersected as its own complement, so a cut through
+a hollow piece came back with a solid lid over the cavity instead of a ring: those are the slabs.
+Drawn, the double reversal turns the front faces inward and CULL_BACK throws the outside away: that
+is the missing exterior. One cause, both symptoms.
+
+**Nothing could see it** because `PolyMesh.volume()` returns an absolute value, and this pipeline
+checks itself by volume - pieces summing to their room, halves summing to their piece. A solid and
+its inside-out twin measure the same. `signed_volume()` now exists and is what to assert on.
+
+Found on the way and fixed with it: `triangulate_face` fanned any face with no holes from vertex
+zero, which is the polygon only when the polygon is convex. Merging coplanar triangles into n-gons
+makes concave ones routinely - 96 of a nucleus piece's 334 faces.
+
+### Verified
+
+A cube carbon: six pieces summing to **315.727 m3 against a room of 315.727**, every piece's cells
+summing to it exactly, and **no cut face over 0.5 m2 anywhere** (the cut area of a piece's cells fell
+from 170.07 m2 to 61.74). A sphere carbon now SPLITS - six closed pieces, 250.809 against a room of
+250.821 - which was ADR 0036's one open case, closed without touching `MeshSeamSplit`.
+
+**gdUnit4 323/323**, plus four new guards (42/42 on their two suites): every baked solid reads
+positive, a piece cut in half gives half of it back, a concave L covers its own 5 m2, and a solid
+knows itself from its inside-out twin. Selfcheck PASSED, hash unchanged at `5536787c6c35d236`;
+validator PASSED; gdformat and gdlint clean; resolve, explode and visual checks PASSED.
+
+### Still the human's to check
+
+A cube carbon, exploded: the wedges beside each hatch are gone and the pieces read as hollow chunks
+with their openings. Then a sphere carbon, which takes the split for the first time.

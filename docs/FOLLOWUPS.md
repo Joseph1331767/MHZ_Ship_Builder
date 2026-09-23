@@ -1628,7 +1628,7 @@ plane where the true equidistant surface curves; a clump mixing equal and unequa
 a sliver in a triple overlap; and a module centred on the beacon has no radial direction to take.
 
 
-## F48 - A room's pieces SPLIT AT THEIR SEAMS AND CAPPED - DONE for boxes, OPEN for spheres
+## F48 - A room's pieces SPLIT AT THEIR SEAMS AND CAPPED - DONE
 
 Raised by the author 2026-09-22, after ADR 0035 and its amendment; the author gave the go the same
 day. `core/mesh/mesh_seam_split.gd` is the construction, and it WORKS - see "What it does, measured"
@@ -1856,3 +1856,15 @@ split hands it back to whoever owns it.
 mouth where it meets the next one. If each piece should instead be closed in its own right, that is
 a WALLED seam between the nucleus bodies rather than an OPEN one (they are open by default, ADR
 0025, and every link is editable) - not a change to how a room is split.
+
+
+### DONE 2026-09-23, as ADR 0037 - the sphere case, and what it really was
+
+The sphere case closed without anyone touching the split. Its pieces were non-manifold because the
+SHELL they were split from was read inside out: `ShipCsgBake._read_raw` took the engine's triangles
+in the engine's order, and the engine winds them the other way round from `PolyMesh`. Every baked
+solid in the project was inside out, and `PolyMesh.volume()` is absolute, so no check in this
+pipeline could see it.
+
+A sphere carbon now splits into six closed pieces summing to **250.809 m3 against a room of
+250.821**, and a cube carbon to **315.727 against 315.727**. `MeshSeamSplit` was not changed.

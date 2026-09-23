@@ -167,22 +167,25 @@ func add_face(outer: PackedInt32Array, holes: Array = []) -> int:
 ## Face [param index] as triangles, given as GLOBAL vertex indices in triples.
 ##
 ## The single triangulation path: [method area], [method volume] and [method to_array_mesh] all
-## come through here, so a face with a hole cannot be measured one way and drawn another. A face
-## with no holes still takes the fan shortcut, which is most faces.
+## come through here, so a face with a hole cannot be measured one way and drawn another.
+##
+## A FAN IS ONLY THE FACE WHEN THE FACE IS CONVEX, which is why the shortcut is guarded. Merging
+## coplanar triangles back into n-gons ([MeshMerge]) routinely makes a concave one - a wall around
+## a doorway, an L where two bodies part - and a fan from vertex zero then lays triangles OUTSIDE
+## the polygon. Measured on a cube carbon: 96 of a nucleus piece's 334 faces are concave, the worst
+## of them beside the hatch, and the stray triangles read as slabs hanging in the cavity and made
+## the piece self-intersecting, so the cell slicer cut nonsense out of it - three of the four cells
+## around the hatch came back with a wedge reaching 3.5 m into the empty room ("sensless infill
+## slabs that ARENT supposed to be there", 2026-09-23).
 func triangulate_face(index: int) -> PackedInt32Array:
 	var outer: PackedInt32Array = faces[index]
 	var holes: Array = holes_of(index)
-	var out: PackedInt32Array = PackedInt32Array()
-	if holes.is_empty():
-		for k: int in range(1, outer.size() - 1):
-			out.append(outer[0])
-			out.append(outer[k])
-			out.append(outer[k + 1])
-		return out
-
 	var plane: Plane = face_plane(index)
-	if plane.normal == Vector3.ZERO:
-		return out
+	if holes.is_empty():
+		if outer.size() <= 3 or plane.normal == Vector3.ZERO or _is_convex(outer, plane.normal):
+			return _fan(outer)
+	elif plane.normal == Vector3.ZERO:
+		return PackedInt32Array()
 	var frame: Array = _plane_basis(plane.normal)
 	var u: Vector3 = frame[0]
 	var w: Vector3 = frame[1]
@@ -195,9 +198,41 @@ func triangulate_face(index: int) -> PackedInt32Array:
 		loops.append(_to_2d_loop(ring, u, w))
 		flat.append_array(ring)
 	var tri: PackedInt32Array = Poly2D.triangulate(loops)
+	if tri.is_empty() and holes.is_empty():
+		# The clipper refused it. A fan is wrong on a concave face, but dropping the face would
+		# put a hole in a solid, and the fan is what this returned before it was guarded at all.
+		return _fan(outer)
+	var out: PackedInt32Array = PackedInt32Array()
 	for i: int in tri.size():
 		out.append(flat[tri[i]])
 	return out
+
+
+## [param loop] as a fan of triangles from its first vertex. The polygon itself only when the
+## polygon is convex - see [method triangulate_face].
+func _fan(loop: PackedInt32Array) -> PackedInt32Array:
+	var out: PackedInt32Array = PackedInt32Array()
+	for k: int in range(1, loop.size() - 1):
+		out.append(loop[0])
+		out.append(loop[k])
+		out.append(loop[k + 1])
+	return out
+
+
+## Does every corner of [param loop] turn the same way about [param normal]?
+##
+## Exactly zero is the threshold on purpose: a convex face whose float noise reads as a hair
+## concave goes the long way round and comes out right, which costs a triangulation and nothing
+## else, while the reverse would keep the bug for the faces that are only just concave.
+func _is_convex(loop: PackedInt32Array, normal: Vector3) -> bool:
+	var count: int = loop.size()
+	for k: int in count:
+		var a: Vector3 = vertices[loop[k]]
+		var b: Vector3 = vertices[loop[(k + 1) % count]]
+		var c: Vector3 = vertices[loop[(k + 2) % count]]
+		if (b - a).cross(c - b).dot(normal) < 0.0:
+			return false
+	return true
 
 
 ## An orthonormal (u, w) pair for [param normal], with u cross w = normal, so a loop wound
@@ -244,11 +279,24 @@ static func plane_of(loop: PackedVector3Array) -> Plane:
 	return Plane(normal, normal.dot(centre / float(n)))
 
 
-## Enclosed volume in cubic metres, by the divergence theorem over a fan of each face.
+## Enclosed volume in cubic metres, whichever way round the solid is wound - see
+## [method signed_volume], which is the one to ask when that matters.
 ##
 ## MEANINGLESS ON AN OPEN MESH, exactly as [method HullBake.mesh_volume] is — the sign of an
 ## unclosed shell's missing cap has nowhere to come from. Ask [method open_edges] first.
 func volume() -> float:
+	return absf(signed_volume())
+
+
+## Enclosed volume in cubic metres, POSITIVE when the faces are wound anticlockwise seen from
+## outside - which is what this class holds - and negative for the same solid turned inside out.
+##
+## [method volume] is absolute and so cannot tell those two apart. That is not a detail: reading
+## the engine's triangles without turning them round handed every baked solid back INSIDE OUT for
+## the life of the project, and a pipeline of "the volume matches" checks never saw it, because a
+## solid and its inside-out twin measure the same (ADR 0037). Assert on THIS when what is being
+## asserted is which way round a solid is.
+func signed_volume() -> float:
 	var total: float = 0.0
 	for i: int in faces.size():
 		var tri: PackedInt32Array = triangulate_face(i)
@@ -256,7 +304,7 @@ func volume() -> float:
 		while k + 2 < tri.size():
 			total += vertices[tri[k]].dot(vertices[tri[k + 1]].cross(vertices[tri[k + 2]]))
 			k += 3
-	return absf(total / 6.0)
+	return total / 6.0
 
 
 ## Total surface area in square metres. Winding-independent.

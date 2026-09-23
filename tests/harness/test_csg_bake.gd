@@ -505,3 +505,58 @@ func test_a_cube_nucleus_divides_at_its_seams() -> void:
 			. append_failure_message("%s stands apart from its six" % id)
 			. is_equal_approx(mean, mean * 0.01)
 		)
+
+
+## EVERY BAKED SOLID IS WOUND OUTWARD (ADR 0037). This is the invariant the whole bake rests on
+## and the one nothing could see: the engine hands its triangles back the other way round, and for
+## the life of the project they were read as-is, so every piece was inside out. An inside-out solid
+## goes back to the engine as its own COMPLEMENT - a cut through a hollow piece came back with a
+## solid lid over the cavity rather than a ring, which the author reported as slabs hanging inside
+## the rooms - and draws with its outside culled away. [method PolyMesh.volume] is absolute and
+## cannot catch it, so this asserts on the sign.
+func test_every_baked_solid_is_wound_outward() -> void:
+	var doc: ShipDoc = _carbon("box_hull", true)
+	var report: Dictionary = await ShipCsgBake.bake(self, doc, _data, _cfg)
+	var solids: Dictionary = report["solids"]
+	assert_int(solids.size()).is_greater(0)
+	for id: String in solids:
+		var solid: PolyMesh = solids[id]
+		(
+			assert_float(solid.signed_volume())
+			. append_failure_message("%s came out of the bake INSIDE OUT" % id)
+			. is_greater(0.0)
+		)
+
+
+## AND A CUT THROUGH ONE LEAVES A RING, NOT A LID (ADR 0037) - which is the same invariant said in
+## the terms the cell slicer cares about, because that is where the author saw it go wrong. Half a
+## hollow piece is half its volume; a piece the engine reads inside out came back at two thirds.
+func test_a_piece_cut_in_half_is_half_of_it() -> void:
+	var doc: ShipDoc = _carbon("box_hull", true)
+	var report: Dictionary = await ShipCsgBake.bake(self, doc, _data, _cfg)
+	var members: PackedStringArray = PackedStringArray()
+	for list: PackedStringArray in report["rooms"]:
+		if list.size() > members.size():
+			members = list
+	var piece: PolyMesh = report["solids"][members[0]]
+	var box: AABB = piece.aabb()
+	var combiner := CSGCombiner3D.new()
+	ShipCsgBake._add_engine_mesh(combiner, piece.to_array_mesh(), CSGShape3D.OPERATION_UNION)
+	var keep := CSGBox3D.new()
+	keep.size = box.size * 4.0
+	keep.position = box.get_center() - Vector3(0.0, 0.0, box.size.z * 2.0)
+	keep.operation = CSGShape3D.OPERATION_INTERSECTION
+	combiner.add_child(keep)
+	add_child(combiner)
+	await ShipCsgBake._until_ready(self, [combiner])
+	var half: PolyMesh = ShipCsgBake._read_raw(ShipCsgBake._engine_mesh(combiner))
+	combiner.queue_free()
+	(
+		assert_float(half.volume())
+		. append_failure_message(
+			"half of %.3f m3 came back as %.3f" % [piece.volume(), half.volume()]
+		)
+		. is_equal_approx(piece.volume() * 0.5, piece.volume() * 0.02)
+	)
+	assert_float(half.signed_volume()).is_greater(0.0)
+	assert_int(half.open_edges()).is_equal(0)
