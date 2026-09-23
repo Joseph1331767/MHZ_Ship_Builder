@@ -3065,7 +3065,19 @@ positive, a piece cut in half gives half of it back, a concave L covers its own 
 knows itself from its inside-out twin. Selfcheck PASSED, hash unchanged at `5536787c6c35d236`;
 validator PASSED; gdformat and gdlint clean; resolve, explode and visual checks PASSED.
 
+### The one thing that had to change with it
+
+The INTERIOR mode is the only place in the builder that culls by side, and so the only place the
+inversion ever showed. It drew the exterior's FRONT faces and the interior's BACKS, which was right
+only while every piece was inside out; with the read turned round it drew the hull as a solid blob
+again - the exact symptom ADR 0028 spent two sessions on. Swapped to what ADR 0022 literally asks
+for: the interior surface draws its fronts, the exterior its backs. Checked by looking at the frame
+(`reports/visual_resolved_interior.png`) - near walls gone, the six cavities and their tunnel mouths
+open. Nothing else in the builder culls by side: the faceted shader is `cull_disabled` and flips its
+normal on `!FRONT_FACING`, which is why no other mode moved.
+
 ### Still the human's to check
 
 A cube carbon, exploded: the wedges beside each hatch are gone and the pieces read as hollow chunks
-with their openings. Then a sphere carbon, which takes the split for the first time.
+with their openings. Then a sphere carbon, which takes the split for the first time. And the INTERIOR
+mode, which now shows cavities rather than a blob.
