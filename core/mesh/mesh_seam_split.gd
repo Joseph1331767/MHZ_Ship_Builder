@@ -97,7 +97,8 @@ static func split(
 		return out
 	var owner_of: PackedInt32Array = PackedInt32Array()
 	var kind_of: PackedInt32Array = PackedInt32Array()
-	_classify(shell, members, bodies, rooms, owner_of, kind_of)
+	var guessed: PackedInt32Array = PackedInt32Array()
+	_classify(shell, members, bodies, rooms, owner_of, kind_of, guessed)
 	_claim(shell, members, claims, owner_of, kind_of)
 
 	# Every directed edge of the shell: what face it belongs to, and which edge follows it round
@@ -114,7 +115,7 @@ static func split(
 				across[_edge_key(u, v, shell)] = face
 				after[_edge_key(u, v, shell)] = _edge_key(v, w, shell)
 
-	_settle(shell, owner_of, kind_of, across)
+	_settle(shell, owner_of, kind_of, guessed, across)
 	for index: int in members.size():
 		var id: String = members[index]
 		out[id] = _piece(shell, index, owner_of, kind_of, across, after)
@@ -129,7 +130,8 @@ static func _classify(
 	bodies: Dictionary,
 	rooms: Dictionary,
 	owner_of: PackedInt32Array,
-	kind_of: PackedInt32Array
+	kind_of: PackedInt32Array,
+	guessed: PackedInt32Array
 ) -> void:
 	# Sampled ONCE per vertex per surface. Every face then reads its own vertices out of the table;
 	# faces share vertices several times over, and the field is the expensive call in here.
@@ -142,6 +144,7 @@ static func _classify(
 
 	owner_of.resize(shell.faces.size())
 	kind_of.resize(shell.faces.size())
+	guessed.resize(shell.faces.size())
 	for face: int in shell.faces.size():
 		var loop: PackedInt32Array = shell.faces[face]
 		var best: float = ON_SURFACE_M
@@ -165,6 +168,7 @@ static func _classify(
 					best_member = index
 					best_kind = kind
 		if best_member < 0:
+			guessed[face] = 1
 			# NOTHING OWNS IT OUTRIGHT. A triangle of an exact boolean lies on one of the surfaces
 			# that made it, so this is the coplanar case - two bodies whose surfaces share a plane,
 			# with a face the engine did not split between them. The nearest surface takes it
@@ -271,14 +275,26 @@ static func _claim(
 ## on a sphere carbon, whose pieces carried fourteen such islands and were refused by the engine
 ## when it came to slice them.
 ##
-## Only the unanimous case is moved, and moved repeatedly until nothing changes: a face with
-## neighbours on both sides is on a real boundary and is left exactly where the fields put it.
+## Only a face NO field claimed outright is moved, and only when its neighbours are unanimous, and
+## repeatedly until nothing changes. A face the fields placed stays where they put it.
 static func _settle(
-	shell: PolyMesh, owner_of: PackedInt32Array, kind_of: PackedInt32Array, across: Dictionary
+	shell: PolyMesh,
+	owner_of: PackedInt32Array,
+	kind_of: PackedInt32Array,
+	guessed: PackedInt32Array,
+	across: Dictionary
 ) -> void:
 	for _pass: int in SETTLE_PASSES:
 		var moved: int = 0
 		for face: int in shell.faces.size():
+			# ONLY WHAT WAS GUESSED AT. A face standing squarely on a member's own surface is not
+			# an island however it is surrounded: a neighbour's cavity wall reaching through this
+			# member's body IS a small patch of that neighbour, and handing it over gives the piece
+			# a shelf of somebody else's hull. Measured on a cube carbon - four such faces on the
+			# lower proton, which is exactly what the author saw: "the cube faces after exploding
+			# are looking very strange like a book shelf" (2026-09-22).
+			if guessed[face] == 0:
+				continue
 			var owner: int = -1
 			var kind: int = -1
 			var alone: bool = true

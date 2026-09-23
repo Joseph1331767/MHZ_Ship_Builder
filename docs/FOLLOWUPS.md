@@ -1815,3 +1815,27 @@ shared by more than two faces - so `MeshSeamSplit.is_sound` refuses them and the
 The same code is exact on boxes, so it is not the construction: it is something about a seam whose
 loops carry hundreds of vertices, and the two places to look are the zip (`_partners`, which pairs
 the two loops by arc length) and the lone loops that are capped flat.
+
+
+### What a split piece IS, measured (2026-09-22)
+
+The author, on first sight of the exploded nucleus: **"the cube faces after exploding are looking
+very strange like a book shelf"**. Measured on a cube carbon, every piece of the nucleus carries:
+
+- its OWN outer wall - 271.4 m² on each of the four that have a hatch, 270.1 on the two that do not
+- its OWN cavity wall - 264.4 and 262.7 m², the same across all six
+- and its caps, and nothing else. No piece holds a face of anybody else's hull.
+
+So a piece is a complete hollow shell SEGMENT, and it is OPEN where it fused, because a fused seam
+is an OPEN seam - the nucleus is one room, and one room has one cavity. Looking into a piece you see
+the far side of its own cavity, which is the shelf.
+
+**That is a change, and it is the correct one.** The older cut-back gave each piece "the shell
+within my own body", which swept up the NEIGHBOUR's cavity wall where it reached inside - material
+belonging to the next module along - and that stray wall is what used to close the piece off. The
+split hands it back to whoever owns it.
+
+**What it leaves open is a design question, not a defect:** a printed module of a fused clump has a
+mouth where it meets the next one. If each piece should instead be closed in its own right, that is
+a WALLED seam between the nucleus bodies rather than an OPEN one (they are open by default, ADR
+0025, and every link is editable) - not a change to how a room is split.
