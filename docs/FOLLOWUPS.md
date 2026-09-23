@@ -1809,12 +1809,29 @@ is split. A carbon of CUBE rooms comes out as six pieces of 26.64/26.68 m³ summ
 a room of 159.99, all sound, all dicing. `ShipCsgBake` reports `split_rooms` and `cut_back_rooms` so
 which construction a room took is never a guess.
 
-**What is left is the sphere case.** A carbon of `sphere_pod` splits into pieces that are closed and
-the right size (20.7 to 21.2 m³ against a room of 126.3) but NON-MANIFOLD - four to twenty-two edges
-shared by more than two faces - so `MeshSeamSplit.is_sound` refuses them and the room falls back.
-The same code is exact on boxes, so it is not the construction: it is something about a seam whose
-loops carry hundreds of vertices, and the two places to look are the zip (`_partners`, which pairs
-the two loops by arc length) and the lone loops that are capped flat.
+**The sphere case had a ROOT CAUSE, and it was the classifier, not the construction** (found
+2026-09-22 after the author said, correctly, that the method cannot be shape-dependent):
+
+> "spheres should work out of the box with cubes and any shape fundamentally .. how could the inside
+> ever overlap the outside.. and if that isnt the issue then explain what you mean by seam
+> overlapping itself?"
+
+A boolean cuts its inputs along their intersections and puts NEW vertices on the TRIANGLES it cut,
+not on the surface those triangles approximate. On a curve that is the sagitta away - measured on a
+sphere carbon, up to 10 cm - while the test for "is this face on that surface" allowed 2 mm. So
+**5853 of 10110 faces of the shell lay on no surface the classifier knew**, a third of the hull was
+handed to whichever member was nearest, and the caps built from that were nonsense. A box never
+shows it: a flat face has no sagitta.
+
+Each field now measures how far its OWN tessellation dips inside it (`_tolerance_of`, sampling its
+faces' centres) and that is the tolerance. **Zero faces unclaimed on either family.** Three of a
+sphere carbon's six pieces came right immediately.
+
+**What is left is the cap where the two boundaries do not correspond.** For members whose body patch
+is cut into several loops while their cavity makes one - measured, body loops [76,10,10,3,5] against
+room loops [3,130] - the cap has one outer ring per inner ring to work with and there is no such
+pairing. Those three pieces come out non-manifold and the room still falls back. Deeply overlapping
+spheres do this because a cavity can be swallowed whole where the outer surfaces are merely cut.
 
 
 ### What a split piece IS, measured (2026-09-22)

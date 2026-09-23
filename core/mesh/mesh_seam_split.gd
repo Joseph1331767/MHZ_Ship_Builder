@@ -138,16 +138,20 @@ static func _classify(
 	var count: int = shell.vertices.size()
 	var body_d: Array = []
 	var room_d: Array = []
+	var body_tol: PackedFloat32Array = PackedFloat32Array()
+	var room_tol: PackedFloat32Array = PackedFloat32Array()
 	for id: String in members:
 		body_d.append(_distances(shell, bodies.get(id, []), count))
 		room_d.append(_distances(shell, rooms.get(id, []), count))
+		body_tol.append(_tolerance_of(bodies.get(id, [])))
+		room_tol.append(_tolerance_of(rooms.get(id, [])))
 
 	owner_of.resize(shell.faces.size())
 	kind_of.resize(shell.faces.size())
 	guessed.resize(shell.faces.size())
 	for face: int in shell.faces.size():
 		var loop: PackedInt32Array = shell.faces[face]
-		var best: float = ON_SURFACE_M
+		var best: float = INF
 		var best_member: int = -1
 		var best_kind: int = KIND_BODY
 		for index: int in members.size():
@@ -157,13 +161,15 @@ static func _classify(
 				)
 				if table.is_empty():
 					continue
+				# EACH SURFACE SAYS HOW FAR ITS OWN TESSELLATION CAN SIT INSIDE IT.
+				var limit: float = body_tol[index] if kind == KIND_BODY else room_tol[index]
 				# The WHOLE face has to lie on the surface, so the worst of its vertices decides.
 				var worst: float = 0.0
 				for v: int in loop:
 					worst = maxf(worst, table[v])
-					if worst >= best:
+					if worst >= limit:
 						break
-				if worst < best:
+				if worst < limit and worst < best:
 					best = worst
 					best_member = index
 					best_kind = kind
@@ -323,6 +329,34 @@ static func _settle(
 				moved += 1
 		if moved == 0:
 			return
+
+
+## How far a vertex may stand from one of [param fields] and still be ON it: the deepest its own
+## tessellation dips inside it, plus a hair.
+##
+## A FIELD IS A SURFACE; A MESH IS ITS CHORDS. A boolean cuts its inputs along their intersections
+## and puts NEW vertices on the triangles it cut - not on the surface those triangles approximate,
+## which on a curve is the sagitta away. Measured on a sphere carbon: 2140 faces of the shell stood
+## between 2 and 10 cm from every field it has, and a test that allowed millimetres called them
+## strangers, so a third of the hull was handed to whichever member was nearest. A box never shows
+## it, because a flat face has no sagitta at all - which is why this took a sphere to find and why
+## the answer must not be a number chosen by hand.
+static func _tolerance_of(fields: Array) -> float:
+	var out: float = ON_SURFACE_M
+	for field: Variant in fields:
+		if field == null or field.surface == null:
+			continue
+		var surface: PolyMesh = field.surface
+		var deepest: float = 0.0
+		for face: int in surface.faces.size():
+			var loop: PackedInt32Array = surface.faces[face]
+			var centre: Vector3 = Vector3.ZERO
+			for v: int in loop:
+				centre += surface.vertices[v]
+			if loop.size() > 0:
+				deepest = maxf(deepest, absf(field.d(centre / float(loop.size()))))
+		out = maxf(out, deepest + ON_SURFACE_M)
+	return out
 
 
 ## How far every vertex of [param shell] stands from the NEAREST of [param fields] - the surface a
@@ -630,8 +664,36 @@ static func _patch_loops(
 			used[at] = true
 			loop.append(int(edges[at]))
 			at = _next_boundary(shell, at, edges, after)
-		if loop.size() >= 3:
-			out.append(loop)
+		out.append_array(_simple_loops(loop))
+	return out
+
+
+## [param loop] cut into loops that never pass through one vertex twice.
+##
+## A SEAM CAN BE PINCHED. Where two of a member's neighbours touch each other, the patch between
+## them narrows to a single vertex and its boundary passes through that vertex twice - one curve in
+## a figure of eight. Three spheres meeting do it as a matter of course; three boxes meet along
+## faces and never do, which is why it took a sphere to find. Each half is a ring in its own right
+## and is capped as one, and nothing else in this file has to know a pinch can happen.
+static func _simple_loops(loop: PackedInt32Array) -> Array:
+	var out: Array = []
+	var at_of: Dictionary = {}
+	var stack: PackedInt32Array = PackedInt32Array()
+	for v: int in loop:
+		if at_of.has(v):
+			# Back where it has been: everything since is a ring, closed by this vertex.
+			var at: int = int(at_of[v])
+			var ring: PackedInt32Array = PackedInt32Array()
+			for i: int in range(at, stack.size()):
+				ring.append(stack[i])
+				at_of.erase(stack[i])
+			if ring.size() >= 3:
+				out.append(ring)
+			stack.resize(at)
+		stack.append(v)
+		at_of[v] = stack.size() - 1
+	if stack.size() >= 3:
+		out.append(stack)
 	return out
 
 
