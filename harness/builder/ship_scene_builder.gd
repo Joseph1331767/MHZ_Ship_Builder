@@ -935,15 +935,20 @@ func inside_materials(selected: bool) -> Dictionary:
 	# The faceted shader is cull_disabled by design (mirrored twins, F7); here each surface is
 	# culled to the one side the mode wants. Measured before this: the interior surface drew both
 	# its sides and the ship read solid again.
-	# GODOT'S FRONT FACE IS CLOCKWISE. The engine's pieces wind by the right-hand rule (normals
-	# out of the material), so from the side a surface faces, Godot sees its BACK faces: the
-	# hull's outside is back faces from outside, the cavity wall is back faces from the cavity.
-	# Hence the exterior keeps its FRONTS (its inner side, the far wall seen from within) and the
-	# interior keeps its BACKS (the cavity side). Measured the other way round: the near outer
-	# wall drew as a solid blob and the far cavity wall as a black hole (ADR 0028).
+	# Literally what ADR 0022 asks for, now that a baked piece is wound the way it says it is: the
+	# interior surface draws its FRONT faces (cull "back"), so the far cavity wall faces the camera
+	# and the near one is gone, and the exterior draws its BACK faces (cull "front"), so the near
+	# outer wall is not in the way and the far wall shows its inner side.
+	#
+	# RETIRED(ADR 0037): the two were the other way round, and had to be. Every baked piece came
+	# back from the engine INSIDE OUT (`_read_raw` read its triangles in the engine's order), so
+	# each surface presented Godot the face it does not now, and this mode was the one place in the
+	# builder that culled by side and therefore the one place the inversion showed - as the near
+	# outer wall drawing as a solid blob and the far cavity wall as a black hole (ADR 0028). The
+	# read is fixed; the compensation comes off with it.
 	var out: Dictionary = {
-		"exterior": _faceted_material(DisplayMode.SHADED_WIRE, selected, false, "back"),
-		"interior": _faceted_material(DisplayMode.SHADED_WIRE, selected, false, "front"),
+		"exterior": _faceted_material(DisplayMode.SHADED_WIRE, selected, false, "front"),
+		"interior": _faceted_material(DisplayMode.SHADED_WIRE, selected, false, "back"),
 		"cut": _faceted_material(DisplayMode.SHADED_WIRE, selected, false),
 		"wire": null,
 	}
