@@ -1053,11 +1053,19 @@ func _riders() -> Dictionary:
 	var out: Dictionary = {}
 	if room_of.is_empty() or _sdf == null:
 		return out
+	# EVERY member rides, and then the one that stands on something OUTSIDE the room is taken back
+	# out: it is the one carrying the room off its own seam. A room whose members only stand beside
+	# each other (ADR 0034) has no such member, so the whole clump holds still in the first stage
+	# and comes apart in the second - not the other way about.
+	for id: Variant in room_of:
+		out[str(id)] = true
 	for seam: Dictionary in _sdf.seams():
+		if bool(seam.get(ShipSeams.SEAM_SIBLING, false)):
+			continue
 		var child: String = str(seam.get(ShipSeams.SEAM_CHILD, ""))
 		var host: String = str(seam.get(ShipSeams.SEAM_HOST, ""))
-		if room_of.has(child) and str(room_of.get(host, "")) == str(room_of[child]):
-			out[child] = true
+		if room_of.has(child) and str(room_of.get(host, "")) != str(room_of[child]):
+			out.erase(child)
 	return out
 
 

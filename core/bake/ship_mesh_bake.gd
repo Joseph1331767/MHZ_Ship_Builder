@@ -86,6 +86,10 @@ const PHASE_STRIDE: float = 0.6180339887
 const CLIP_CELLS: int = 12
 
 ## The three cutters a part offers, by name - see [method plan].
+## Halvings that put the plane two equal members of a room divide on. Twenty is inside a millionth
+## of the distance between their centres - far below anything a hull shows (ADR 0035).
+const SPLIT_SOLVE_STEPS: int = 20
+
 const CUT_BODY: String = "body"
 const CUT_ROOM: String = "room"
 const CUT_GROWN: String = "grown"
@@ -143,7 +147,11 @@ static func bake(
 ##     "grown": {id: PolyMesh}, "cutters": {key: MeshClip.Cutter}, "cuts": {id: [ {"outer": key,
 ##     "inner": key} ]} (the WALLED seams), "open_cuts": the same shape for the OPEN seams as the
 ##     pure executor reads them, "rooms": [PackedStringArray] (every part in exactly one, members
-##     sorted), "split": {id: {"origin": Vector3, "normal": Vector3}} (the manufacturing plane
+##     sorted), "room_splits": {id: [{"other": String, "origin": Vector3, "normal": Vector3}]}
+##     (where a member of a room divides from an equal neighbour - the member keeps the side the
+##     normal points AWAY from; the engine executor cuts there instead of subtracting the whole
+##     neighbour, and the pure executor does not, which is one more way the two differ),
+##     "split": {id: {"origin": Vector3, "normal": Vector3}} (the manufacturing plane
 ##     the exploded view slices a module on), "frames": {id: Transform3D} (the part's own
 ##     orthonormal, right-handed axes, Y its placement normal: the frame the exploded view's slicer
 ##     cuts in, ADR 0031), "open_seams": int, "pending_seams": int,
@@ -228,6 +236,7 @@ static func plan(
 	var seams: Array[Dictionary] = ShipSeams.seams(doc, shapes, xforms, cfg, data)
 	var cuts: Dictionary = {}
 	var open_cuts: Dictionary = {}
+	var room_splits: Dictionary = {}
 	var room_of: Dictionary = {}
 	var bounded_seams: int = 0
 	var open_seams: int = 0
@@ -259,6 +268,28 @@ static func plan(
 			# the indenter's body on both surfaces, the indenter loses the indented part's room.
 			open_seams += 1
 			_join_rooms(room_of, indented, indenter)
+			# TWO EQUAL MEMBERS DIVIDE DOWN THE MIDDLE. Cutting each piece back by the whole of
+			# the bodies before it is a priority order, and on a clump of equal bodies it is the
+			# wrong answer twice over: the first member keeps everything and the last is bitten by
+			# all of them, so no two pieces are alike, and the bites are the neighbours' ROUNDED
+			# bodies rather than a face. "6 cubes overlaping about the center should not be leaving
+			# messy edges between their seams and all should be exact copies of one another"
+			# (2026-09-22). Where neither body is larger, the boundary is the plane where the two
+			# fields read alike - the perpendicular bisector, for a pair of the same solid - and
+			# each keeps its own side. Where one IS larger the priority order stands: a tunnel
+			# sunk into a hull keeps its own body, which is what it is.
+			if child_is_big and MeshFlange.first_is_larger(outer[host_id], outer[child_id]):
+				var at: Vector3 = _equidistant(
+					shapes[child_id], xforms[child_id], shapes[host_id], xforms[host_id]
+				)
+				var toward: Vector3 = (
+					(xforms[child_id] as Transform3D).origin
+					- (xforms[host_id] as Transform3D).origin
+				)
+				if toward.length_squared() > 1.0e-12:
+					var n: Vector3 = toward.normalized()
+					_add_split(room_splits, host_id, child_id, at, n)
+					_add_split(room_splits, child_id, host_id, at, -n)
 			_add_cut(
 				open_cuts,
 				indented,
@@ -373,6 +404,7 @@ static func plan(
 		"open_cuts": open_cuts,
 		"rooms": rooms,
 		"split": split,
+		"room_splits": room_splits,
 		"frames": frames,
 		"open_seams": open_seams,
 		"pending_seams": bounded_seams - door_list.size(),
@@ -383,6 +415,34 @@ static func plan(
 
 
 ## Union-find over the open seams: [param a] and [param b] are in one room.
+## Where two solids' fields read alike along the line between their centres - the plane a pair of
+## the same body divides on, which for two of one solid is the perpendicular bisector. Bisected
+## rather than solved: the difference of two fields is monotone along that line for any pair that
+## meets there, and [constant SPLIT_SOLVE_STEPS] halvings put it inside a millionth of the span.
+static func _equidistant(
+	a: ResolvedShape, xform_a: Transform3D, b: ResolvedShape, xform_b: Transform3D
+) -> Vector3:
+	var inv_a: Transform3D = xform_a.affine_inverse()
+	var inv_b: Transform3D = xform_b.affine_inverse()
+	var near: Vector3 = xform_a.origin
+	var far: Vector3 = xform_b.origin
+	for _step: int in SPLIT_SOLVE_STEPS:
+		var mid: Vector3 = (near + far) * 0.5
+		if a.sdf(inv_a * mid) < b.sdf(inv_b * mid):
+			near = mid
+		else:
+			far = mid
+	return (near + far) * 0.5
+
+
+static func _add_split(
+	room_splits: Dictionary, id: String, other: String, at: Vector3, normal: Vector3
+) -> void:
+	var list: Array = room_splits.get(id, [])
+	list.append({"other": other, "origin": at, "normal": normal})
+	room_splits[id] = list
+
+
 static func _join_rooms(room_of: Dictionary, a: String, b: String) -> void:
 	var ra: String = _room_root(room_of, a)
 	var rb: String = _room_root(room_of, b)

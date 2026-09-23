@@ -1603,3 +1603,26 @@ ADR 0034. The public surfaces `docs/API_CONTRACT.md` pins are unchanged in name 
 their centres; `dissolve` resolves a rider against the instance's own anchor (exact for an anchored
 instance, which is where nucleus components live); the radius is solved for the arrangement's
 tightest pair; and nothing places a part on the beacon from the UI yet.
+
+
+## F47 - Additive extensions of 2026-09-22: the pieces of a clump - OPEN, DELIBERATE
+
+ADR 0035. The public surfaces `docs/API_CONTRACT.md` pins are unchanged in name and signature.
+
+- **`ShipMeshBake.plan()`** gains **`room_splits`**: `{id: [{"other", "origin", "normal"}]}`, where
+  two equal members of one room divide. New private `_equidistant`, `_add_split`; new const
+  `SPLIT_SOLVE_STEPS`. The pure executor ignores it.
+- **`ShipSeams`**: seam records carry **`SEAM_SIBLING`** (bool). `explode_offsets()` gives a module
+  that stands on nothing a radial travel from the beacon and leaves sibling seams out of the host
+  chains. `_record()` takes a trailing `sibling`, defaulted.
+- **`ShipCsgBake`**: pass two cuts at the plan's planes (new private `_half_space`, `_room_reach`;
+  new const `HALF_SPACE_REACH`).
+- **`ShipExplodeView._riders()`**: every member of a room of several rides it but the one standing
+  on something outside it.
+- Tests: two new, one rewritten. Suite **322/322**.
+
+**No hash moves.** Measured: `5536787c6c35d236` either side.
+
+**Known limits** are ADR 0035's four: the pure executor does not cut on the planes; the plane is a
+plane where the true equidistant surface curves; a clump mixing equal and unequal pairs could strand
+a sliver in a triple overlap; and a module centred on the beacon has no radial direction to take.

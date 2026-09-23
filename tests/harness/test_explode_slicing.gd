@@ -167,35 +167,43 @@ func test_the_explode_runs_in_three_stages() -> void:
 	assert_vector(ShipExplodeView._stages(1.0)).is_equal(Vector3.ONE)
 
 
-## The first stage moves a room as one body: every chunk held to another member of its room RIDES
-## its host there, while the modules around the room still travel.
+## The first stage moves a room as one body: every chunk of it holds still together while the
+## modules around it travel. The nucleus of a class stands on NOTHING (ADR 0034/0035), so a class
+## holds its core where it is and pulls its pods off it - it does not slide off its own top body,
+## which is what the author saw: "the entire ship moves down from the top node" (2026-09-22).
 func test_in_the_first_stage_a_rooms_chunks_ride_it() -> void:
 	var doc: ShipDoc = _carbon()
 	var sdf: ShipSdf = ShipSdf.build(doc, _data, _cfg)
 	var rooms: Array = ShipMeshBake.plan(doc, _data, _cfg)["rooms"]
-	var room_of: Dictionary = {}
-	for members: PackedStringArray in rooms:
-		for id: String in members:
-			room_of[id] = members[0]
+	# Every member of a room of several rides it; the one standing on something OUTSIDE the room
+	# would be the one carrying it off, and a nucleus has none.
 	var riders: Dictionary = {}
-	for seam: Dictionary in sdf.seams():
-		var child: String = seam[ShipSeams.SEAM_CHILD]
-		var host: String = seam[ShipSeams.SEAM_HOST]
-		if str(room_of.get(child, child)) == str(room_of.get(host, host)):
-			riders[child] = host
-	assert_int(riders.size()).is_equal(5)
+	for members: PackedStringArray in rooms:
+		if members.size() > 1:
+			for id: String in members:
+				riders[id] = true
+	assert_int(riders.size()).is_equal(6)
 	var boxes: Dictionary = {}
 	for i: int in sdf.part_count():
 		boxes[sdf.part_id_at(i)] = sdf.part_aabb(i)
 	var full: Dictionary = ShipSeams.explode_offsets(sdf.seams(), _cfg, boxes)
 	var first: Dictionary = ShipSeams.explode_offsets(sdf.seams(), _cfg, boxes, riders)
-	for child: String in riders:
-		var rides: Vector3 = first.get(child, Vector3.ZERO)
-		var host_at: Vector3 = first.get(riders[child], Vector3.ZERO)
-		assert_vector(rides).append_failure_message(child).is_equal_approx(
-			host_at, Vector3.ONE * 1.0e-5
+	for id: String in riders:
+		(
+			assert_vector(first.get(id, Vector3.ZERO) as Vector3)
+			. append_failure_message("%s left the room in the first stage" % id)
+			. is_equal_approx(Vector3.ZERO, Vector3.ONE * 1.0e-5)
 		)
-		assert_float((full.get(child, Vector3.ZERO) as Vector3).length()).is_greater(0.1)
+		# And it does come apart in the full explode - away from the beacon, which is where a body
+		# that stands on nothing goes.
+		var out: Vector3 = full.get(id, Vector3.ZERO)
+		assert_float(out.length()).append_failure_message(id).is_greater(0.1)
+		var centre: Vector3 = (boxes[id] as AABB).get_center()
+		(
+			assert_float(out.normalized().dot(centre.normalized()))
+			. append_failure_message("%s did not travel away from the centre" % id)
+			. is_greater(0.99)
+		)
 	var travelling: int = 0
 	for id: String in first:
 		if not riders.has(id) and (first[id] as Vector3).length() > 0.1:

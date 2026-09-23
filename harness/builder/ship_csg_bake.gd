@@ -69,6 +69,10 @@ const FINE_CUTS: Array = [1.0 / 3.0, 0.5, 2.0 / 3.0]
 ## gently curved faces into (see [method _feature_wire]).
 const WIRE_FEATURE_DEG: float = 10.0
 
+## How far past a room's own bounds a dividing half-space reaches, as a multiple of them. Anything
+## over one covers the room; the margin is there so no face of the cutter can land near a surface.
+const HALF_SPACE_REACH: float = 3.0
+
 ## A whole room's slicing job is keyed by its keeper under this prefix.
 const ROOM_PREFIX: String = "room:"
 
@@ -140,11 +144,20 @@ static func bake(
 	await _until_ready(host, shells.values())
 	_tick(progress, 0.3, "PIECES")
 
-	# PASS TWO: each member's piece is the room's shell within the member's ORIGINAL body, less the
-	# bodies of the members before it. A room of one is simply its shell. Nothing is read back
-	# here (ADR 0030): a piece stays in the engine, as the combiner that made it, until the doors
-	# are through it - measured, reading every piece at every pass was the larger half of a bake.
+	# PASS TWO: each member's piece is the room's shell within the member's ORIGINAL body, cut away
+	# from every EQUAL neighbour at the plan's plane between them ("room_splits") and, for the rest,
+	# less the bodies of the members before it. A room of one is simply its shell. Nothing is read
+	# back here (ADR 0030): a piece stays in the engine, as the combiner that made it, until the
+	# doors are through it - measured, reading every piece at every pass was the larger half of a
+	# bake.
+	#
+	# THE PLANE IS WHY THE PIECES OF A CLUMP MATCH (ADR 0035). Subtracting a neighbour's whole body
+	# is a priority order - the first member keeps everything, the last is bitten by all of them -
+	# and the bite is that body's ROUNDED surface. Six equal bodies about a centre came out as six
+	# different pieces with curved grooves between them; cut at the plane they divide on, they come
+	# out as six of the same piece with a flat face each.
 	var pieces: Dictionary = {}
+	var room_splits: Dictionary = plan.get("room_splits", {})
 	for members: PackedStringArray in plan["rooms"]:
 		if members.size() == 1:
 			continue
@@ -153,12 +166,21 @@ static func bake(
 		# reading, with holed faces bridged by PolyMesh, made pass two return 348 m3 for a piece of a
 		# 50 m3 shell; the engine's own mesh does not.
 		var engine_shell: Mesh = _engine_mesh(shells[members[0]])
+		var reach: float = _room_reach(outer, members)
 		for i: int in members.size():
 			var id: String = members[i]
 			var piece: CSGCombiner3D = CSGCombiner3D.new()
 			_add_engine_mesh(piece, engine_shell, CSGShape3D.OPERATION_UNION)
 			_add_mesh(piece, outer[id], CSGShape3D.OPERATION_INTERSECTION)
+			var divided: Dictionary = {}
+			for entry: Dictionary in room_splits.get(id, []):
+				divided[str(entry["other"])] = true
+				piece.add_child(
+					_half_space(entry["origin"] as Vector3, entry["normal"] as Vector3, reach)
+				)
 			for j: int in i:
+				if divided.has(members[j]):
+					continue
 				_add_mesh(piece, outer[members[j]], CSGShape3D.OPERATION_SUBTRACTION)
 			stage.add_child(piece)
 			pieces[id] = piece
@@ -378,6 +400,37 @@ static func bake_extras(
 ## One slicing job: the solid (as the engine made it, or [param fallback] when it has none), the
 ## frame it is cut in, and its extent in that frame read off [param bodies] - the ORIGINAL bodies,
 ## so a cut does not move when a neighbour changes what was carved off this piece.
+## Everything on the far side of the plane through [param at] with [param normal], as a box of
+## [param reach] metres: what a member of a room gives up to an equal neighbour (ADR 0035). The box
+## stands one face ON the plane and reaches away along the normal, so the member keeps the side the
+## normal points away from.
+static func _half_space(at: Vector3, normal: Vector3, reach: float) -> CSGBox3D:
+	var out: CSGBox3D = CSGBox3D.new()
+	out.operation = CSGShape3D.OPERATION_SUBTRACTION
+	out.size = Vector3(reach, reach, reach)
+	var axis: Vector3 = normal
+	if axis.length_squared() <= 1.0e-12:
+		axis = Vector3.BACK
+	axis = axis.normalized()
+	out.transform = Transform3D(ShipAttach.mount_frame(axis), at + axis * (reach * 0.5))
+	return out
+
+
+## How big a dividing half-space has to be to cover [param members] whatever way it is turned.
+static func _room_reach(outer: Dictionary, members: PackedStringArray) -> float:
+	var bounds: AABB = AABB()
+	var first: bool = true
+	for id: String in members:
+		if not outer.has(id):
+			continue
+		var box: AABB = (outer[id] as PolyMesh).aabb()
+		bounds = box if first else bounds.merge(box)
+		first = false
+	if first:
+		return 1.0
+	return maxf(bounds.size.length() * HALF_SPACE_REACH, 1.0)
+
+
 static func _slice_job(
 	source: Mesh, fallback: PolyMesh, frame: Transform3D, bodies: Array
 ) -> Dictionary:

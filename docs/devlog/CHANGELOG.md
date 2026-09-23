@@ -2904,3 +2904,41 @@ instead: a part may stand on nothing, a pair is named, and it is the ROOM that c
 Build a carbon with CUBE rooms: the nucleus is a symmetric 3D plus about the dot, the same top and
 bottom. EXPLODE it - six equal bodies pull apart instead of the lopsided lumps. Then try a spar
 carbon, which is the family this could have quietly broken.
+
+
+## [2026-09-22] Six equal bodies, six of the same piece - and they explode off the centre
+
+> "6 cubes overlaping about the center should not be leaving messy edges between their seams and all
+> should be exact copies of one another, thats my verification ive been running so i know something
+> is off here. also when i press explode .. the entire ship moves down from the top node which it
+> should not, the top node piece should move away from center"
+
+ADR 0035, and both halves were the same mistake: the clump was still being read as a CHAIN with a
+first member after ADR 0034 made it six equal bodies about a centre.
+
+A room is cut into its pieces by taking each member's own body and subtracting the members BEFORE it
+(ADR 0021) - a priority order, so the first member kept everything and the last was bitten by all of
+them, and the bite was the neighbour's ROUNDED body rather than a face. Measured: six pieces from
+18.9 to 29.2 m3 with curved grooves between them. Two members that are neither larger than the other
+now divide on the plane where their fields read alike - the perpendicular bisector, for a pair of the
+same solid. Where one IS larger the priority order stands, because that is what a tunnel sunk into a
+hull actually is.
+
+And a module that stands on nothing now travels away from the BEACON, radially, instead of being the
+one thing in the clump with nothing to leave - which is why the nucleus slid off its top body. In the
+first stage a room holds still unless something outside it carries it off, so a class keeps its core
+where it is, pulls its pods off, and only then comes apart.
+
+### Verified
+
+A cube carbon's six pieces come out 26.64 to 26.68 m3 - 0.15% apart, and that 0.15% is the four of
+them carrying a tunnel socket, which is real geometry. The cut faces are flat (the top piece reads
+back as 20 faces). **gdUnit4 322/322**, two new - one of them the author's own check, asserted;
+selfcheck PASSED, hash unchanged at `5536787c6c35d236`; validator PASSED; gdformat and gdlint clean;
+windowed visual, resolve and explode checks PASSED. Frames: `reports/visual_box_carbon.png` and
+`reports/visual_box_carbon_explode.png`.
+
+### Still the human's to check
+
+A carbon with CUBE rooms, exploded: six pieces of one shape, flat faces between them, each pulling
+away from the centre along its own axis - the top one included.

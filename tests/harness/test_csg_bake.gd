@@ -413,3 +413,37 @@ func test_an_imported_class_is_built_at_the_host_ships_dimensions() -> void:
 	var host_span: float = (host_shapes[host.root] as ResolvedShape).local_aabb().size.x
 	var rebuilt_span: float = (rebuilt_shapes[rebuilt.root] as ResolvedShape).local_aabb().size.x
 	assert_float(rebuilt_span).is_equal_approx(host_span, 0.01)
+
+
+## THE AUTHOR'S OWN CHECK (2026-09-22): "6 cubes overlaping about the center should not be leaving
+## messy edges between their seams and all should be exact copies of one another". Six equal bodies
+## ringing the beacon (ADR 0034) come out as six pieces of one volume, cut on flat planes, and they
+## still add up to the room they came from.
+func test_a_clump_of_equal_bodies_comes_out_as_pieces_of_one_size() -> void:
+	var doc: ShipDoc = ShipTemplates.build(
+		_data, _cfg, "carbon", {ShipTemplates.OPT_ROOM_FAMILY: "box_hull"}
+	)
+	var report: Dictionary = await ShipCsgBake.bake(self, doc, _data, _cfg)
+	var solids: Dictionary = report["solids"]
+	var nucleus: PackedStringArray = PackedStringArray()
+	for members: PackedStringArray in report["rooms"]:
+		if members.size() > nucleus.size():
+			nucleus = members
+	assert_int(nucleus.size()).is_equal(6)
+	var total: float = 0.0
+	var volumes: Dictionary = {}
+	for id: String in nucleus:
+		volumes[id] = (solids[id] as PolyMesh).volume()
+		total += float(volumes[id])
+	var mean: float = total / float(nucleus.size())
+	for id: String in nucleus:
+		# One per cent: four of the six carry a tunnel socket, which is real geometry, not a
+		# difference in how the piece was cut. Before the planes they ranged over 20 per cent.
+		(
+			assert_float(float(volumes[id]))
+			. append_failure_message(
+				"%s is %.2f m3 against a mean of %.2f" % [id, volumes[id], mean]
+			)
+			. is_equal_approx(mean, mean * 0.01)
+		)
+		assert_int((solids[id] as PolyMesh).open_edges()).append_failure_message(id).is_equal(0)

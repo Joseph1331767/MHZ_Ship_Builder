@@ -55,6 +55,9 @@ const SEAM_FRAME: String = "frame"  # Transform3D in SHIP space: origin = anchor
 const SEAM_MODE: String = "mode"  # one of MODE_*
 const SEAM_HOLE: String = "hole"  # Dictionary, see HOLE_*; {} for MODE_WALL
 const SEAM_STYLE: String = "style"  # one of STYLE_*
+## True for a seam between two parts that stand SIDE BY SIDE (ADR 0034) rather than one upon the
+## other. The explode reads it: a module with no host to leave travels away from the beacon instead.
+const SEAM_SIBLING: String = "sibling"
 
 ## Seam STYLES - what shape the seam is, as against SEAM_MODE, which is what closes it. The
 ## same three values [ShipJoint] stores (ADR 0009); named again here so nothing outside the
@@ -274,7 +277,7 @@ static func _sibling_seams(
 		var joint: ShipJoint = _joint_for(doc, child, host)
 		var hole: Dictionary = hole_for(mode, joint, data, cfg)
 		var style: String = joint.seam_style if joint != null else STYLE_FLAT
-		out.append(_record(child, host, frame, mode, hole, style))
+		out.append(_record(child, host, frame, mode, hole, style, true))
 		var twin_child: String = ShipSymmetry.twin_id(child)
 		var twin_host: String = ShipSymmetry.twin_id(host)
 		if not xforms.has(twin_child):
@@ -282,7 +285,9 @@ static func _sibling_seams(
 		if not xforms.has(twin_host):
 			twin_host = host
 		out.append(
-			_record(twin_child, twin_host, ShipMirror.reflect(frame, plane), mode, hole, style)
+			_record(
+				twin_child, twin_host, ShipMirror.reflect(frame, plane), mode, hole, style, true
+			)
 		)
 	return out
 
@@ -814,10 +819,46 @@ static func explode_offsets(
 	var dir_of: Dictionary = {}
 	var travel: Dictionary = {}
 
+	# WHAT STANDS ON WHAT, AND WHAT MERELY STANDS BESIDE IT. A module pulled off a host travels
+	# along the seam it leaves. A module that stands on NOTHING has no such seam - the bodies of a
+	# nucleus ring the beacon (ADR 0034) and only meet each other - so it travels RADIALLY, away
+	# from the build centre it was laid out around: "the top node piece should move away from
+	# centre" (2026-09-22). Measured before this: a cube carbon's whole nucleus slid downward off
+	# its top body, because that body was the one thing in the clump with nothing to leave.
+	var seated: Dictionary = {}
+	for seam: Dictionary in seams_list:
+		if not bool(seam.get(SEAM_SIBLING, false)):
+			seated[str(seam[SEAM_CHILD])] = true
+	var beside: Dictionary = {}
+	for seam: Dictionary in seams_list:
+		if not bool(seam.get(SEAM_SIBLING, false)):
+			continue
+		for end: String in [str(seam[SEAM_CHILD]), str(seam[SEAM_HOST])]:
+			if not seated.has(end):
+				beside[end] = true
+	var radial: Array = beside.keys()
+	radial.sort()
+	for id: String in radial:
+		# REGISTERED EVEN WHEN IT CANNOT MOVE. A caller that merges a component's inner parts into
+		# their instance (ShipSeams.module_of) hands in no box for the inner keys, and their centre
+		# comes out on the beacon: no direction, no travel - but they are still links in the chains
+		# that hang off them, and leaving them out strands every tunnel standing on one.
+		var centre: Vector3 = (boxes.get(id, AABB()) as AABB).get_center()
+		var moving: bool = centre.length_squared() > MIN_LENGTH_SQ and not still.has(id)
+		var out_dir: Vector3 = centre.normalized() if moving else Vector3.ZERO
+		order.append(id)
+		host_of[id] = ""
+		dir_of[id] = out_dir
+		travel[id] = gap + 0.5 * _extent_along(boxes.get(id, AABB()), out_dir) if moving else 0.0
+
 	# Seams arrive host-before-child (ordered_part_ids is a root-first walk, and a twin follows
 	# its source), so one pass settles every chain. The retry loop is the belt to that: a doc
-	# whose order is broken still converges instead of leaving a module behind.
-	var pending: Array[Dictionary] = seams_list.duplicate()
+	# whose order is broken still converges instead of leaving a module behind. Sibling seams are
+	# not chains and are left out of it - their modules were placed radially just above.
+	var pending: Array[Dictionary] = []
+	for seam: Dictionary in seams_list:
+		if not bool(seam.get(SEAM_SIBLING, false)):
+			pending.append(seam)
 	var guard: int = pending.size() + 1
 	while not pending.is_empty() and guard > 0:
 		guard -= 1
@@ -970,7 +1011,13 @@ static func _root_of(host_of: Dictionary, id: String) -> String:
 
 
 static func _record(
-	child: String, host: String, frame: Transform3D, mode: String, hole: Dictionary, style: String
+	child: String,
+	host: String,
+	frame: Transform3D,
+	mode: String,
+	hole: Dictionary,
+	style: String,
+	sibling: bool = false
 ) -> Dictionary:
 	return {
 		SEAM_CHILD: child,
@@ -979,6 +1026,7 @@ static func _record(
 		SEAM_MODE: mode,
 		SEAM_HOLE: hole.duplicate(true),
 		SEAM_STYLE: style,
+		SEAM_SIBLING: sibling,
 	}
 
 

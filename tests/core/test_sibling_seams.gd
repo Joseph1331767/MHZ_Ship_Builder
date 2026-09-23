@@ -116,3 +116,41 @@ func test_a_seam_that_lands_on_the_origin_is_still_a_seam() -> void:
 		. is_less(0.01)
 	)
 	assert_bool(frame.is_equal_approx(Transform3D())).is_true()
+
+
+## TWO EQUAL MEMBERS OF A ROOM DIVIDE DOWN THE MIDDLE (ADR 0035). The plan says where, and for a
+## pair of the same solid the plane is the perpendicular bisector - equidistant from both centres,
+## square to the line between them. Cutting each piece back by the whole of its neighbours instead
+## is a priority order, and a clump of equal bodies came out as that many different pieces.
+func test_equal_members_of_a_room_divide_on_the_plane_between_them() -> void:
+	var doc: ShipDoc = ShipTemplates.build(
+		_data, _cfg, "carbon", {ShipTemplates.OPT_ROOM_FAMILY: "box_hull"}
+	)
+	var plan: Dictionary = ShipMeshBake.plan(doc, _data, _cfg)
+	var xforms: Dictionary = ShipAttach.resolve_all(doc, _data, _cfg)
+	var splits: Dictionary = plan["room_splits"]
+	var nucleus: PackedStringArray = PackedStringArray()
+	for members: PackedStringArray in plan["rooms"]:
+		if members.size() > nucleus.size():
+			nucleus = members
+	assert_int(nucleus.size()).is_equal(6)
+	for id: String in nucleus:
+		var list: Array = splits.get(id, [])
+		# Four neighbours each, on an octahedron: the body across the nucleus does not meet it.
+		assert_int(list.size()).append_failure_message(id).is_equal(4)
+		for entry: Dictionary in list:
+			var other: String = str(entry["other"])
+			var at: Vector3 = entry["origin"]
+			var normal: Vector3 = entry["normal"]
+			var here: Vector3 = (xforms[id] as Transform3D).origin
+			var there: Vector3 = (xforms[other] as Transform3D).origin
+			(
+				assert_float(at.distance_to(here) - at.distance_to(there))
+				. append_failure_message("%s | %s: the plane is not between them" % [id, other])
+				. is_equal_approx(0.0, 0.01)
+			)
+			(
+				assert_float(normal.normalized().dot((there - here).normalized()))
+				. append_failure_message("%s | %s: the plane is not square to them" % [id, other])
+				. is_greater(0.999)
+			)
