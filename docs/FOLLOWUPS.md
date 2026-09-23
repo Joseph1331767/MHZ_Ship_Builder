@@ -1626,3 +1626,82 @@ ADR 0035. The public surfaces `docs/API_CONTRACT.md` pins are unchanged in name 
 **Known limits** are ADR 0035's four: the pure executor does not cut on the planes; the plane is a
 plane where the true equidistant surface curves; a clump mixing equal and unequal pairs could strand
 a sliver in a triple overlap; and a module centred on the beacon has no radial direction to take.
+
+
+## F48 - A room's pieces should be SPLIT AT THEIR SEAMS AND CAPPED - PROPOSED, NOT BUILT
+
+Raised by the author 2026-09-22, after ADR 0035 and its amendment. **This needs an ADR and the
+author's go before anyone builds it**, because it replaces the mechanism ADR 0021 set. It is written
+here so the next session starts from what was measured rather than from the argument.
+
+### What the author asked for
+
+> "the proper way is to union all primitave shapes together, then cut them along the shape of
+> interior seam to exterior seam."
+
+> "the cut shapes inner seams all have vertexes, and the outter shell has vertexes, their end caps
+> would be the capping of inner seam verticies to outter seam verticies, independantly for each
+> piece right? think of a cuve in a cube, and think of the cubes edges as the "seams" of 2 joined
+> shapes. the inner cube line between verticies i,j exist, and the outter cubes a,b exists, so a
+> face between i,a,b,j would be the cap .. yeilding 4 thick square faces with champered edges"
+
+And, ruling out what had been floated in reply: **"we will never marsh cubes or use surface nets.
+weve already decided on excat mesh cfg stuff."** No marching, no field extraction, no dual
+contouring. Exact mesh CSG and mesh surgery only.
+
+### Why the present mechanism cannot give it
+
+ADR 0021 cuts a room back into pieces with SOLID cutters, and ADR 0035 divides two equal members on
+a PLANE. A plane is the right divider only where the two bodies are mirror images across it - two
+axis-aligned cubes 90 degrees apart on an octahedron, which is why a carbon of cubes comes out
+right. Where the seam curve is not planar (a boron class, whose equatorial bodies sit 120 degrees
+apart) no plane contains it, so the cut crosses the seam instead of following it.
+
+### What was measured, and it is the thing that makes this buildable
+
+**The seam loops are already in the baked mesh.** Manifold puts vertices on the intersection curve
+because that is what exact CSG does. Measured on a helium of `box_hull`: the room shell's keeper
+piece has 21 vertices, of which **exactly 4 lie on BOTH bodies' outer surfaces** - the rectangle
+where the two cubes cross. Nothing has to be found or approximated; the vertices are there.
+
+**Every such test must be calibrated (F34).** A `box_hull` tessellation sits INSIDE its own field:
+measured here, -0.159 m for both the body and its inset. `ShipCsgBake._offset_of(cutter, surface)`
+gives the offset; a test against a raw `sdf() == 0` finds nothing at all, which is what the first
+run of the probe did.
+
+### The build, as proposed
+
+1. Read the room shell back (already done) and classify every face by which member's surface it lies
+   on, outer or inner, using the calibrated offsets.
+2. The boundary between one member's faces and another's IS the seam loop - outer and inner, both
+   already real edges of the mesh.
+3. Cap each piece by joining its outer loop to its inner loop, the author's `(i, a, b, j)` quad per
+   segment. Both pieces of a pair share those two loops, so their caps are the same surface and the
+   pieces meet exactly: no overlap, no gap, no plane anywhere.
+4. Drop `room_splits`, `_beyond` and the half-space cutter entirely (ADR 0035's machinery).
+
+**The one wrinkle.** In the author's cube-in-cube the inner loop is a scaled copy of the outer, so
+vertex `i` pairs with vertex `a` one for one. Where two DIFFERENT bodies cross, the outer loop
+(where the two bodies meet) and the inner loop (where their two insets meet) are found independently
+and have their own vertex counts, so the cap has to zip the two loops by arc-length rather than by
+index. That is bookkeeping, and it is the only part of the author's construction that is not
+literally as described.
+
+### Two things this will NOT fix, recorded so they are not chased again
+
+1. **A clump of CUBES on a THREE-fold arrangement cannot have identical pieces.** A cube has no
+   three-fold symmetry about a face axis, so a boron class's three equatorial bodies meet its two
+   axial ones differently whatever the cut does: measured, 34.29 against 34.85 m³. Carbon's
+   octahedron lines up with the cube's own four-fold axes, which is why its six match. The lever for
+   that is the arrangement or the body orientation, not the cut.
+2. **Framing the bodies on the arrangement's pole does not help.** Tried 2026-09-22 so that a ring of
+   bodies would be exact rotations of each other: it changed boron's numbers not at all and left a
+   sphere carbon with cells that would not close. Reverted; `ShipAttach.mount_frame` stands.
+
+### And one hazard the build must respect
+
+**A cutter standing on the surface it cuts is a coincidence the engine will not resolve.** Clipping
+a member's half-space to its neighbour's own SOLID is the exact answer and was measured to give a
+sphere nucleus an open piece and cells that would not close - the neighbour's surface IS the room
+shell's surface there. ADR 0035's amendment uses the pair's shared AABB for that reason. Mesh
+surgery sidesteps it, but anything that goes back to solid cutters will meet it again.

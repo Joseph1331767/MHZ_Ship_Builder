@@ -2975,10 +2975,20 @@ equatorial protons stay 1.6% apart whatever the cut does.
 Boron's axial pieces 30.45 -> 30.88 m3, its equatorial three from 4% apart to 1.6%. **gdUnit4
 322/322**; selfcheck PASSED, hash unchanged at `5536787c6c35d236`; gdformat and gdlint clean.
 
-### Still open
+### Still open - FOLLOWUPS F48, proposed and awaiting the author's go
 
-Inside the shared box the division is a PLANE, and the seam between two fused bodies is not flat. The
-surface that runs from the inner seam curve to the outer one is where the two fields read alike; it
-is flat only when the two bodies are mirror images across it. Building it means either marching it
-into a mesh or clipping the read-back pieces on the field (`MeshClip.clip_all` takes a Callable) -
-recorded here rather than started.
+Inside the shared box the division is a PLANE, and the seam between two fused bodies is not flat: a
+plane is the right divider only where the two bodies are mirror images across it, which is why a
+carbon of cubes comes out right and a boron of cubes does not.
+
+The author's answer, and it is the right one: split the room at its seams and CAP - "the cut shapes
+inner seams all have vertexes, and the outter shell has vertexes, their end caps would be the
+capping of inner seam verticies to outter seam verticies". No marching and no surface nets: "weve
+already decided on excat mesh cfg stuff". Measured the same day, and it is what makes it buildable:
+the seam loops are ALREADY in the baked mesh - a helium of cubes has exactly 4 vertices of its shell
+lying on both bodies' surfaces, the rectangle where they cross.
+
+**F48 carries the whole of it**: what was measured, the four steps, the one wrinkle (the inner and
+outer loops have their own vertex counts, so the cap zips by arc-length rather than by index), the
+two things it will NOT fix, and the hazard it must respect. It replaces the mechanism ADR 0021 set,
+so it needs an ADR and the author's go before anyone builds it.
