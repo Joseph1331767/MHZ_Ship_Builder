@@ -2942,3 +2942,43 @@ windowed visual, resolve and explode checks PASSED. Frames: `reports/visual_box_
 
 A carbon with CUBE rooms, exploded: six pieces of one shape, flat faces between them, each pulling
 away from the centre along its own axis - the top one included.
+
+
+## [2026-09-22] The dividing plane stops at the body it is dividing from
+
+> "when i tried boron with 3 radial nodes and cubes the proton does not come out correctly .. it
+> looks as if theres a simple flat cut with missing corner pieces and such. so when a cube collides
+> non-orthognally it doesnt bite and seam along all geodesics, its just a flat cut and leaves
+> cornerns and stuff cut out and unresolved"
+
+ADR 0035 amended. The plane two equal members divide on was carried by an INFINITE half-space, and a
+body is not infinite: where two of them meet at anything but a right angle the plane ran on past the
+neighbour and took a corner off the member, which is material no neighbour ever stood in. Measured on
+boron, whose three equatorial bodies sit 120 degrees apart: 0.39 m into each body, over its whole
+height. Carbon never showed it because an octahedron of axis-aligned cubes puts the plane exactly
+through the corner it grazes.
+
+The cutter is one box now, standing on the plane and covering only what the pair's two bodies have in
+common. Clipping to the neighbour's own SOLID would be exact and cannot be used: that surface is the
+room shell's surface there, and a cutter standing on the surface it cuts is the coincidence the
+boolean engine will not resolve - measured, it gave a sphere nucleus an open piece and cells that
+would not close.
+
+Two things were measured and NOT changed. Framing each body on the arrangement's pole, so a ring of
+them would be exact rotations of each other, made no difference to boron's numbers and broke a sphere
+carbon's cells; it was dropped. And a clump of CUBES on a three-fold arrangement cannot have
+identical pieces at all - a cube has no three-fold symmetry about a face axis - so boron's three
+equatorial protons stay 1.6% apart whatever the cut does.
+
+### Verified
+
+Boron's axial pieces 30.45 -> 30.88 m3, its equatorial three from 4% apart to 1.6%. **gdUnit4
+322/322**; selfcheck PASSED, hash unchanged at `5536787c6c35d236`; gdformat and gdlint clean.
+
+### Still open
+
+Inside the shared box the division is a PLANE, and the seam between two fused bodies is not flat. The
+surface that runs from the inner seam curve to the outer one is where the two fields read alike; it
+is flat only when the two bodies are mirror images across it. Building it means either marching it
+into a mesh or clipping the read-back pieces on the field (`MeshClip.clip_all` takes a Callable) -
+recorded here rather than started.

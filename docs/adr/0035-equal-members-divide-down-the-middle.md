@@ -67,6 +67,22 @@ that host sat. With a clump that stands on nothing there is no such host to sit 
 the stage means instead - every member of the room holds still together, and each one travels away
 from the centre in the full explode.
 
+**AMENDED the same day: the plane is confined to the box the two bodies share.** A plane is
+infinite and a body is not. Where two bodies meet at anything but a right angle the half-space ran
+on past the one it was dividing from and took a corner of the member with it - material no
+neighbour ever stood in. Measured on a BORON class, whose three equatorial bodies sit 120 degrees
+apart: the plane reached 0.39 m into each body over its whole height, and the pieces came out with
+notches cut out of them. "when a cube collides non-orthognally it doesnt bite and seam along all
+geodesics, its just a flat cut and leaves cornerns and stuff cut out and unresolved" (2026-09-22).
+The cutter is now ONE box standing on the plane and covering only what the pair's two bodies have
+in common. Boron's axial pieces went from 30.45 to 30.88 m³ and its equatorial three from 4% apart
+to 1.6%.
+
+The bound is a BOX rather than the neighbour's own solid, which would be the exact answer: that
+surface IS the room shell's surface there, and a cutter standing on the surface it cuts is a
+coincidence the boolean engine will not resolve - measured, clipping to the solid gave a sphere
+nucleus an open piece and cells that would not close.
+
 **Known limits, recorded rather than hidden.**
 
 1. **The pure executor does not cut on the planes.** `ShipMeshBake.bake` keeps its per-part rule and
@@ -79,6 +95,16 @@ from the centre in the full explode.
    not, the plane rule and the priority rule meet, and a point in a triple overlap could fall
    outside every member's claim. No class in the pack builds one; a room of equal bodies (every
    nucleus) and a room of a hull and its tunnels (every other room) are each wholly one rule.
-4. **A radial travel needs a centre to be radial FROM.** A module whose box is centred on the beacon
+4. **The division inside the overlap is still a PLANE, and the seam is not flat.** The surface that
+   divides two fused bodies from the inner seam curve to the outer one is the surface where their
+   two fields read alike - flat only when the two are mirror images across it, which is why a
+   carbon of cubes comes out right and a boron of cubes does not. The plane is confined to what the
+   pair share, so it no longer takes corners off; within that box it is still an approximation, and
+   the material it divides is the wall-thick ring around the seam.
+5. **A clump of cubes on a THREE-fold arrangement cannot have identical pieces.** A cube has no
+   three-fold symmetry about a face axis, so boron's three equatorial bodies necessarily meet its
+   two axial ones differently: measured, 34.29 against 34.85 m³, and no cut can make them equal.
+   Carbon's octahedron lines up with the cube's own four-fold axes, which is why its six match.
+6. **A radial travel needs a centre to be radial FROM.** A module whose box is centred on the beacon
    gets no direction and stays where it is, which is right for a body laid over the centre and is
    also what a caller that merges a component's inner parts into their instance sees.

@@ -69,10 +69,6 @@ const FINE_CUTS: Array = [1.0 / 3.0, 0.5, 2.0 / 3.0]
 ## gently curved faces into (see [method _feature_wire]).
 const WIRE_FEATURE_DEG: float = 10.0
 
-## How far past a room's own bounds a dividing half-space reaches, as a multiple of them. Anything
-## over one covers the room; the margin is there so no face of the cutter can land near a surface.
-const HALF_SPACE_REACH: float = 3.0
-
 ## A whole room's slicing job is keyed by its keeper under this prefix.
 const ROOM_PREFIX: String = "room:"
 
@@ -155,7 +151,9 @@ static func bake(
 	# is a priority order - the first member keeps everything, the last is bitten by all of them -
 	# and the bite is that body's ROUNDED surface. Six equal bodies about a centre came out as six
 	# different pieces with curved grooves between them; cut at the plane they divide on, they come
-	# out as six of the same piece with a flat face each.
+	# out as six of the same piece with a flat face each. The plane cuts only WITHIN the neighbour
+	# ([method _beyond]): past it there is nothing to divide, and a bare half-space took corners off
+	# bodies that met at anything but a right angle.
 	var pieces: Dictionary = {}
 	var room_splits: Dictionary = plan.get("room_splits", {})
 	for members: PackedStringArray in plan["rooms"]:
@@ -166,7 +164,6 @@ static func bake(
 		# reading, with holed faces bridged by PolyMesh, made pass two return 348 m3 for a piece of a
 		# 50 m3 shell; the engine's own mesh does not.
 		var engine_shell: Mesh = _engine_mesh(shells[members[0]])
-		var reach: float = _room_reach(outer, members)
 		for i: int in members.size():
 			var id: String = members[i]
 			var piece: CSGCombiner3D = CSGCombiner3D.new()
@@ -174,10 +171,17 @@ static func bake(
 			_add_mesh(piece, outer[id], CSGShape3D.OPERATION_INTERSECTION)
 			var divided: Dictionary = {}
 			for entry: Dictionary in room_splits.get(id, []):
-				divided[str(entry["other"])] = true
-				piece.add_child(
-					_half_space(entry["origin"] as Vector3, entry["normal"] as Vector3, reach)
+				var other: String = str(entry["other"])
+				divided[other] = true
+				if not outer.has(other):
+					continue
+				var cutter: CSGBox3D = _beyond(
+					entry["origin"] as Vector3,
+					entry["normal"] as Vector3,
+					(outer[id] as PolyMesh).aabb().intersection((outer[other] as PolyMesh).aabb())
 				)
+				if cutter != null:
+					piece.add_child(cutter)
 			for j: int in i:
 				if divided.has(members[j]):
 					continue
@@ -400,35 +404,54 @@ static func bake_extras(
 ## One slicing job: the solid (as the engine made it, or [param fallback] when it has none), the
 ## frame it is cut in, and its extent in that frame read off [param bodies] - the ORIGINAL bodies,
 ## so a cut does not move when a neighbour changes what was carved off this piece.
-## Everything on the far side of the plane through [param at] with [param normal], as a box of
-## [param reach] metres: what a member of a room gives up to an equal neighbour (ADR 0035). The box
-## stands one face ON the plane and reaches away along the normal, so the member keeps the side the
-## normal points away from.
-static func _half_space(at: Vector3, normal: Vector3, reach: float) -> CSGBox3D:
-	var out: CSGBox3D = CSGBox3D.new()
-	out.operation = CSGShape3D.OPERATION_SUBTRACTION
-	out.size = Vector3(reach, reach, reach)
+## What a member of a room gives up to an equal neighbour (ADR 0035): ONE box, standing on the
+## plane through [param at] with [param normal] and covering [param shared] - the box the two
+## bodies have in common - on the far side of it. The member keeps the side the normal points
+## away from. Null when the two share nothing beyond the plane.
+##
+## CONFINED TO WHAT THEY SHARE, NOT A BARE HALF-SPACE. A plane is infinite and a body is not: where
+## two bodies meet at anything but a right angle the plane runs on past the one it is dividing from
+## and takes a corner of the member with it, which is material no neighbour ever stood in. "when a
+## cube collides non-orthognally it doesnt bite and seam along all geodesics, its just a flat cut
+## and leaves cornerns and stuff cut out and unresolved" (2026-09-22) - measured on a boron class,
+## whose three equatorial bodies sit 120 degrees apart: the plane reached 0.39 m into each body over
+## its whole height.
+##
+## THE BOUND IS A BOX, NOT THE NEIGHBOUR ITSELF. Clipping to the neighbour's own solid is the exact
+## answer and cannot be used: that surface IS the room shell's surface there, and a cutter standing
+## on the surface it cuts is the coincidence a boolean engine will not resolve - measured, a sphere
+## nucleus came back with an open piece and with cells that would not close. The two bodies' common
+## box is a plain axis-aligned box, which coincides with nothing, and it is as tight a bound as the
+## pair's own reach.
+static func _beyond(at: Vector3, normal: Vector3, shared: AABB) -> CSGBox3D:
 	var axis: Vector3 = normal
 	if axis.length_squared() <= 1.0e-12:
 		axis = Vector3.BACK
 	axis = axis.normalized()
-	out.transform = Transform3D(ShipAttach.mount_frame(axis), at + axis * (reach * 0.5))
+	var frame: Basis = ShipAttach.mount_frame(axis)
+	var inv: Basis = frame.inverse()
+	var low: Vector3 = Vector3.ZERO
+	var high: Vector3 = Vector3.ZERO
+	for i: int in 8:
+		var corner: Vector3 = inv * (shared.get_endpoint(i) - at)
+		low = (
+			corner
+			if i == 0
+			else Vector3(minf(low.x, corner.x), minf(low.y, corner.y), minf(low.z, corner.z))
+		)
+		high = (
+			corner
+			if i == 0
+			else Vector3(maxf(high.x, corner.x), maxf(high.y, corner.y), maxf(high.z, corner.z))
+		)
+	if high.z <= 0.0:
+		return null
+	var out: CSGBox3D = CSGBox3D.new()
+	out.operation = CSGShape3D.OPERATION_SUBTRACTION
+	out.size = Vector3(maxf(high.x - low.x, 0.001), maxf(high.y - low.y, 0.001), high.z)
+	var centre: Vector3 = Vector3((low.x + high.x) * 0.5, (low.y + high.y) * 0.5, high.z * 0.5)
+	out.transform = Transform3D(frame, at + frame * centre)
 	return out
-
-
-## How big a dividing half-space has to be to cover [param members] whatever way it is turned.
-static func _room_reach(outer: Dictionary, members: PackedStringArray) -> float:
-	var bounds: AABB = AABB()
-	var first: bool = true
-	for id: String in members:
-		if not outer.has(id):
-			continue
-		var box: AABB = (outer[id] as PolyMesh).aabb()
-		bounds = box if first else bounds.merge(box)
-		first = false
-	if first:
-		return 1.0
-	return maxf(bounds.size.length() * HALF_SPACE_REACH, 1.0)
 
 
 static func _slice_job(
