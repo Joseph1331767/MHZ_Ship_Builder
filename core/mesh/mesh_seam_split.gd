@@ -32,11 +32,10 @@ extends RefCounted
 ## Two pieces of a pair share the same two loops, so their caps are the same surface and they meet
 ## exactly - no overlap, no gap, and no plane anywhere.
 ##
-## NOT WIRED YET, and FOLLOWUPS F48 says why. What this file does is measured and right: a cube
-## carbon splits into six pieces of 26.64 m3 that sum to its shell exactly, every piece closed and
-## every edge shared by two faces. What is not solved is the ENGINE work downstream - a piece with
-## a door bored through it will not slice into its cells. [ShipCsgBake] therefore still cuts rooms
-## back the old way; do not delete either until the other is proven.
+## LIVE FOR A ROOM IT CAN DIVIDE SOUNDLY (ADR 0036), and [ShipCsgBake] falls back to the older
+## cut-back for one it cannot - which today is any room of spheres, whose pieces come out closed and
+## the right size but non-manifold (FOLLOWUPS F48). A cube carbon splits into six pieces of 26.64 m3
+## summing to its room exactly, every piece closed and every edge shared by two faces.
 ##
 ## Pure data (SPEC section 12): [RefCounted], static only, no [Node], no [code]res://[/code].
 
@@ -78,10 +77,20 @@ const MAX_LOOP_STEPS: int = 100000
 ## reckoning had them claimed by whichever member was nearest, which is how a piece ends up with
 ## an island of surface that is not its own and a cap that crosses itself.
 ##
+## [param claims] speaks for the surfaces that belong to a member but lie on NO field of its own -
+## the hatch hardware. Each entry is `{"id": String, "bounds": AABB}`: a face nothing else claimed,
+## standing wholly inside those bounds, is that member's. A collar and a bore have no distance field
+## to be recognised by, and they do not need one - a door names the two modules it joins, so whose
+## they are was never in question, only how to say it.
+##
 ## A member whose surface never reaches the shell gets an empty mesh: it contributed no hull, which
 ## is a true answer about a body buried inside its neighbours, and the caller decides what to draw.
 static func split(
-	shell: PolyMesh, members: PackedStringArray, bodies: Dictionary, rooms: Dictionary
+	shell: PolyMesh,
+	members: PackedStringArray,
+	bodies: Dictionary,
+	rooms: Dictionary,
+	claims: Array = []
 ) -> Dictionary:
 	var out: Dictionary = {}
 	if shell == null or shell.is_empty() or members.is_empty():
@@ -89,6 +98,7 @@ static func split(
 	var owner_of: PackedInt32Array = PackedInt32Array()
 	var kind_of: PackedInt32Array = PackedInt32Array()
 	_classify(shell, members, bodies, rooms, owner_of, kind_of)
+	_claim(shell, members, claims, owner_of, kind_of)
 
 	# Every directed edge of the shell: what face it belongs to, and which edge follows it round
 	# that face. A closed solid traverses every edge once each way, which is what makes the first
@@ -203,6 +213,55 @@ static func is_sound(piece: PolyMesh) -> bool:
 					return false
 				seen[key] = used
 	return true
+
+
+## The faces no field claimed, handed to the member whose hatch they belong to.
+##
+## WHY A HATCH NEEDS TELLING AT ALL. Every other surface of a room is a field - a body, a cavity, a
+## socket - and the split recognises a face by standing it against them. A door is not: it is a
+## collar unioned on, a clearance taken out and a bore through both, three plain meshes with no
+## distance function anywhere. Left unrecognised they fell to whichever member was nearest, and a
+## handful of faces in the wrong patch is all it takes: each becomes an island with a boundary and
+## a cap of its own, and the piece comes out non-manifold. Measured on a cube carbon with its four
+## hatches bored in, every piece failed [method is_sound] and three of six would not dice.
+##
+## The bounds are the door's own, which are small and sit wholly within one module per side, and
+## only faces NOTHING else claimed are tested against them - so a surface that has a field of its
+## own can never be taken by a door standing in the same space.
+static func _claim(
+	shell: PolyMesh,
+	members: PackedStringArray,
+	claims: Array,
+	owner_of: PackedInt32Array,
+	kind_of: PackedInt32Array
+) -> void:
+	if claims.is_empty():
+		return
+	var index_of: Dictionary = {}
+	for i: int in members.size():
+		index_of[members[i]] = i
+	for face: int in shell.faces.size():
+		if owner_of[face] >= 0:
+			continue
+		var loop: PackedInt32Array = shell.faces[face]
+		for claim: Dictionary in claims:
+			var id: String = str(claim.get("id", ""))
+			if not index_of.has(id):
+				continue
+			var bounds: AABB = claim.get("bounds", AABB())
+			var inside: bool = true
+			for v: int in loop:
+				if not bounds.has_point(shell.vertices[v]):
+					inside = false
+					break
+			if not inside:
+				continue
+			owner_of[face] = int(index_of[id])
+			# A hatch stands on the body side of the wall it goes through, and its bore is a cut
+			# face belonging to neither surface; both travel with the body patch, which is where
+			# the collar shows and where a seam through a hatch would have to be capped.
+			kind_of[face] = KIND_BODY
+			break
 
 
 ## An ISLAND JOINS WHAT SURROUNDS IT. A face whose every neighbour belongs to one other surface is
@@ -500,6 +559,15 @@ static func _nearest(shell: PolyMesh, loop: PackedInt32Array, to: Vector3) -> in
 
 ## The closed loops that bound one member's BODY or ROOM patch, walked.
 ##
+## A BOUNDARY IS WHERE THE MEMBER CHANGES, and nowhere else. A member's own two surfaces meet each
+## other wherever a bore goes through its wall - the bore's own wall joins them - and treating that
+## as a boundary asks for a cap across a hole that is already closed. The surface a face lies on
+## still decides which LOOP it belongs to, so the outer seam and the inner seam are still found
+## apart and still pair with each other; it just no longer creates a boundary of its own. Measured
+## on a cube carbon with its four hatches bored in: by member AND surface, every piece came out
+## non-manifold and three of six refused to dice; by member alone, all six are sound and all six
+## dice.
+##
 ## WALKED, NOT CHAINED. Where three bodies meet, one vertex carries boundary edges of two different
 ## seams, and a walk that only knows the edge SET takes whichever it finds and hops from one seam
 ## onto the other - measured on a sphere carbon, whose four room seams came back as one loop of 149
@@ -527,7 +595,7 @@ static func _patch_loops(
 				var twin: Variant = across.get(_edge_key(v, u, shell), null)
 				if twin == null:
 					continue
-				if owner_of[int(twin)] == index and kind_of[int(twin)] == kind:
+				if owner_of[int(twin)] == index:
 					continue
 				edges[_edge_key(u, v, shell)] = u
 

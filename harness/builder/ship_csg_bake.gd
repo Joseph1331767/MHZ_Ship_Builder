@@ -69,6 +69,15 @@ const FINE_CUTS: Array = [1.0 / 3.0, 0.5, 2.0 / 3.0]
 ## gently curved faces into (see [method _feature_wire]).
 const WIRE_FEATURE_DEG: float = 10.0
 
+## How far past a door's own bounds a face may stand and still be claimed as part of it, metres.
+## The hardware is modelled tight to the hole; this is slack for the weld, nothing more.
+const DOOR_CLAIM_M: float = 0.05
+
+## Report keys: how many rooms of several were split at their seams (ADR 0036), and how many fell
+## back to the older cut-back because the split did not come out sound.
+const SPLIT_ROOMS: String = "split_rooms"
+const CUT_BACK_ROOMS: String = "cut_back_rooms"
+
 ## A whole room's slicing job is keyed by its keeper under this prefix.
 const ROOM_PREFIX: String = "room:"
 
@@ -140,61 +149,116 @@ static func bake(
 	await _until_ready(host, shells.values())
 	_tick(progress, 0.3, "PIECES")
 
-	# PASS TWO: each member's piece is the room's shell within the member's ORIGINAL body, cut away
-	# from every EQUAL neighbour at the plan's plane between them ("room_splits") and, for the rest,
-	# less the bodies of the members before it. A room of one is simply its shell. Nothing is read
-	# back here (ADR 0030): a piece stays in the engine, as the combiner that made it, until the
-	# doors are through it - measured, reading every piece at every pass was the larger half of a
-	# bake.
+	# PASS TWO: the room is finished as ONE BODY and only then broken into its pieces (ADR 0036).
+	# Every hatch of the room is bored while it is whole, and the shell is then SPLIT AT ITS SEAMS -
+	# each piece its own faces of it, capped from its inner seam loop to its outer one. This is the
+	# order every CAD pipeline uses and the author named it: "union all primatave shapes together,
+	# then cut them along the shape of interior seam to exterior seam", and cut the openings before
+	# separating, not after. Mesh surgery, not a boolean: the seam loops are already vertices of the
+	# shell, because that is what an exact union puts there.
 	#
-	# THE PLANE IS WHY THE PIECES OF A CLUMP MATCH (ADR 0035). Subtracting a neighbour's whole body
-	# is a priority order - the first member keeps everything, the last is bitten by all of them -
-	# and the bite is that body's ROUNDED surface. Six equal bodies about a centre came out as six
-	# different pieces with curved grooves between them; cut at the plane they divide on, they come
-	# out as six of the same piece with a flat face each. The plane cuts only WITHIN the neighbour
-	# ([method _beyond]): past it there is nothing to divide, and a bare half-space took corners off
-	# bodies that met at anything but a right angle.
+	# RETIRED(ADR 0036) where the split holds: the piece as "the shell within the member's own body,
+	# less the bodies of the members before it" (ADR 0021) and, for a pair of equals, less a PLANE
+	# between them (ADR 0035). A solid cutter is a priority order - the first member keeps
+	# everything, the last is bitten by all of them - and a plane divides two bodies correctly only
+	# where they mirror across it. Neither follows the seam.
+	#
+	# A ROOM THE SPLIT CANNOT DIVIDE SOUNDLY FALLS BACK to that older cut-back, whole. The two
+	# constructions disagree about who owns the wall at a seam and are not meant to agree, so a room
+	# takes one or the other. Measured: a carbon of BOXES splits - six pieces of one size, summing
+	# exactly to the room, every one of them closed and every edge shared by two faces - and a
+	# carbon of SPHERES does not yet, and keeps the pieces it has always had.
 	var pieces: Dictionary = {}
-	var room_splits: Dictionary = plan.get("room_splits", {})
+	var pre_bored: Dictionary = {}
+	var cut_back: Array = []
+	var split_rooms: int = 0
 	for members: PackedStringArray in plan["rooms"]:
 		if members.size() == 1:
 			continue
-		# The shell goes back into the engine AS THE ENGINE MADE IT - its own manifold triangles -
-		# not as this file's merged n-gons re-triangulated. Measured on a box nucleus: the merged
-		# reading, with holed faces bridged by PolyMesh, made pass two return 348 m3 for a piece of a
-		# 50 m3 shell; the engine's own mesh does not.
+		var work: Dictionary = {"union": [], "cut": []}
+		var claims: Array = []
+		var holed_ids: Dictionary = {}
+		for door: Dictionary in plan.get("doors", []):
+			for side: String in ShipDoors.SIDES:
+				var id: String = str(door[side])
+				if not members.has(id):
+					continue
+				var collar: PolyMesh = door[ShipDoors.DOOR_COLLAR][side]
+				var clear: PolyMesh = door[ShipDoors.DOOR_CLEAR][side]
+				var bore: PolyMesh = door[ShipDoors.DOOR_BORE]
+				(work["union"] as Array).append(collar)
+				(work["cut"] as Array).append(clear)
+				(work["cut"] as Array).append(bore)
+				# WHOSE THESE FACES ARE. A collar and a bore lie on no field of the member's own,
+				# so the split would hand them to whichever member was nearest and scatter islands
+				# through the wrong patches; a door names its two modules, and this is that, said
+				# in the only terms a mesh can be recognised by - where it stands.
+				var bounds: AABB = collar.aabb().merge(clear.aabb()).merge(bore.aabb())
+				claims.append({"id": id, "bounds": bounds.grow(DOOR_CLAIM_M)})
+				holed_ids[id] = true
+		var source: Mesh = _engine_mesh(shells[members[0]])
+		if not (work["union"] as Array).is_empty() or not (work["cut"] as Array).is_empty():
+			var holed: CSGCombiner3D = _with_doors(stage, source, outer[members[0]], work)
+			await _until_ready(host, [holed])
+			source = _engine_mesh(holed)
+		var shell_mesh: PolyMesh = _read_raw(source)
+		if shell_mesh.is_empty():
+			cut_back.append(members)
+			continue
+		var body_fields: Dictionary = {}
+		var room_fields: Dictionary = {}
+		for id: String in members:
+			body_fields[id] = _member_fields(plan, id, ShipMeshBake.CUT_BODY, outer)
+			room_fields[id] = _member_fields(plan, id, ShipMeshBake.CUT_ROOM, inner)
+		var split: Dictionary = MeshSeamSplit.split(
+			shell_mesh, members, body_fields, room_fields, claims
+		)
+		var sound: bool = true
+		for id: String in members:
+			var piece: Variant = split.get(id, null)
+			if not (piece is PolyMesh) or not MeshSeamSplit.is_sound(piece as PolyMesh):
+				sound = false
+				break
+		if not sound:
+			cut_back.append(members)
+			continue
+		split_rooms += 1
+		for id: String in members:
+			# Back into CAD shape: the split works on the engine's triangles, and a piece of a box
+			# should read as six faces and a chamfer, not as the fragments of one.
+			pieces[id] = _tidy(split[id] as PolyMesh)
+			if holed_ids.has(id):
+				pre_bored[id] = true
+
+	# THE OLD CUT-BACK, for a room the split could not divide soundly.
+	var carved: Dictionary = {}
+	for members: PackedStringArray in cut_back:
 		var engine_shell: Mesh = _engine_mesh(shells[members[0]])
 		for i: int in members.size():
 			var id: String = members[i]
 			var piece: CSGCombiner3D = CSGCombiner3D.new()
 			_add_engine_mesh(piece, engine_shell, CSGShape3D.OPERATION_UNION)
 			_add_mesh(piece, outer[id], CSGShape3D.OPERATION_INTERSECTION)
-			var divided: Dictionary = {}
-			for entry: Dictionary in room_splits.get(id, []):
-				var other: String = str(entry["other"])
-				divided[other] = true
-				if not outer.has(other):
-					continue
-				var cutter: CSGBox3D = _beyond(
-					entry["origin"] as Vector3,
-					entry["normal"] as Vector3,
-					(outer[id] as PolyMesh).aabb().intersection((outer[other] as PolyMesh).aabb())
-				)
-				if cutter != null:
-					piece.add_child(cutter)
 			for j: int in i:
-				if divided.has(members[j]):
-					continue
 				_add_mesh(piece, outer[members[j]], CSGShape3D.OPERATION_SUBTRACTION)
 			stage.add_child(piece)
-			pieces[id] = piece
-	if not pieces.is_empty():
-		await _until_ready(host, pieces.values())
-	# Where every piece stands so far: its own combiner, or a room of one's shell.
+			carved[id] = piece
+	if not carved.is_empty():
+		await _until_ready(host, carved.values())
+
+	# Where every piece stands: its own mesh from the split, its own combiner from the cut-back, or
+	# - for a room of one - the room's shell as the engine made it.
 	var made: Dictionary = {}
+	var cut_solid: Dictionary = {}
 	for members: PackedStringArray in plan["rooms"]:
 		for id: String in members:
-			made[id] = pieces[id] if pieces.has(id) else shells[members[0]]
+			if pieces.has(id):
+				cut_solid[id] = pieces[id]
+				made[id] = (pieces[id] as PolyMesh).to_array_mesh()
+			elif carved.has(id):
+				made[id] = _engine_mesh(carved[id])
+			else:
+				made[id] = _engine_mesh(shells[members[0]])
 
 	# PASS TWO AND A HALF: THE DOORS (ADR 0029). Every bounded seam's opening, on both of its
 	# pieces at once - a piece with several doors takes them all in one combiner. A piece the
@@ -207,7 +271,11 @@ static func bake(
 		var ids: Array = work.keys()
 		ids.sort()
 		for id: String in ids:
-			bored[id] = _with_doors(stage, _engine_mesh(made[id]), outer[id], work[id])
+			# A piece that was split off a room already carries its hatches: they were bored while
+			# the room was one body, which is the whole point of the order (ADR 0036).
+			if pre_bored.has(id):
+				continue
+			bored[id] = _with_doors(stage, made[id] as Mesh, outer[id], work[id])
 		await _until_ready(host, bored.values())
 	_tick(progress, 0.75, "READING")
 
@@ -235,15 +303,23 @@ static func bake(
 		for id: String in members:
 			if solids.has(id):
 				continue
-			var solid: PolyMesh = _read_combiner(made[id])
+			# A piece the split made is already exact and needs no second reading.
+			var solid: PolyMesh = cut_solid.get(id, null)
+			if solid == null:
+				solid = _read_combiner(carved[id] if carved.has(id) else shells[members[0]])
 			solids[id] = solid if not solid.is_empty() else outer[id]
-			engine[id] = _engine_mesh(made[id])
+			engine[id] = made[id]
 	# The engine's meshes are Resources and outlive the nodes that made them: the extras operate
 	# on them later, after this stage is gone.
 	stage.queue_free()
 	_tick(progress, 0.9, "SURFACES")
 
 	var report: Dictionary = ShipMeshBake.report(solids, plan, t0)
+	# WHICH CONSTRUCTION EACH ROOM GOT (ADR 0036): split at its seams, or cut back the older way
+	# because the split did not come out sound. A room that falls back is not an error and not a
+	# silent one either - its pieces look different, and this is how anyone can tell which.
+	report[SPLIT_ROOMS] = split_rooms
+	report[CUT_BACK_ROOMS] = cut_back.size()
 	# Every mesh the view draws carries its faces in three NAMED surfaces - exterior, interior,
 	# cut - so the INTERIOR display mode can treat them apart (PolyMesh.to_array_mesh_grouped).
 	var meshes: Dictionary = {}
@@ -253,6 +329,13 @@ static func bake(
 	report["meshes"] = meshes
 	report["split"] = plan["split"]
 	report["rooms"] = plan["rooms"]
+	# A PIECE CARRIES ITS HATCHES EITHER WAY (ADR 0036): bored on its own, or bored while its room
+	# was still one body and then split off it. Both belong here - the caller is asking which pieces
+	# have their openings, not which pass made them.
+	for id: String in pre_bored:
+		if not bored_ids.has(id) and solids.has(id):
+			bored_ids.append(id)
+	bored_ids.sort()
 	report["bored"] = bored_ids
 	report["door_failed"] = door_failed
 	report[EXTRAS_READY] = false
@@ -740,6 +823,28 @@ static func _on_any(v: Vector3, fields: Array) -> bool:
 
 ## [param surface] less every cutter of [param cuts] on its [param side] ("outer" or "inner"), as
 ## one combiner.
+## Every calibrated field one member's surface of [param kind] is made of: the member's own, and one
+## per SOCKET cut into it. A socket's face lies on the cutter's surface and belongs to the member it
+## was cut into - which is the only member it can belong to, since whatever cut it is a room of its
+## own and not in this split at all.
+static func _member_fields(
+	plan: Dictionary, id: String, kind: String, surfaces: Dictionary
+) -> Array:
+	var cutters: Dictionary = plan["cutters"]
+	var side: String = "outer" if kind == ShipMeshBake.CUT_BODY else "inner"
+	var out: Array = []
+	var key: String = ShipMeshBake._cutter_key(id, kind)
+	if cutters.has(key) and surfaces.has(id):
+		out.append(ShipDoors.field_of(cutters[key], surfaces[id]))
+	for cut: Dictionary in (plan["cuts"] as Dictionary).get(id, []):
+		if not cutters.has(cut.get(side, "")):
+			continue
+		var cutter: MeshClip.Cutter = cutters[cut[side]]
+		if cutter.surface != null and not cutter.surface.is_empty():
+			out.append(ShipDoors.field_of(cutter, cutter.surface))
+	return out
+
+
 static func _less_cuts(
 	surface: PolyMesh, cuts: Array, cutters: Dictionary, side: String
 ) -> CSGCombiner3D:
@@ -820,6 +925,14 @@ static func _read_combiner(combiner: CSGCombiner3D) -> PolyMesh:
 ## on a box carbon into closed solids 0.4-0.5 m3 too big - a tunnel read 1.498 m3 where its own
 ## halves summed to 1.026. Closed is not enough; the volume is checked too.
 static func _read(mesh: Mesh) -> PolyMesh:
+	return _tidy(_read_raw(mesh))
+
+
+## The engine's triangles as a [PolyMesh], welded and NOT merged - what the seam split reads (ADR
+## 0036). A triangle of an exact boolean lies on exactly ONE of the surfaces that made it, while a
+## merged n-gon spanning two bodies' coplanar surfaces lies wholly on neither: measured, a helium of
+## cubes left 2188 m2 of its shell, most of its area, claimed by no member at all.
+static func _read_raw(mesh: Mesh) -> PolyMesh:
 	if mesh == null:
 		return PolyMesh.new()
 	var polys: Array = []
@@ -841,7 +954,14 @@ static func _read(mesh: Mesh) -> PolyMesh:
 				)
 	if polys.is_empty():
 		return PolyMesh.new()
-	var raw: PolyMesh = PolyMesh.from_polygons(polys, READ_WELD_M)
+	return PolyMesh.from_polygons(polys, READ_WELD_M)
+
+
+## [param raw] with its coplanar fragments merged into n-gons - unless the merge tears an edge open
+## or changes the volume, in which case the fragments stand. See [method _read].
+static func _tidy(raw: PolyMesh) -> PolyMesh:
+	if raw.is_empty():
+		return raw
 	var tidy: PolyMesh = MeshMerge.merge(raw)
 	if tidy.open_edges() != 0 or tidy.is_empty():
 		return raw

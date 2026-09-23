@@ -2992,3 +2992,38 @@ lying on both bodies' surfaces, the rectangle where they cross.
 outer loops have their own vertex counts, so the cap zips by arc-length rather than by index), the
 two things it will NOT fix, and the hazard it must respect. It replaces the mechanism ADR 0021 set,
 so it needs an ADR and the author's go before anyone builds it.
+
+
+## [2026-09-22] A room is finished whole, then split at its seams
+
+> "the cut shapes inner seams all have vertexes, and the outter shell has vertexes, their end caps
+> would be the capping of inner seam verticies to outter seam verticies, independantly for each
+> piece .. so a face between i,a,b,j would be the cap" / "we will never marsh cubes or use surface
+> nets. weve already decided on excat mesh cfg stuff."
+
+ADR 0036, and it is the author's construction start to finish. A room's hatches are bored while it
+is still one body; the shell is then read as the engine's own triangles and split at its SEAMS -
+each member keeps the faces on its own surfaces, and the loop where its faces meet another's is
+capped from the inner seam to the outer one. Nothing is marched and nothing is sampled on a grid:
+the seam loops are already vertices of the shell, because that is what an exact union puts there.
+
+The ORDER was half the bug, and the author named that too - every CAD pipeline unions, hollows, cuts
+its openings while the body is one, separates, then dices, and this one separated first and bored
+the fragments. The dicing was innocent all along: a split piece with no tunnel diced perfectly.
+
+### Verified
+
+A carbon of CUBE rooms: six pieces of 26.64 and 26.68 m3 - the 0.3% is the four that carry a hatch -
+summing to **159.99 against a room of 159.99**. Every piece closed, every edge shared by exactly two
+faces, every one dicing into its cells. **gdUnit4 322/322** with one new; selfcheck PASSED, hash
+unchanged at `5536787c6c35d236`; validator PASSED; gdformat and gdlint clean; windowed visual,
+resolve and explode checks PASSED. Frame: `reports/visual_box_carbon_explode.png`.
+
+A carbon of SPHERES does not split yet - its pieces come out closed and the right size but
+non-manifold - so the gate sends that room to the older cut-back and it keeps the pieces it has
+always had. F48 carries what was measured.
+
+### Still the human's to check
+
+A carbon with CUBE rooms, exploded: six pieces of one shape, flat faces where they part, each with
+its own hatch opening in it. Then a sphere carbon, which should look exactly as it always has.

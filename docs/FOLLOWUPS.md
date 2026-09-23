@@ -1628,7 +1628,7 @@ plane where the true equidistant surface curves; a clump mixing equal and unequa
 a sliver in a triple overlap; and a module centred on the beacon has no radial direction to take.
 
 
-## F48 - A room's pieces should be SPLIT AT THEIR SEAMS AND CAPPED - BUILT IN CORE, NOT WIRED
+## F48 - A room's pieces SPLIT AT THEIR SEAMS AND CAPPED - DONE for boxes, OPEN for spheres
 
 Raised by the author 2026-09-22, after ADR 0035 and its amendment; the author gave the go the same
 day. `core/mesh/mesh_seam_split.gd` is the construction, and it WORKS - see "What it does, measured"
@@ -1800,3 +1800,18 @@ member with `ShipDoors.field_of` plus one per socket from `plan["cuts"]`, and ca
 each piece's volume, `open_edges()` and whether `is_sound` holds. The wiring that was removed -
 pass two rebuilt around the split, with a fallback to the old cut-back for any room the split could
 not divide soundly - is in this session's history if it is wanted back.
+
+
+### DONE 2026-09-22, as ADR 0036 - and what is left
+
+Wired, in the CAD order the author named: the room's hatches are bored while it is one body, then it
+is split. A carbon of CUBE rooms comes out as six pieces of 26.64/26.68 m³ summing to 159.99 against
+a room of 159.99, all sound, all dicing. `ShipCsgBake` reports `split_rooms` and `cut_back_rooms` so
+which construction a room took is never a guess.
+
+**What is left is the sphere case.** A carbon of `sphere_pod` splits into pieces that are closed and
+the right size (20.7 to 21.2 m³ against a room of 126.3) but NON-MANIFOLD - four to twenty-two edges
+shared by more than two faces - so `MeshSeamSplit.is_sound` refuses them and the room falls back.
+The same code is exact on boxes, so it is not the construction: it is something about a seam whose
+loops carry hundreds of vertices, and the two places to look are the zip (`_partners`, which pairs
+the two loops by arc length) and the lone loops that are capped flat.

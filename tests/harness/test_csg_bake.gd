@@ -447,3 +447,61 @@ func test_a_clump_of_equal_bodies_comes_out_as_pieces_of_one_size() -> void:
 			. is_equal_approx(mean, mean * 0.01)
 		)
 		assert_int((solids[id] as PolyMesh).open_edges()).append_failure_message(id).is_equal(0)
+
+
+## THE SEAM SPLIT (ADR 0036). A room is finished as one body - its hatches bored while it is whole -
+## and only then broken into its members' pieces, each capped from its inner seam loop to its outer
+## one. "the proper way is to union all primatave shapes together, then cut them along the shape of
+## interior seam to exterior seam" (2026-09-22).
+##
+## The claim is exactness: the pieces PARTITION the room. Nothing is owned twice, nothing is owned
+## by nobody, and every piece is a solid the engine will take - closed, and with every edge shared
+## by exactly two faces, which "closed" alone does not promise.
+func test_a_cube_nucleus_divides_at_its_seams() -> void:
+	var doc: ShipDoc = ShipTemplates.build(
+		_data, _cfg, "carbon", {ShipTemplates.OPT_ROOM_FAMILY: "box_hull"}
+	)
+	var report: Dictionary = await ShipCsgBake.bake(self, doc, _data, _cfg)
+	(
+		assert_int(int(report[ShipCsgBake.SPLIT_ROOMS]))
+		. append_failure_message("the nucleus fell back to the older cut-back")
+		. is_equal(1)
+	)
+	assert_int(int(report[ShipCsgBake.CUT_BACK_ROOMS])).is_equal(0)
+	var nucleus: PackedStringArray = PackedStringArray()
+	for members: PackedStringArray in report["rooms"]:
+		if members.size() > nucleus.size():
+			nucleus = members
+	assert_int(nucleus.size()).is_equal(6)
+
+	var solids: Dictionary = report["solids"]
+	var total: float = 0.0
+	for id: String in nucleus:
+		var piece: PolyMesh = solids[id]
+		total += piece.volume()
+		(
+			assert_bool(MeshSeamSplit.is_sound(piece))
+			. append_failure_message("%s is not a solid the engine will take" % id)
+			. is_true()
+		)
+	# THE PARTITION. Six bodies that overlap deeply cannot come to six WHOLE shells between them
+	# unless something is owned twice; measured by hand, the pieces come to the room's own 159.99 m3
+	# exactly, and the cheap form of that claim here is that they come to well under the six.
+	var whole: float = 0.0
+	for id: String in nucleus:
+		whole += _whole_shell(doc, id)
+	(
+		assert_float(total)
+		. append_failure_message(
+			"the pieces come to %.2f m3 of six whole shells' %.2f" % [total, whole]
+		)
+		. is_less(whole * 0.85)
+	)
+	# And on a clump this symmetric they are the same piece, which is the author's own check.
+	var mean: float = total / float(nucleus.size())
+	for id: String in nucleus:
+		(
+			assert_float((solids[id] as PolyMesh).volume())
+			. append_failure_message("%s stands apart from its six" % id)
+			. is_equal_approx(mean, mean * 0.01)
+		)
