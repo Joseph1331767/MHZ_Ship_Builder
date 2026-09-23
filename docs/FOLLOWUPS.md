@@ -1736,6 +1736,24 @@ triangles and hands back one [PolyMesh] per member.
    back as one loop of 149. The half-edge walk - turn about the far vertex through this patch until
    a boundary edge comes round - is the fix.
 
+### THE ORDER IS WRONG, and the author named it (2026-09-22)
+
+> "use standard 3d software pipelines, what would i do in blender, sketchup, autocad, etc.. the
+> workflows are almost always a pattern we can repeat" / "dicing is a simple cut, no weird caps,
+> simple slice all the way through so i dont see how it could be failing"
+
+Every CAD workflow does the same five things in the same order: union the primitives, hollow the
+result, **cut every opening while it is still one body**, then separate into parts (in Blender:
+select the faces, `P` to separate, fill the boundary), then dice. This pipeline does the third step
+LAST - it separates the nucleus into pieces and bores the hatches into the fragments - and that is
+the step that fails. The author is also right that the dicing is innocent: a split piece with no
+tunnel dices perfectly, and only a piece bored AFTER separation is refused.
+
+**The reorder was tested** (`scratch`, 2026-09-22). Hatches bored into the whole room first, then
+split: a cube carbon's six pieces come to **159.99 m3 against a room of 159.99** - still an exact
+partition - and a sphere carbon's to 126.00 against 126.48. So the order is right and the split
+survives it.
+
 ### What blocks the wiring
 
 **A piece with a door bored through it will not slice into its cells.** Measured on a cube carbon:
@@ -1744,9 +1762,35 @@ the two protons with no tunnel slice correctly; the four that carry one bore a d
 closed, every edge shared by exactly two faces (`MeshSeamSplit.is_sound`), the right volume - and
 passing them through a CSG node before the door pass does not help.
 
-So the question for whoever picks this up is narrow: **what does Manifold refuse about a bored split
-piece that it accepts about a bored cut-back piece?** Self-intersection and degenerate faces are the
-obvious suspects and neither has been measured yet.
+Under the reorder the question sharpens to one thing: **the hatch hardware belongs to no member.**
+
+A door is a collar unioned on, a clearance subtracted and a bore through both (`ShipDoors`
+DOOR_COLLAR / DOOR_CLEAR / DOOR_BORE). Once those are in the room, the shell carries faces that lie
+on none of the members' surfaces, and `MeshSeamSplit` hands each to whichever member is nearest.
+That guess scatters single faces into the wrong patch, every one of them becomes an island with its
+own boundary and its own cap, and the piece comes out NON-MANIFOLD - `is_sound` reports false for
+every piece of a bored room, and three of six then refuse to dice.
+
+**The fix is the one the sockets already got.** A socket's faces lie on the tunnel's surface and
+belong to the member it was cut into; the split was taught that and every room stopped falling back.
+A door's faces belong to the member its side names - `door[ShipDoors.SIDE_CHILD]` and
+`door[ShipDoors.SIDE_HOST]` say which - and the split has to be told the same way.
+
+One wrinkle to solve when doing it: a socket arrives as a `MeshClip.Cutter`, which carries a field,
+so `ShipDoors.field_of` calibrates it directly. A door's collar and bore arrive as plain
+[PolyMesh]es with no field at all, so either they need one (a cutter built from the door prism) or
+the faces have to be claimed another way - their own bounds are small and belong to exactly one
+member per side, which is probably enough.
+
+### The order to build it in, once the above is solved
+
+1. Union the members' bodies (with their sockets) and subtract the union of their interiors - the
+   room's shell, as `ShipCsgBake` pass one already makes it.
+2. Bore EVERY hatch of that room into the shell, while it is one body (`_with_doors` takes the
+   whole room's door work just as it takes a piece's).
+3. Read it with the raw reader, split it, cap it.
+4. Merge each piece back into n-gons.
+5. Dice - and nothing that was bored is ever handed back to the engine, which is the whole point.
 
 ### How to see it for yourself
 
