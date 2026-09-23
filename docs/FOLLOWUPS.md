@@ -1628,11 +1628,12 @@ plane where the true equidistant surface curves; a clump mixing equal and unequa
 a sliver in a triple overlap; and a module centred on the beacon has no radial direction to take.
 
 
-## F48 - A room's pieces should be SPLIT AT THEIR SEAMS AND CAPPED - PROPOSED, NOT BUILT
+## F48 - A room's pieces should be SPLIT AT THEIR SEAMS AND CAPPED - BUILT IN CORE, NOT WIRED
 
-Raised by the author 2026-09-22, after ADR 0035 and its amendment. **This needs an ADR and the
-author's go before anyone builds it**, because it replaces the mechanism ADR 0021 set. It is written
-here so the next session starts from what was measured rather than from the argument.
+Raised by the author 2026-09-22, after ADR 0035 and its amendment; the author gave the go the same
+day. `core/mesh/mesh_seam_split.gd` is the construction, and it WORKS - see "What it does, measured"
+below. It is NOT wired into `ShipCsgBake`, because the pieces it makes cannot be carried through the
+engine work that follows. What remains is written down here rather than guessed at again.
 
 ### What the author asked for
 
@@ -1705,3 +1706,53 @@ a member's half-space to its neighbour's own SOLID is the exact answer and was m
 sphere nucleus an open piece and cells that would not close - the neighbour's surface IS the room
 shell's surface there. ADR 0035's amendment uses the pair's shared AABB for that reason. Mesh
 surgery sidesteps it, but anything that goes back to solid cutters will meet it again.
+
+
+### What it does, measured (2026-09-22)
+
+`MeshSeamSplit.split(shell, members, bodies, rooms)` takes the room's shell as the engine's own
+triangles and hands back one [PolyMesh] per member.
+
+- **A cube carbon**: six pieces of **26.64 m3**, summing to **159.82** against a shell of **159.82**
+  - an exact partition, no overlap and no gap, every piece closed. With the tunnel sockets in, the
+  six read 26.64 / 26.72 - within 0.3%, and the difference is the sockets, which are real.
+- **A sphere carbon**: six pieces, all closed, 20.66 to 21.19 m3 against a shell of 126.32.
+- **Helium**, whose two bodies share their side planes: nothing unclaimed, 239.49 against 239.49.
+- The split itself costs **4 ms** on a cube carbon and **127 ms** on a sphere one.
+
+### The five things that had to be right, and are
+
+1. **Read the shell BEFORE the n-gon merge.** A merged face spanning two bodies' coplanar surfaces
+   lies wholly on neither: measured, a helium left 2188 m2 - most of its area - claimed by nobody.
+   `ShipCsgBake._read_raw` exists for this; each piece is merged again afterwards.
+2. **Classify by VERTICES, not centroids.** A face's centroid sits inside a curved surface by its
+   own sagitta, centimetres on a 9 m sphere.
+3. **Calibrate every field** (F34), or nothing is found on any surface at all.
+4. **A member's surface includes the SOCKETS cut into it.** The face at the bottom of a socket lies
+   on the tunnel's surface and belongs to the member; leaving those out is what made every room
+   fall back.
+5. **Walk the boundary, do not chain it.** Where three bodies meet, one vertex carries two seams'
+   edges, and an edge-set walk hops between them: measured, a sphere carbon's four room seams came
+   back as one loop of 149. The half-edge walk - turn about the far vertex through this patch until
+   a boundary edge comes round - is the fix.
+
+### What blocks the wiring
+
+**A piece with a door bored through it will not slice into its cells.** Measured on a cube carbon:
+the two protons with no tunnel slice correctly; the four that carry one bore a door and then their
+64 cells come back summing to ZERO. The pieces themselves are sound by every test available here -
+closed, every edge shared by exactly two faces (`MeshSeamSplit.is_sound`), the right volume - and
+passing them through a CSG node before the door pass does not help.
+
+So the question for whoever picks this up is narrow: **what does Manifold refuse about a bored split
+piece that it accepts about a bored cut-back piece?** Self-intersection and degenerate faces are the
+obvious suspects and neither has been measured yet.
+
+### How to see it for yourself
+
+Build a room's shell as `ShipCsgBake.bake` does (bodies and interiors with their cuts, via
+`_less_cuts`), read it with `_read_raw(_engine_mesh(shell))`, build a body and a room field per
+member with `ShipDoors.field_of` plus one per socket from `plan["cuts"]`, and call `split`. Print
+each piece's volume, `open_edges()` and whether `is_sound` holds. The wiring that was removed -
+pass two rebuilt around the split, with a fallback to the old cut-back for any room the split could
+not divide soundly - is in this session's history if it is wanted back.
