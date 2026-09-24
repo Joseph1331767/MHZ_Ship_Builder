@@ -3323,3 +3323,32 @@ which measures nothing once each chunk has its own z (summed per room a carbon r
 per PIECE it fails too, and correctly, because the grid is anchored to the node's body while a chunk
 is only part of it (a sphere carbon's `p_0007` comes apart 1.55 / 19.75). It now claims what is
 actually claimed: every piece comes apart in two non-empty halves.
+
+
+## [2026-09-24] The dicing runs behind what is on screen
+
+Third of the author's dev notes (SHIFT+F, 13:58), with their own answer to what it would cost:
+
+> "the ship doesnt slice and dice untill after explode is pushed. thats incorrect it should exist
+> like that from the initial bake. explode simply should seperate the pieces." / "you can slice in
+> background and then do a seamless swap when its done"
+
+`_show_bake` asked for the cells and RETURNED, so the screen waited for the cut: a ship was undiced
+until EXPLODE, and pressing it froze the view for 12.9 s. Now the pieces go up at once and the cells
+are cut behind them; when they land the session's `landed` runs `_show_bake` again and the view is
+rebuilt with them. The swap is seamless because nothing moves - a piece and its cells stand in the
+same place, so only the meshes change.
+
+Safe to start without knowing whether the document will move, because `request_extras` already
+checked `is_same(last, from)` before keeping anything: a cut belonging to a replaced bake is thrown
+away. And it is not automatic heavy work (ADR 0028) - nothing starts a BAKE; this is the tail of one
+the author asked for, off-screen, never blocking a frame.
+
+### Verified
+
+**EXPLODE 2.9 s on a carbon, against 12.9.** The work did not get cheaper - it moved off the button.
+**gdUnit4 335/335**; selfcheck PASSED, hash unchanged at `5536787c6c35d236`; resolve, explode and
+visual checks PASSED; gdformat and gdlint clean.
+
+`ship_builder.gd` is at 1999 lines against gdlint's 2000 cap, so this went in as four lines of
+comment and two of code. The next flow to touch it needs a helper class, not a method.

@@ -887,15 +887,15 @@ func _update_meshes() -> void:
 	_bake_session.request_update(_data, _config)
 
 
-## Put the last bake on screen - exploded when the exploded view is up, assembled otherwise. The
-## exploded view and ROOMS: WHOLE draw the bake's extras, made on the first ask (ADR 0030).
+## Put the last bake on screen - exploded when the exploded view is up, assembled otherwise.
+## THE DICING RUNS BEHIND IT (ADR 0042): pieces are drawn at once and cells cut in the background;
+## when they land this runs again (it is the session's `landed`) and rebuilds with them, seamless
+## because nothing moves. RETIRED: the screen WAITED, so a ship was undiced until EXPLODE.
 func _show_bake() -> void:
 	if _view == null or _doc == null or _bake_session.last.is_empty():
 		return
-	if (_exploded or _rooms_whole) and not _bake_session.has_extras():
-		set_status("CUTTING THE PIECES INTO CELLS...")
+	if not _bake_session.has_extras():
 		_bake_session.request_extras()
-		return
 	_connect_explode()
 	var sdf: ShipSdf = ShipSdf.build(_doc, _data, _config)
 	_view.set_rooms_whole(_rooms_whole)
