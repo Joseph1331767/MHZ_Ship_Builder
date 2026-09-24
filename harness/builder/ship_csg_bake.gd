@@ -415,19 +415,25 @@ static func bake_extras(
 			room_shells[keeper] = whole
 			room_source[keeper] = room_mesh
 
-	# THE CELLS: every piece in its own frame, every room shown whole in its keeper's frame across
-	# the extent of all its members.
-	# A ROOM IS CUT AS ONE BODY (ADR 0033). Its chunks are one mass that happens to be several
-	# pieces, so they take the KEEPER's frame across the whole room's extent - one grid of planes
-	# through all of them - rather than each its own, whose axes fan out from an off-centre root and
-	# left the cuts of neighbouring chunks visibly out of line ("it kinda makes the modules out of
-	# alignment", 2026-09-21). A piece standing alone keeps its own frame, so a tunnel still cuts
-	# lengthways along itself.
+	# THE CELLS: EVERY PIECE IN ITS OWN AXES, ACROSS ITS OWN EXTENT (ADR 0041), which is what the
+	# slicer panel has always said it does. A chunk is cut square to its own faces, so its cells are
+	# its own shape divided evenly, and the separation pulls them apart along the axes the chunk is
+	# built on. A room shown WHOLE is one body and keeps one grid: the keeper's frame across every
+	# member's extent.
+	#
+	# RETIRED(ADR 0041): "A ROOM IS CUT AS ONE BODY (ADR 0033). Its chunks are one mass that happens
+	# to be several pieces, so they take the KEEPER's frame across the whole room's extent - one grid
+	# of planes through all of them - rather than each its own, whose axes fan out from an off-centre
+	# root and left the cuts of neighbouring chunks visibly out of line." The author looked at it
+	# again with the split working: "the splitting/dicing system is using global world space
+	# alignemnt, id rather use local node alignment" (2026-09-24). One grid through a room cuts every
+	# chunk diagonally unless the keeper happens to stand square to it, and it sized the grid to the
+	# ROOM, so a chunk occupied a corner of it and diced into slivers on one side and nothing on the
+	# other.
 	var jobs: Dictionary = {}
 	var cell_frames: Dictionary = {}
 	for members: PackedStringArray in plan["rooms"]:
 		var keeper: String = members[0]
-		var room: bool = members.size() > 1
 		var bodies: Array = []
 		for id: String in members:
 			bodies.append(outer[id])
@@ -436,11 +442,8 @@ static func bake_extras(
 				room_source[keeper], room_shells[keeper], frames[keeper], bodies
 			)
 		for id: String in members:
-			var frame: Transform3D = frames[keeper] if room else frames[id]
-			cell_frames[id] = frame
-			jobs[id] = _slice_job(
-				engine.get(id, null), solids[id], frame, bodies if room else [outer[id]]
-			)
+			cell_frames[id] = frames[id]
+			jobs[id] = _slice_job(engine.get(id, null), solids[id], frames[id], [outer[id]])
 	var cut: Dictionary = await _slice(stage, host, jobs, progress)
 	stage.queue_free()
 	_tick(progress, 0.8, "SURFACES")

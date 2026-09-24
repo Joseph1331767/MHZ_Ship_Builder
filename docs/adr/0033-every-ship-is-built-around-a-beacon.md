@@ -56,6 +56,10 @@ measured on helium, whose twin landed exactly on its other proton.
 
 **A room is cut as one body** (amending ADR 0032): the cells of a room of several are cut in the
 KEEPER's frame across the whole room's extent, so one grid of planes runs through all of its chunks.
+RETIRED(ADR 0041): every piece is diced in its OWN axes across its own body's extent. The keeper
+of a nucleus stands at whatever angle its class puts it at, so one grid through the room cut every
+chunk diagonally - "id rather use local node alignment" (2026-09-24). A room shown WHOLE still
+takes one grid, being one body.
 A piece standing alone keeps its own frame, so a tunnel still cuts lengthways along itself. The
 extras report the frame each piece was cut in (`cell_frames`).
 

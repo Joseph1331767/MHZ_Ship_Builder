@@ -218,15 +218,15 @@ func test_every_piece_is_sliced_into_two_closed_halves() -> void:
 			var report: Dictionary = await ShipCsgBake.bake_extras(self, assembled)
 			var cells: Dictionary = report["cells"]
 			var solids: Dictionary = report["solids"]
-			# A ROOM is cut as one body (ADR 0033): one grid of planes runs through all of its
-			# members, so it is the ROOM that comes apart down the middle - a member standing on
-			# one side of it, which a nucleus ringing the beacon guarantees (ADR 0034), keeps all
-			# of its cells on that side and is not a sliver for it.
-			var room_of: Dictionary = {}
-			for members: PackedStringArray in assembled["rooms"]:
-				for id: String in members:
-					room_of[id] = members[0]
-			var halves_of: Dictionary = {}
+			# EVERY PIECE IS CUT IN ITS OWN AXES (ADR 0041), so it is the PIECE that comes apart
+			# down its own middle. There is no longer one grid through a room to ask the question
+			# of: each chunk has its own z, and a room's chunks point every way a nucleus does.
+			#
+			# RETIRED(ADR 0041): "A ROOM is cut as one body (ADR 0033): one grid of planes runs
+			# through all of its members, so it is the ROOM that comes apart down the middle - a
+			# member standing on one side of it .. keeps all of its cells on that side and is not a
+			# sliver for it." Summed per room under the new rule a carbon reads 8.0 / 152.0, which
+			# measures nothing but the chunks disagreeing about which way z points.
 			for pid: String in doc.part_order():
 				(
 					assert_bool(cells.has(pid))
@@ -252,20 +252,26 @@ func test_every_piece_is_sliced_into_two_closed_halves() -> void:
 					)
 					. is_equal_approx(piece, maxf(piece * 0.02, 0.01))
 				)
-				var room: String = str(room_of.get(pid, pid))
-				var sum: Array = halves_of.get(room, [0.0, 0.0])
-				halves_of[room] = [sum[0] + halves[0], sum[1] + halves[1]]
-			# Down the MIDDLE: neither half of a room is a sliver.
-			for room: String in halves_of:
-				var sum: Array = halves_of[room]
-				var whole: float = float(sum[0]) + float(sum[1])
-				(
-					assert_float(minf(float(sum[0]), float(sum[1])))
-					. append_failure_message(
-						"%s: the room at %s came apart %f / %f" % [family, room, sum[0], sum[1]]
+				# IT COMES APART IN TWO, which is the manufacturing claim - "in manufacturing they
+				# are made in 2 pieces" - and is all that can be claimed now.
+				#
+				# NOT down the middle, and deliberately not: the grid is anchored to the NODE'S OWN
+				# BODY, not to the chunk, so that a cut does not move when a neighbour changes what
+				# was carved off this piece ([method ShipCsgBake._slice_job]). A chunk is only part
+				# of its body, so it sits off-centre in that grid and its halves are uneven -
+				# measured, a sphere carbon's p_0007 comes apart 1.55 / 19.75. Evenness was a
+				# property of the one grid a room used to share (ADR 0033), and went with it.
+				for half: int in 2:
+					(
+						assert_float(halves[half])
+						. append_failure_message(
+							(
+								"%s: %s has nothing on side %d (%f / %f)"
+								% [family, pid, half, halves[0], halves[1]]
+							)
+						)
+						. is_greater(0.0)
 					)
-					. is_greater(whole * 0.2)
-				)
 
 
 func test_every_drawn_mesh_names_its_exterior_and_interior() -> void:

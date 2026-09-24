@@ -3282,3 +3282,44 @@ PASSED; gdformat and gdlint clean; resolve, explode and visual checks PASSED.
 
 A prebuilt ship is now slightly bigger in every dimension, and its hatches noticeably so. That is the
 levers meaning what they say - but it is a visible change to every preset, so it wants an eye.
+
+
+## [2026-09-24] Every piece is diced in its own axes
+
+Second of the author's dev notes (SHIFT+F, 13:45):
+
+> "the splitting/dicing system is using global world space alignemnt, id rather use local node
+> alignment."
+
+Not world space - the ROOM KEEPER's frame, which ADR 0033 chose in September after the opposite was
+tried. But a nucleus keeper stands at whatever angle its class puts it at, so one grid through the
+room cut every chunk DIAGONALLY: on the frame attached to the note, three cubes sliced corner to
+corner while the tunnel beside them, a room of one, was cut squarely along its length. The slicer
+panel has said "EACH PART IN ITS OWN AXES" the whole time.
+
+The grid was also sized to the ROOM rather than the chunk, so a chunk sat in a corner of it - a cube
+carbon's piece diced into 20 cells that used two of the four indices on one axis and left the rest
+slivers or empty.
+
+Now every piece is diced in its own axes across its own body's extent, exactly as a lone part always
+was; ROOMS: WHOLE still takes one grid, being one body; and the extent stays the node's own body so a
+cut does not move when a neighbour changes what was carved off this piece.
+
+### Verified
+
+A cube carbon's pieces each dice into **44 cells using all four indices on every axis**, summing to
+the piece exactly (52.650 of 52.650), from 20 bunched on two. Looked at: every cube is now cut square
+to its own faces. It costs about a second - 656 cells against 532, 12.9 s against 12.0.
+
+**gdUnit4 335/335**; selfcheck PASSED, hash unchanged at `5536787c6c35d236`; explode check PASSED;
+gdformat and gdlint clean.
+
+### What was given up, knowingly
+
+A room no longer comes apart down one line - neighbouring chunks' cuts stop at the seam. That was ADR
+0033's whole point and is now the lesser of the two. A test had to be re-aimed with it:
+`test_every_piece_is_sliced_into_two_closed_halves` claimed neither half of a ROOM was a sliver,
+which measures nothing once each chunk has its own z (summed per room a carbon reads 8.0 / 152.0);
+per PIECE it fails too, and correctly, because the grid is anchored to the node's body while a chunk
+is only part of it (a sphere carbon's `p_0007` comes apart 1.55 / 19.75). It now claims what is
+actually claimed: every piece comes apart in two non-empty halves.
