@@ -560,3 +560,30 @@ func test_a_piece_cut_in_half_is_half_of_it() -> void:
 	)
 	assert_float(half.signed_volume()).is_greater(0.0)
 	assert_int(half.open_edges()).is_equal(0)
+
+
+## THE TIDY-UP MUST NOT UNDO THE GATE. `MeshSeamSplit.is_sound` approves a piece, and `_tidy` then
+## merges its coplanar fragments into n-gons - and a merge can leave an edge on three faces where
+## the fragments met a third surface along the same line. Measured on a NEON of cube rooms, which
+## is why the test is a neon and not the carbon everything else here uses: `p_0009/cp_0002` passed
+## the gate at 1388 faces with every edge on two, and came out of the merge at 507 faces with two
+## edges on three. A non-manifold solid is what the engine mis-cuts (ADR 0037).
+func test_the_merge_never_breaks_a_piece_the_gate_passed() -> void:
+	var doc: ShipDoc = ShipTemplates.build(
+		_data, _cfg, "neon", {ShipTemplates.OPT_ROOM_FAMILY: "box_hull"}
+	)
+	var report: Dictionary = await ShipCsgBake.bake(self, doc, _data, _cfg)
+	var members: PackedStringArray = PackedStringArray()
+	for list: PackedStringArray in report["rooms"]:
+		if list.size() > members.size():
+			members = list
+	assert_int(members.size()).is_greater(2)
+	for id: String in members:
+		var piece: PolyMesh = report["solids"][id]
+		(
+			assert_bool(MeshSeamSplit.is_sound(piece))
+			. append_failure_message(
+				"%s left the bake non-manifold or open (%d faces)" % [id, piece.face_count()]
+			)
+			. is_true()
+		)

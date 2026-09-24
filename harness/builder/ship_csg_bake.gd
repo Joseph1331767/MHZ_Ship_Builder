@@ -970,13 +970,23 @@ static func _read_raw(mesh: Mesh) -> PolyMesh:
 	return PolyMesh.from_polygons(polys, READ_WELD_M)
 
 
-## [param raw] with its coplanar fragments merged into n-gons - unless the merge tears an edge open
-## or changes the volume, in which case the fragments stand. See [method _read].
+## [param raw] with its coplanar fragments merged into n-gons - unless the merge tears an edge open,
+## makes the solid non-manifold, or changes the volume, in which case the fragments stand. See
+## [method _read].
+##
+## THE MANIFOLD GUARD IS NOT SPARE. A merge joins coplanar fragments into one face, and where the
+## fragments meet a third surface along the same line the merged face can end up sharing an edge
+## with two others. Measured on a neon of cube rooms: `p_0009/cp_0002` passed
+## [method MeshSeamSplit.is_sound] at 1388 faces with every edge on two faces, and came out of the
+## merge at 507 faces with TWO edges on three - so the gate had approved a piece and the tidy-up
+## broke it afterwards, which is the one order in which nothing was watching. A non-manifold solid
+## is what the engine mis-cuts (ADR 0037), so this is the same class of fault, caught one step
+## earlier.
 static func _tidy(raw: PolyMesh) -> PolyMesh:
 	if raw.is_empty():
 		return raw
 	var tidy: PolyMesh = MeshMerge.merge(raw)
-	if tidy.open_edges() != 0 or tidy.is_empty():
+	if tidy.is_empty() or not MeshSeamSplit.is_sound(tidy):
 		return raw
 	var raw_volume: float = raw.volume()
 	if absf(tidy.volume() - raw_volume) > READ_VOLUME_REL * absf(raw_volume) + 1.0e-6:

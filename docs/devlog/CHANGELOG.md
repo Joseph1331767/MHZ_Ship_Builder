@@ -3108,3 +3108,29 @@ none of them could be trusted; swept helium, boron, carbon and neon in both `box
 and `scratch/` is gitignored, so git showed nothing while `ShipCsgBake` resolved to a copy that
 predated ADR 0036, and which copy won flipped between runs. Renamed to `.bak` and re-imported.
 Anything kept in `scratch/` for reference belongs under a suffix Godot does not parse.
+
+
+## [2026-09-23] A merge that breaks a piece is refused
+
+Caught by the sweep above: a piece can pass `MeshSeamSplit.is_sound` and be handed on non-manifold
+anyway, because the gate runs on the RAW split and `ShipCsgBake._tidy` merges its coplanar fragments
+into n-gons AFTERWARDS. Where fragments meet a third surface along the same line, the merged face
+can end up sharing an edge with two others. `_tidy` already refused a merge that tore an edge open
+or moved the volume; it now refuses one that makes the solid non-manifold, which is the same guard
+said properly.
+
+Measured on a NEON of cube rooms - the class the sweep caught, and now the class the test uses:
+`p_0009/cp_0002` passed the gate at 1388 faces with every edge on two faces, and came out of the
+merge at 507 faces with **two edges on three**. With the guard it keeps its 1388 fragments, which
+is worth more than a tidy wireframe: a non-manifold solid is exactly what the engine mis-cuts
+(ADR 0037), so this is that fault caught one step earlier.
+
+`p_0024` on a sphere neon came clean the same way. One non-manifold solid is left across the whole
+sweep - `p_0022`, a 1.741 m3 tunnel on a cube neon - and it is not the merge: it comes back that way
+from the engine, so it is a different thing and is still open.
+
+### Verified
+
+**gdUnit4 328/328** with one new (`test_the_merge_never_breaks_a_piece_the_gate_passed`), which
+fails without the guard. Resolve and explode checks PASSED; gdformat and gdlint clean; the sweep
+re-run shows eight rooms, eight splits, no fallback, and the piece sums unchanged.
