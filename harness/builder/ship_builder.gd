@@ -1981,6 +1981,12 @@ func _handle_edit_hotkey(key: InputEventKey) -> bool:
 
 
 func _handle_view_hotkey(key: InputEventKey) -> bool:
+	# THE DEVELOPER NOTE (SHIFT+F), and the whole of its footprint in this file. Tested before
+	# plain F so that FRAME keeps the key it has had all along. Delete these three lines and
+	# `ship_dev_feedback.gd` and the feature is gone without a trace.
+	if ShipDevFeedback.opens(key):
+		ShipDevFeedback.open(self, _bake_session)
+		return true
 	if key.keycode == KEY_F and _view != null:
 		_view.frame_all()
 		return true

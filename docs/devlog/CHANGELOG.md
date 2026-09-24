@@ -3208,3 +3208,40 @@ either side of an edge each work it out for themselves and the same arithmetic i
 lands a hair apart; keyed by position, the two make two vertices and tear the edge open. Measured
 while building it: 16 open edges on one body of a mirrored pair and none on the other - a tie broken
 on float noise, which is the same shape of bug as a spatial hash used as an identity.
+
+
+## [2026-09-23] A developer note, taken in the moment
+
+> "id like a future-hideable/removable developer feature quick feedback note prompt using the f key,
+> where while im testing i can press f, enter in my observation in the moment, the system will take
+> my observation and a snapshot of the state and any logs and save it in a developer feedback file
+> that you can read the entire compilation of feedback notes in"
+
+`harness/builder/ship_dev_feedback.gd`. **SHIFT+F** while testing: the frame is grabbed as it
+stands, a prompt asks what was noticed, and the note is appended to `reports/feedback/notes.jsonl`
+with the whole document, the last bake's report, what the view was showing and the tail of the
+engine log. `notes.md` beside it is the same list without the document blob, for a human skimming.
+
+**SHIFT, not F alone.** `F` is `ShipView3D.frame_all()` and has been since the beginning. Taking it
+would have broken framing silently, so the chord is SHIFT+F - `ShipDevFeedback.CHORD` changes it,
+and a test asserts that plain F is still left to FRAME.
+
+**The document is the field that earns it.** A note about a shape is worth little without the ship
+that made it; a `ShipDoc` is small and exact, and an agent can rebuild the exact ship the remark was
+about. That is not hypothetical - this session reproduced the author's ship from a dumped doc twice,
+and both times it was the difference between measuring the right thing and the wrong one.
+
+**Hideable and removable, which is the point.** `ENABLED = false` and nothing arms; it never arms in
+a release build regardless (`OS.is_debug_build()`); and removing it is deleting one file and three
+lines in `ship_builder.gd`. Nothing else in the project refers to it.
+
+**In-scene, like everything else** (SPEC section 10). It borrows `ShipBuilder.prompt()`, the app's
+own modal Control, so no native dialog is opened and it will work just as well once the builder is a
+texture on a quad. Typing needs a real keyboard, which is the other reason it is a developer feature.
+
+### Verified
+
+Driven end to end the way a finger drives it - the chord through `_handle_view_hotkey`, the text into
+the prompt's own line, OK - and the file read back: the note, a frame, and a document that rebuilt
+into its 9 parts, with the bake report beside it (14 pieces, rooms `[6, 1, 1, 1, 1, 1, 1, 1, 1]`,
+split 1, fell back 0). **gdUnit4 333/333** with five new; gdformat and gdlint clean.
