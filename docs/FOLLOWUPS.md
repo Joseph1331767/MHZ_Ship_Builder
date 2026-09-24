@@ -1897,7 +1897,7 @@ Sphere classes do not have it in any size that matters: their strays measure ~1e
 A cube helium, boron, carbon and neon all do (0.190, 0.253, 0.131 and 0.680 m3 per piece).
 
 
-## F50 - Halving a coplanar band exactly means cutting a face, which means inventing a vertex
+## F50 - Halving a coplanar band exactly - DONE (ADR 0039)
 
 **Measured 2026-09-23** (ADR 0038). With a coplanar tie going to the nearer body, a cube helium
 divides 242.458 against 231.461 m3 - 4.5% apart, down from 8.9%, where symmetry says halve. The two
@@ -1919,3 +1919,16 @@ classes standing side by side, and never a curved family.
 **The cheaper half-answer**, if it is ever wanted without touching the construction: cut the coplanar
 band in the PLAN, by splitting the two members' body meshes along their bisector before the union, so
 the engine itself puts the vertices there and the split still invents nothing.
+
+
+### DONE 2026-09-23, as ADR 0039
+
+Taken by the cheaper half-answer this entry already named, which turned out to be the whole answer:
+the band is cut **in the plan**. Both bodies and both cavities are sliced along the plane between
+them before anything is unioned, so the ENGINE puts the vertices on the bisector and `MeshSeamSplit`
+reads a division it did not invent - ADR 0036's refusal stays intact.
+
+Proved on the shell before it was built: straddling faces went from 4 carrying 234.40 m2 to NONE,
+with the shell otherwise identical. A helium of cubes then divided **236.960 against 236.959 m3,
+0.0% apart**, from 4.5%. Nothing else in the sweep moved, and the 0.39% a neon of cubes had lost to
+ADR 0038's tie-break came back to 0.26%.

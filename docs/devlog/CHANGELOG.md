@@ -3170,3 +3170,41 @@ takes all its area to one side - the 110 m2 between the two pieces is about one 
 exactly means cutting the band and putting NEW VERTICES in the shell, which is the one thing ADR
 0036's construction refuses. F50 has it, with a cheaper half-answer that keeps the refusal intact:
 split the two bodies along their bisector in the PLAN, so the engine puts the vertices there itself.
+
+
+## [2026-09-23] A shared plane is cut in the plan, so the split still invents nothing
+
+ADR 0039, and it closes the coplanar case ADR 0036 opened and ADR 0038 halved.
+
+The obstacle was never the rule, it was the tessellation: an exact boolean has no reason to
+subdivide a band where two surfaces share a plane, so it comes back as a few enormous faces - the
+whole shell of a cube helium is 64 of them, about 74 m2 each - and a face straddling the bisector can
+only be given WHOLE. Halving it exactly needs a vertex on that line, and ADR 0036 is built on never
+making one.
+
+So the vertex is made somewhere else: both bodies and both cavities are sliced along the plane
+between them IN THE PLAN, before anything is unioned. Same solids, more faces. The engine keeps those
+vertices and does not triangulate across them, so the shell arrives with the band already divided and
+the split reads a division it did not invent. The principle is intact rather than bent.
+
+It was proved on the shell before being built: straddling faces went from 4 carrying 234.40 m2 to
+NONE, with the shell otherwise identical - 64 faces, 4739.50 m2, the same either way.
+
+### Verified
+
+A helium of cubes divides **236.960 against 236.959 m3 - 0.0% apart**, from 4.5% under ADR 0038 and
+8.9% before it, both pieces sound. Nothing else in the sweep moves to three decimals, because no
+other pair shares a plane - every curved family is left alone by construction. A cube carbon still
+divides exactly, 315.727 against 315.727. And the 0.39% overlap ADR 0038 cost a neon of cubes is back
+to **0.26%**, the other side of its room.
+
+**gdUnit4 328/328**; selfcheck PASSED, hash unchanged at `5536787c6c35d236`; validator PASSED;
+gdformat and gdlint clean; resolve, explode and visual checks PASSED.
+
+### One thing worth keeping
+
+`PolyMesh.sliced_at` keys a crossing by its EDGE, never by where the point lands. The two faces
+either side of an edge each work it out for themselves and the same arithmetic in a different order
+lands a hair apart; keyed by position, the two make two vertices and tear the edge open. Measured
+while building it: 16 open edges on one body of a mirrored pair and none on the other - a tie broken
+on float noise, which is the same shape of bug as a spatial hash used as an identity.

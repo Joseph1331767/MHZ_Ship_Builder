@@ -21,6 +21,11 @@ extends RefCounted
 ## Vertices closer than this are the same vertex. Ships are up to 250 m and the finest authored
 ## feature is ~0.01 m (SPEC §12), so a micrometre is far below anything real and far above the
 ## float noise that CSG splitting leaves on a coincident face.
+## How far off a plane a vertex may sit and still count as ON it, for [method sliced_at]. Loose
+## enough that a vertex the plane already passes through is not cut off itself into a sliver, and
+## tight enough not to move anything: a crossing nearer than this is not a crossing.
+const SLICE_TOL_M: float = 1.0e-6
+
 const WELD_M: float = 1.0e-6
 
 ## A face's vertices must lie within this of its own plane to be believed.
@@ -89,6 +94,71 @@ static func from_polygons(polygons: Array, weld_m: float = WELD_M) -> PolyMesh:
 			out.faces.append(face)
 		else:
 			out.dropped += 1
+	return out
+
+
+## This mesh with every face that CROSSES [param plane] cut in two along it. The solid is
+## untouched - same volume, same area, same faces everywhere else - and only the tessellation
+## changes, so the caller gets the same shape with vertices guaranteed to sit on the plane.
+##
+## WHAT IT IS FOR (ADR 0039). Two members whose surfaces share a plane hand the engine a band it
+## has no reason to subdivide, so it comes back as a few very large faces that STRADDLE the line
+## the two should be divided on - and a face can only be given whole. Slicing the two bodies on
+## that line first puts the vertices in the plan, the engine keeps them, and the split then finds
+## its own division already drawn. It invents nothing itself, which is the point.
+##
+## A CROSSING IS KEYED BY ITS EDGE, NOT BY WHERE IT LANDS. The two faces either side of an edge
+## each work the crossing out for themselves, and the same arithmetic in a different order lands a
+## hair apart; keyed by position, the two make two vertices and tear the edge open. Measured on a
+## mirrored pair of bodies: 16 open edges on one and none on the other, which is what a tie broken
+## on float noise looks like. The edge's own two ids are the same for both faces, always, and the
+## crossing is worked out from its lower id every time.
+##
+## Faces carrying holes are left whole: nothing that needs this has one, and a bridged loop is not
+## something to cut blind.
+func sliced_at(plane: Plane, tol: float = SLICE_TOL_M) -> PolyMesh:
+	var out: PolyMesh = PolyMesh.new()
+	out.vertices = vertices.duplicate()
+	var made: Dictionary = {}
+	for face: int in faces.size():
+		var loop: PackedInt32Array = faces[face]
+		var over: bool = false
+		var under: bool = false
+		for v: int in loop:
+			var at: float = plane.distance_to(vertices[v])
+			if at > tol:
+				over = true
+			elif at < -tol:
+				under = true
+		if not (over and under) or not holes_of(face).is_empty():
+			out.add_face(loop, holes_of(face))
+			continue
+		var above: PackedInt32Array = PackedInt32Array()
+		var below: PackedInt32Array = PackedInt32Array()
+		for k: int in loop.size():
+			var u: int = loop[k]
+			var v: int = loop[(k + 1) % loop.size()]
+			var du: float = plane.distance_to(vertices[u])
+			var dv: float = plane.distance_to(vertices[v])
+			if du >= -tol:
+				above.append(u)
+			if du <= tol:
+				below.append(u)
+			if (du > tol and dv < -tol) or (du < -tol and dv > tol):
+				var low: int = mini(u, v)
+				var high: int = maxi(u, v)
+				var key: int = low * vertices.size() + high
+				if not made.has(key):
+					var da: float = plane.distance_to(vertices[low])
+					var db: float = plane.distance_to(vertices[high])
+					made[key] = out.vertices.size()
+					out.vertices.append(vertices[low].lerp(vertices[high], da / (da - db)))
+				above.append(int(made[key]))
+				below.append(int(made[key]))
+		if above.size() >= 3:
+			out.add_face(above)
+		if below.size() >= 3:
+			out.add_face(below)
 	return out
 
 

@@ -115,6 +115,9 @@ opening.
    helium divides 242.458 against 231.461, **4.5% apart**. The rest is a face that STRADDLES the
    bisector and can only be given whole - the shell is 64 faces of about 74 m2 each - so halving it
    exactly means cutting the band and inventing vertices. FOLLOWUPS F50.
+   CLOSED(ADR 0039): the band is cut in the PLAN instead - both bodies sliced on the plane between
+   them before the union, so the ENGINE puts the vertices there and this file still invents none.
+   The cube helium divides **236.960 against 236.959, 0.0% apart**.
 4. **The split is all-or-nothing per room**, by design (above).
    NOTE(ADR 0037): no room falls back any more. Measured across helium, boron, carbon and neon in
    both `box_hull` and `sphere_pod`: **eight rooms, eight splits, no fallback**.

@@ -79,6 +79,15 @@ class_name ShipMeshBake
 
 ## How far apart, as a fraction of one segment, consecutive parts' tessellations are turned about
 ## their own axes - the golden ratio, so no two of any count land on one phase. See [method bake].
+## How nearly two faces must face the same way, and how near their planes must lie, before the two
+## members carrying them count as sharing a plane - the case ADR 0039 slices for. Both are loose:
+## a pair either lies face to face or does not, and nothing in between is worth the faces.
+const COPLANAR_FACING: float = 0.999
+const COPLANAR_PLANE_M: float = 0.001
+
+## Two bodies nearer than this have no plane between them worth drawing.
+const COPLANAR_APART_M: float = 0.001
+
 const PHASE_STRIDE: float = 0.6180339887
 
 ## How many cells a surface's longest extent is gridded into before it is clipped - the count of
@@ -394,6 +403,13 @@ static func plan(
 	var doors: Dictionary = ShipDoors.plan(door_entries, thickness, cfg.hatch_min_m, segments)
 	var door_list: Array = doors["doors"]
 
+	# THE COPLANAR BAND, DRAWN ON BEFORE THE ENGINE SEES IT (ADR 0039). Two members of a room whose
+	# surfaces share a plane give the engine a band it has no reason to subdivide, so it returns a
+	# few very large faces straddling the line the two should be divided on - and the split can only
+	# give a face WHOLE. Slicing both bodies on that line here puts the vertices in the plan; the
+	# engine keeps them, and the split finds its division already drawn rather than inventing it.
+	_slice_coplanar(rooms, outer, inner)
+
 	return {
 		"ids": placed,
 		"outer": outer,
@@ -542,6 +558,59 @@ static func report(solids: Dictionary, plan: Dictionary, t0: int) -> Dictionary:
 
 
 ## One name for one surface of one part, in [method plan].
+## Cuts the bodies and cavities of every pair of [param rooms] members whose surfaces SHARE A
+## PLANE along the plane between them, in place. Same solids, more faces - see
+## [method PolyMesh.sliced_at] for why, and ADR 0039.
+##
+## ONLY A PAIR THAT ACTUALLY SHARES A PLANE. Slicing costs faces and every face is work for the
+## engine, so a pair whose surfaces merely meet - which is every curved family, and most cube ones -
+## is left alone and measures identical either way. Measured on a helium of cubes, the one class
+## whose two bodies lie face to face: it divided 242.458 against 231.461 m3 and now divides 236.960
+## against 236.959, where symmetry says halve.
+static func _slice_coplanar(rooms: Array, outer: Dictionary, inner: Dictionary) -> void:
+	for members: PackedStringArray in rooms:
+		if members.size() < 2:
+			continue
+		for i: int in members.size():
+			for j: int in range(i + 1, members.size()):
+				var a: String = members[i]
+				var b: String = members[j]
+				if not outer.has(a) or not outer.has(b):
+					continue
+				if not _share_a_plane(outer[a], outer[b]):
+					continue
+				var from: Vector3 = (outer[a] as PolyMesh).aabb().get_center()
+				var to: Vector3 = (outer[b] as PolyMesh).aabb().get_center()
+				var apart: Vector3 = to - from
+				if apart.length() <= COPLANAR_APART_M:
+					continue
+				var normal: Vector3 = apart.normalized()
+				var plane: Plane = Plane(normal, normal.dot((from + to) * 0.5))
+				for id: String in [a, b]:
+					outer[id] = (outer[id] as PolyMesh).sliced_at(plane)
+					if inner.has(id):
+						inner[id] = (inner[id] as PolyMesh).sliced_at(plane)
+
+
+## Do [param first] and [param second] carry a face each that lies in the SAME plane, facing the
+## same way? That is the case with no seam curve to follow, and the only one worth slicing for.
+static func _share_a_plane(first: PolyMesh, second: PolyMesh) -> bool:
+	for i: int in first.face_count():
+		var one: Plane = first.face_plane(i)
+		if one.normal == Vector3.ZERO:
+			continue
+		for j: int in second.face_count():
+			var two: Plane = second.face_plane(j)
+			if two.normal == Vector3.ZERO:
+				continue
+			if (
+				one.normal.dot(two.normal) > COPLANAR_FACING
+				and absf(one.d - two.d) <= COPLANAR_PLANE_M
+			):
+				return true
+	return false
+
+
 static func _cutter_key(id: String, kind: String) -> String:
 	return id + "\u0001" + kind
 
