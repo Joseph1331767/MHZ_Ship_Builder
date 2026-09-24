@@ -182,8 +182,8 @@
     "max": 4.0
   },
   "hatch_min_m": {
-    "value": 0.5,
-    "description": "The smallest clear width or height, in metres, a hatch or doorway should be given: a person's squeeze, shoulders turned, which is the floor the hatch panel clamps its size fields to (ADR 0029). The bake still bores a smaller hole where a seam has no room for this one - a tunnel's bore, less the frame, may be under it - and reports the door TIGHT rather than leaving a wall.",
+    "value": 0.66,
+    "description": "The smallest clear width or height, in metres, a hatch or doorway should be given: a person in a SUIT, not a squeeze, which is the floor the hatch panel clamps its size fields to (ADR 0029, raised from 0.5 by ADR 0040). The bake still bores a smaller hole where a seam has no room for this one - a tunnel's bore, less the frame, may be under it - and reports the door TIGHT rather than leaving it out. A tunnel is sized to pass this, so on a prebuilt ship it is met rather than merely asked for.",
     "min": 0.2,
     "max": 2.0
   },

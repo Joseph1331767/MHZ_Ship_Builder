@@ -258,6 +258,19 @@ static func limits(
 
 ## [param cutter] calibrated to [param surface], its own tessellation in the same space: the
 ## field's median value at a spread of the surface's corners becomes the field's zero.
+## The narrowest tunnel that can pass a hatch of [param hatch] metres through a wall of
+## [param wall]: the hole, the frame ring either side of it, and the wall either side of that.
+##
+## A floor is only worth what the geometry can honour. `hatch_min_m` clamps what a PANEL may ask
+## for, and says nothing about whether the seam can give it - so a prebuilt tunnel narrower than
+## this bores a hole under the minimum and reports it TIGHT, which is how a 0.66 m floor produced a
+## 0.38 m hole (2026-09-24). Templates size a hallway to at least this, so the floor is met rather
+## than merely asked for.
+static func bore_for_hatch(hatch: float, wall: float) -> float:
+	var frame: float = clampf(wall * FRAME_FRACTION, FRAME_MIN_M, FRAME_MAX_M)
+	return maxf(hatch, 0.0) + 2.0 * frame + 2.0 * maxf(wall, 0.0)
+
+
 static func field_of(cutter: MeshClip.Cutter, surface: PolyMesh) -> Field:
 	var out: Field = Field.new()
 	out.cutter = cutter

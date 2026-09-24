@@ -144,10 +144,15 @@ var attach_embed_max_fraction: float = 0.5
 var doorway_width_m: float = 0.8
 var doorway_height_m: float = 1.9
 
-## The smallest clear width or height a hatch or doorway should have, in metres: "min a person
-## could squeeze through" (ADR 0029). A panel clamps its fields to it; the bake still bores a
-## smaller hole when the seam has no room for this one, and reports it TIGHT.
-var hatch_min_m: float = 0.5
+## The smallest clear width or height a hatch or doorway should have, in metres: a person in a
+## SUIT, not a squeeze - "i want to maintain our smallest hatches will be .66 of a meter so a human
+## can fit through with a suit on" (2026-09-24). A panel clamps its fields to it; the bake still
+## bores a smaller hole when the seam has no room for this one, and reports it TIGHT.
+##
+## RETIRED(2026-09-24): 0.5, "min a person could squeeze through" (ADR 0029). The floor is only
+## worth what the geometry can honour, and a tunnel has to be wide enough to pass it - see
+## [member tunnel_bore_m] and ADR 0040.
+var hatch_min_m: float = 0.66
 
 ## EXPLODE view: the fixed gap, in metres, each module is pulled away from the module it stands
 ## on, along its own seam normal, on top of half its extent along that normal

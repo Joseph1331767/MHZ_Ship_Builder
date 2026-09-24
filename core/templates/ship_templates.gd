@@ -198,7 +198,13 @@ static func build(
 			data, room_family, room_mfr, conf.template_volume_m3 / float(maxi(nodes.size(), 1))
 		)
 	var tunnel_len: float = _opt_num(options, OPT_TUNNEL_LENGTH, conf.tunnel_length_m)
-	var bore: float = _opt_num(options, OPT_TUNNEL_BORE, conf.tunnel_bore_m)
+	# A TUNNEL HAS TO PASS ITS OWN SMALLEST HATCH (ADR 0040). The bore lever is the player's, but a
+	# hallway narrower than a person in a suit is not a hallway, and the hole would just be bored
+	# under the minimum and reported TIGHT - which is what a 0.66 m floor did on a 0.38 m hole.
+	var bore: float = maxf(
+		_opt_num(options, OPT_TUNNEL_BORE, conf.tunnel_bore_m),
+		ShipDoors.bore_for_hatch(conf.hatch_min_m, conf.hull_thickness_m)
+	)
 	var hatch: String = _opt_text(options, OPT_HATCH_FAMILY, _pick_hatch(data))
 
 	var doc: ShipDoc = ShipDoc.create_new(room_family, room_mfr, data, 0.0)
@@ -884,8 +890,24 @@ static func _tube_scale(
 	return Vector3(sx, sy, sz)
 
 
+## The family at scale one, measured on THE MESH THAT GETS BUILT rather than on the field around
+## it (ADR 0040).
+##
+## `ResolvedShape.local_aabb()` is the envelope of the signed distance field, and the tessellation
+## sits inside it by the family's own rounding - the same gap F34 records for door fields. Sizing
+## against the envelope therefore builds everything short of what was asked, by a factor that
+## differs per family: measured at scale one, `box_hull` predicts 2.04 and builds 2.00 (0.98),
+## `sphere_pod` 2.00 and 1.95 (0.975), `torus_ring` 4.00 and 4.00 (1.000), and `cylinder_spar` -
+## which is what a hallway is - predicts 1.20 and builds 1.00, **0.833**. A tunnel asked for a 1.4 m
+## bore was therefore built 1.166 m across, its cavity 0.766, and the widest hatch it would take
+## 0.568 m: "the hatches on here are visually only about .33m acrost" (2026-09-24).
+##
+## Measuring the mesh costs one tessellation per size query, which [method _span_for_volume]
+## already pays to weigh a shape, so nothing here is newly expensive.
 static func _unscaled_size(data: ShipData, family_id: String, manufacturer_id: String) -> Vector3:
-	return _resolved(data, family_id, manufacturer_id, Vector3.ONE).local_aabb().size
+	var shape: ResolvedShape = _resolved(data, family_id, manufacturer_id, Vector3.ONE)
+	var built: PolyMesh = ShapeMesh.build(shape)
+	return built.aabb().size if not built.is_empty() else shape.local_aabb().size
 
 
 ## The family at its default params under `scale`, resolved.

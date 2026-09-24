@@ -3245,3 +3245,40 @@ Driven end to end the way a finger drives it - the chord through `_handle_view_h
 the prompt's own line, OK - and the file read back: the note, a frame, and a document that rebuilt
 into its 9 parts, with the bake report beside it (14 pieces, rooms `[6, 1, 1, 1, 1, 1, 1, 1, 1]`,
 split 1, fell back 0). **gdUnit4 333/333** with five new; gdformat and gdlint clean.
+
+
+## [2026-09-24] A size lever means the mesh, not the field around it
+
+First of the author's own dev notes to be worked (SHIFT+F, 13:44):
+
+> "the hatches on here are visually only about .33m acrost, i want to maintain our smallest hatches
+> will be .66 of a meter so a human can fit through with a suit on."
+
+The note carried the ship, so it could be measured rather than guessed at: both holes 0.380 m, both
+TIGHT, against an ask of 0.699. Raising the floor would have changed nothing.
+
+The tunnel was built smaller than it was asked for - 0.98 m across, a 0.580 m aperture, less the
+0.100 m frame ring each side, which is 0.380 to the millimetre. And it was small because
+`ShipTemplates` sized everything against `ResolvedShape.local_aabb()`, the envelope of the FIELD,
+while `ShapeMesh` builds the tessellation inside it. For a `cylinder_spar` - which a hallway is -
+that gap is 20%: 1.4 x 0.833 = 1.166, the bore that was actually built.
+
+So a size lever now measures the mesh, the same instrument reads a size back off a ship (until now
+the two errors cancelled, and fixing only one made a 2.2 m bore read back as 2.64), `hatch_min_m` is
+0.66, and a template floors a tunnel's bore at what a hatch of that size needs - because a floor is
+only worth what the geometry honours.
+
+### Verified
+
+The narrowest hole on any prebuilt ship, over lithium, carbon and neon in `box_hull`, `sphere_pod`
+and `cylinder_spar`: **0.700 m**, up from 0.568, none TIGHT. Tunnels build 1.399-1.400 against a
+1.400 lever, up from 1.166; rooms 3.000 against 3.000, up from 2.941. A lithium of `cylinder_spar`
+plans two doors where it planned none.
+
+**gdUnit4 335/335** with two new; selfcheck PASSED, hash unchanged at `5536787c6c35d236`; validator
+PASSED; gdformat and gdlint clean; resolve, explode and visual checks PASSED.
+
+### Still the human's to check
+
+A prebuilt ship is now slightly bigger in every dimension, and its hatches noticeably so. That is the
+levers meaning what they say - but it is a visible change to every preset, so it wants an eye.

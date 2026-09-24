@@ -337,3 +337,71 @@ func test_an_iris_closes_to_a_full_disc_and_opens_toward_the_frame() -> void:
 	# Open, only the ring between the hole and the seat is left of the blades.
 	assert_float(open_volume).is_less(shut_volume * 0.6)
 	assert_float(open_volume).is_greater(0.0)
+
+
+## A PREBUILT SHIP'S HATCHES PASS A SUITED PERSON (ADR 0040). The floor is only worth what the
+## geometry honours: `hatch_min_m` clamps what a panel may ASK for and says nothing about whether
+## the seam can give it, so before this the floor was 0.5 and every prebuilt hole came out 0.568 -
+## or 0.380 on the ship the author was holding when they wrote "the hatches on here are visually
+## only about .33m acrost, i want to maintain our smallest hatches will be .66 of a meter so a
+## human can fit through with a suit on" (2026-09-24).
+func test_a_prebuilt_ships_hatches_pass_a_suited_person() -> void:
+	for element: String in ["lithium", "carbon", "neon"]:
+		for family: String in ["box_hull", "sphere_pod", "cylinder_spar"]:
+			var doc: ShipDoc = ShipTemplates.build(
+				_data, _cfg, element, {ShipTemplates.OPT_ROOM_FAMILY: family}
+			)
+			assert_object(doc).is_not_null()
+			var plan: Dictionary = ShipMeshBake.plan(doc, _data, _cfg)
+			var doors: Array = plan.get("doors", [])
+			(
+				assert_int(doors.size())
+				. append_failure_message("%s of %s planned no doors at all" % [element, family])
+				. is_greater(0)
+			)
+			for door: Dictionary in doors:
+				var profile: PackedVector2Array = door[ShipDoors.DOOR_PROFILE]
+				var box: Rect2 = Rect2(profile[0], Vector2.ZERO)
+				for at: Vector2 in profile:
+					box = box.expand(at)
+				var narrowest: float = minf(box.size.x, box.size.y)
+				(
+					assert_float(narrowest)
+					. append_failure_message(
+						(
+							"%s of %s: a hole %.3f m across, under the %.3f m floor"
+							% [element, family, narrowest, _cfg.hatch_min_m]
+						)
+					)
+					. is_greater_equal(_cfg.hatch_min_m - TOL)
+				)
+
+
+## AND THE TUNNEL IS WIDE ENOUGH TO BE THE REASON. A hallway narrower than the hole plus its frame
+## and its two walls cannot pass one, whatever the floor says.
+func test_a_tunnel_is_sized_to_pass_its_smallest_hatch() -> void:
+	var needed: float = ShipDoors.bore_for_hatch(_cfg.hatch_min_m, _cfg.hull_thickness_m)
+	assert_float(needed).is_greater(_cfg.hatch_min_m)
+	var doc: ShipDoc = _carbon()
+	var plan: Dictionary = ShipMeshBake.plan(doc, _data, _cfg)
+	var frames: Dictionary = plan["frames"]
+	var outer: Dictionary = plan["outer"]
+	var checked: int = 0
+	for pid: String in plan["ids"] as PackedStringArray:
+		var part: ShipPart = doc.parts.get(pid, null)
+		if part == null or part.role != ShipPart.ROLE_HALLWAY or not outer.has(pid):
+			continue
+		checked += 1
+		var into: Transform3D = (frames[pid] as Transform3D).affine_inverse()
+		var box: Vector3 = (outer[pid] as PolyMesh).transformed(into).aabb().size
+		(
+			assert_float(minf(box.x, box.z))
+			. append_failure_message(
+				(
+					"%s is %.3f m across, under the %.3f a hatch needs"
+					% [pid, minf(box.x, box.z), needed]
+				)
+			)
+			. is_greater_equal(needed - TOL)
+		)
+	assert_int(checked).is_greater(0)

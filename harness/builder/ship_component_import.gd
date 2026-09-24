@@ -77,7 +77,7 @@ static func template_options(doc: ShipDoc, data: ShipData) -> Dictionary:
 		if part.role != ShipPart.ROLE_HALLWAY or not shapes.has(pid):
 			continue
 		var tube: ResolvedShape = shapes[pid]
-		var size: Vector3 = tube.local_aabb().size
+		var size: Vector3 = _built_size(tube)
 		if data.families.has(part.family):
 			out[ShipTemplates.OPT_HALL_FAMILY] = part.family
 			if not part.manufacturer.is_empty():
@@ -89,5 +89,19 @@ static func template_options(doc: ShipDoc, data: ShipData) -> Dictionary:
 
 
 static func _widest(shape: ResolvedShape) -> float:
-	var size: Vector3 = shape.local_aabb().size
+	var size: Vector3 = _built_size(shape)
 	return maxf(size.x, maxf(size.y, size.z))
+
+
+## How big [param shape] actually gets BUILT, which is what a size read off a ship has to mean.
+##
+## Measured on the mesh, not on `local_aabb()`, for the reason
+## [method ShipTemplates._unscaled_size] gives at length (ADR 0040): the field's envelope stands
+## outside the tessellation by the family's own rounding, and for a `cylinder_spar` - which a
+## hallway is - that is 20%. It has to be the SAME instrument the templates size with, or a ship
+## read back and rebuilt does not come out the shape it was: measured, a carbon asked for a 2.2 m
+## bore handed back 2.64 the moment the sizing was corrected and this was not, because until then
+## the two errors had been cancelling.
+static func _built_size(shape: ResolvedShape) -> Vector3:
+	var built: PolyMesh = ShapeMesh.build(shape)
+	return built.aabb().size if not built.is_empty() else shape.local_aabb().size
