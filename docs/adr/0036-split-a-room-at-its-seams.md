@@ -111,6 +111,10 @@ opening.
    STANDS (re-measured 2026-09-23, ADR 0037): a helium of BOXES divides 247.956 against 225.963,
    **8.9% apart**. It is the coplanar case only - a helium of SPHERES, whose surfaces touch at a
    curve rather than share a plane, divides 195.701 against 195.843, 0.1% apart.
+   HALVED(ADR 0038): a face both members claim now goes to the body it stands nearer, and the cube
+   helium divides 242.458 against 231.461, **4.5% apart**. The rest is a face that STRADDLES the
+   bisector and can only be given whole - the shell is 64 faces of about 74 m2 each - so halving it
+   exactly means cutting the band and inventing vertices. FOLLOWUPS F50.
 4. **The split is all-or-nothing per room**, by design (above).
    NOTE(ADR 0037): no room falls back any more. Measured across helium, boron, carbon and neon in
    both `box_hull` and `sphere_pod`: **eight rooms, eight splits, no fallback**.

@@ -3134,3 +3134,39 @@ from the engine, so it is a different thing and is still open.
 **gdUnit4 328/328** with one new (`test_the_merge_never_breaks_a_piece_the_gate_passed`), which
 fails without the guard. Resolve and explode checks PASSED; gdformat and gdlint clean; the sweep
 re-run shows eight rooms, eight splits, no fallback, and the piece sums unchanged.
+
+
+## [2026-09-23] Where two surfaces share a plane, the nearer body takes the face
+
+ADR 0038, the coplanar case ADR 0036 left open. Where two members' surfaces lie in one plane every
+face of the band lies on BOTH, both answers are right, and the old rule resolved that to whichever
+member the fields named first - so the whole band went to one of them.
+
+The premise was checked before anything was changed: a helium's two bodies are identical and
+mirrored, 4000.001 m3 each, centred at x = +-5.84, so symmetry really does say halve. It divided
+247.956 against 225.963.
+
+A face both members claim now goes to the body it stands NEARER - the plane between them, without
+one being constructed. Confined to readings that agree within 2 mm, and like for like, body against
+body and cavity against cavity. It is not ADR 0035's plane returning: that one divided whole bodies
+and cut corners off them; this decides the owner of a face already on both surfaces and cuts nothing.
+
+### Verified
+
+The cube helium divides **242.458 against 231.461, 4.5% apart**, from 8.9%. Sphere classes gain too
+though they have no coplanar surfaces - a carbon of spheres closes from 0.012 to 0.004 m3 against its
+room, a neon of spheres from 0.975 to 0.262. A neon of CUBES goes the other way, 0.25% to 0.39% of
+overlap, and that is recorded rather than hidden. A cube carbon still divides exactly, 315.727
+against 315.727, and every room in the sweep splits with no fallback.
+
+**gdUnit4 328/328**; selfcheck PASSED, hash unchanged at `5536787c6c35d236`; validator PASSED;
+gdformat and gdlint clean; resolve and explode checks PASSED.
+
+### And why the other half will not go quietly
+
+The shell of a cube helium is **64 faces**, about 74 m2 each: an exact boolean has no reason to split
+a coplanar band, so it arrives whole. A face can only be given whole, so one straddling the bisector
+takes all its area to one side - the 110 m2 between the two pieces is about one such face. Halving it
+exactly means cutting the band and putting NEW VERTICES in the shell, which is the one thing ADR
+0036's construction refuses. F50 has it, with a cheaper half-answer that keeps the refusal intact:
+split the two bodies along their bisector in the PLAN, so the engine puts the vertices there itself.

@@ -50,6 +50,12 @@ const KIND_ROOM: int = 1
 ## by its own sagitta, which on a 9 m sphere is centimetres.
 const ON_SURFACE_M: float = 0.002
 
+## How close two members' readings of one face must be before the face counts as claimed by BOTH,
+## and is therefore handed to whichever body it stands nearer (ADR 0038). Two surfaces sharing a
+## plane read a face identically up to float noise; this is loose enough to survive a read-back and
+## tight enough that a face lying on one surface and merely passing near another is left alone.
+const COPLANAR_TIE_M: float = 0.002
+
 ## How far apart two loops' centres may stand and still be the two sides of one seam, as a
 ## fraction of the loop's own reach. They are a wall apart in truth; this is loose enough for a
 ## seam whose two curves are not concentric and tight enough to refuse a loop from somewhere else.
@@ -146,6 +152,9 @@ static func _classify(
 		body_tol.append(_tolerance_of(bodies.get(id, [])))
 		room_tol.append(_tolerance_of(rooms.get(id, [])))
 
+	# Where each member stands, for the tie below and nothing else.
+	var centres: PackedVector3Array = _centres(members, bodies)
+
 	owner_of.resize(shell.faces.size())
 	kind_of.resize(shell.faces.size())
 	guessed.resize(shell.faces.size())
@@ -173,6 +182,44 @@ static func _classify(
 					best = worst
 					best_member = index
 					best_kind = kind
+		# A TIE GOES TO THE BODY THE FACE STANDS NEARER (ADR 0038). Where two members' surfaces are
+		# COPLANAR both read the face as lying on them and both are right - a shared plane holds no
+		# seam curve to follow - so the only divider left is the plane between the two bodies, and
+		# nearest-centre IS that plane. Confined to faces BOTH claim to within [constant
+		# COPLANAR_TIE_M] of each other: every face that lies on one surface and merely passes near
+		# another is decided as before, so a real seam still follows its own curve.
+		#
+		# RETIRED(ADR 0038): the first member to read a hair smaller took the whole band. Measured
+		# on a helium of cubes, whose two bodies are mirror images: 247.956 m3 against 225.963, 8.9%
+		# apart, where symmetry says halve.
+		if best_member >= 0 and members.size() > 1:
+			var middle: Vector3 = _centre_of(shell, loop)
+			var nearest: float = centres[best_member].distance_to(middle)
+			for index: int in members.size():
+				if index == best_member:
+					continue
+				var reach: float = centres[index].distance_to(middle)
+				if reach >= nearest:
+					continue
+				# LIKE FOR LIKE. Only the SAME surface of the other member can be the coplanar
+				# twin of this one: a body face and a neighbour's cavity reading the same distance
+				# is two different surfaces that happen to coincide, and moving a face across that
+				# puts it in a patch it does not belong to - which shows up as a piece overlapping
+				# its neighbour rather than meeting it.
+				var table: PackedFloat32Array = (
+					body_d[index] if best_kind == KIND_BODY else room_d[index]
+				)
+				if table.is_empty():
+					continue
+				var limit: float = body_tol[index] if best_kind == KIND_BODY else room_tol[index]
+				var worst: float = 0.0
+				for v: int in loop:
+					worst = maxf(worst, table[v])
+					if worst >= limit:
+						break
+				if worst < limit and worst <= best + COPLANAR_TIE_M:
+					nearest = reach
+					best_member = index
 		if best_member < 0:
 			guessed[face] = 1
 			# NOTHING OWNS IT OUTRIGHT. A triangle of an exact boolean lies on one of the surfaces
@@ -223,6 +270,33 @@ static func is_sound(piece: PolyMesh) -> bool:
 					return false
 				seen[key] = used
 	return true
+
+
+## Where each of [param members] stands: the centre of its own body's tessellation, which is the
+## FIRST field of its list - the member's own, before any socket cut into it. Only ever used to
+## break a tie between members whose surfaces share a plane (see [method _classify]), so a member
+## with no field of its own simply never wins one.
+static func _centres(members: PackedStringArray, bodies: Dictionary) -> PackedVector3Array:
+	var out: PackedVector3Array = PackedVector3Array()
+	for id: String in members:
+		var at: Vector3 = Vector3.ZERO
+		for field: Variant in bodies.get(id, []) as Array:
+			if field == null or field.surface == null:
+				continue
+			at = (field.surface as PolyMesh).aabb().get_center()
+			break
+		out.append(at)
+	return out
+
+
+## The middle of [param loop], as the average of its corners.
+static func _centre_of(shell: PolyMesh, loop: PackedInt32Array) -> Vector3:
+	if loop.is_empty():
+		return Vector3.ZERO
+	var at: Vector3 = Vector3.ZERO
+	for v: int in loop:
+		at += shell.vertices[v]
+	return at / float(loop.size())
 
 
 ## The faces no field claimed, handed to the member whose hatch they belong to.

@@ -1895,3 +1895,27 @@ plate that belongs nowhere anyone can see. Three ways out, none of them chosen:
 
 Sphere classes do not have it in any size that matters: their strays measure ~1e-8 m3, float dust.
 A cube helium, boron, carbon and neon all do (0.190, 0.253, 0.131 and 0.680 m3 per piece).
+
+
+## F50 - Halving a coplanar band exactly means cutting a face, which means inventing a vertex
+
+**Measured 2026-09-23** (ADR 0038). With a coplanar tie going to the nearer body, a cube helium
+divides 242.458 against 231.461 m3 - 4.5% apart, down from 8.9%, where symmetry says halve. The two
+bodies were checked and ARE identical: 4000.001 m3 each, span (22.27, 22.27, 15.87), centred at
+x = +-5.84.
+
+**Why the rest does not go.** An exact boolean has no reason to split a band where two surfaces share
+a plane, so it comes back as a few very large faces: the whole shell of a cube helium is **64 faces**,
+about 74 m2 each. The split can only give a face WHOLE, so a face straddling the bisector takes all
+of its area to one side. The 110 m2 of surface separating the two pieces is roughly one such face.
+
+**What it would take.** Cut the band's faces at the plane between the two bodies before assigning
+them - which puts NEW VERTICES in the shell. ADR 0036 is built on never doing that ("the seam loops
+are already vertices of the shell, because that is what an exact union puts there ... this file reads
+what the engine already computed and never invents a point"), so it is the author's call, not a
+tidy-up. It is also narrow: only a pair whose surfaces share a plane is affected, which is cube
+classes standing side by side, and never a curved family.
+
+**The cheaper half-answer**, if it is ever wanted without touching the construction: cut the coplanar
+band in the PLAN, by splitting the two members' body meshes along their bisector before the union, so
+the engine itself puts the vertices there and the split still invents nothing.
