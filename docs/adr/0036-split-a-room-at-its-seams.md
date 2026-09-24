@@ -108,4 +108,18 @@ opening.
 3. **Coplanar bodies divide arbitrarily.** Two members whose surfaces share a plane - helium's
    pair - have no seam curve there to follow, and the shared band goes to whichever member the
    fields name first: measured, 125.4 against 114.1 m³ where symmetry says they should halve.
+   STANDS (re-measured 2026-09-23, ADR 0037): a helium of BOXES divides 247.956 against 225.963,
+   **8.9% apart**. It is the coplanar case only - a helium of SPHERES, whose surfaces touch at a
+   curve rather than share a plane, divides 195.701 against 195.843, 0.1% apart.
 4. **The split is all-or-nothing per room**, by design (above).
+   NOTE(ADR 0037): no room falls back any more. Measured across helium, boron, carbon and neon in
+   both `box_hull` and `sphere_pod`: **eight rooms, eight splits, no fallback**.
+
+5. **A room's core can carry a lump no piece is joined to** - NOT a fault of the split, which
+   divides it correctly. Where the nucleus bodies meet at the ship's centre their cavities, each
+   inset by its own wall, stop short of the middle and leave a little hollow box of material there:
+   on a cube carbon, 1.0028 m3 of shell around a -0.2170 m3 void. The split gives each of the six
+   members one face slab of it, 0.1310 m3 each, coming to 0.7858 m3 - the lump's net volume to the
+   last digit. Each slab is real material belonging to that member and is detached from it, because
+   cavity surrounds it. Recorded as FOLLOWUPS F49; it is a question about the cavity model, not
+   about the split.

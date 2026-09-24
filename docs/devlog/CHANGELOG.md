@@ -3081,3 +3081,30 @@ normal on `!FRONT_FACING`, which is why no other mode moved.
 A cube carbon, exploded: the wedges beside each hatch are gone and the pieces read as hollow chunks
 with their openings. Then a sphere carbon, which takes the split for the first time. And the INTERIOR
 mode, which now shows cavities rather than a blob.
+
+
+## [2026-09-23] What the split actually does now, measured across eight rooms
+
+Follow-on to ADR 0037. Every limit ADR 0036 recorded had been measured against inside-out solids, so
+none of them could be trusted; swept helium, boron, carbon and neon in both `box_hull` and
+`sphere_pod` and re-stated them from what came back.
+
+- **Eight rooms, eight splits, no fallback.** The cut-back is no longer reached by anything swept.
+- **The pieces come to their room**: exactly on a cube helium and a cube carbon, 0.005% on a sphere
+  carbon (ADR 0036 recorded 0.4%), 0.25% and 0.40% on the neons.
+- **The coplanar case stands** and is the one real limit left: a cube helium's pair divides 247.956
+  against 225.963, 8.9% apart, where symmetry says halve. A SPHERE helium divides 0.1% apart, so it
+  is coplanar surfaces specifically, not size.
+- **The lump at the core is not a split fault.** A cube nucleus leaves a 1 m hollow box of material
+  at the ship's centre, where six cavities each inset by their own wall fail to meet. The split
+  gives each member one face slab of it, 0.1310 m3 each, six coming to 0.7858 - the lump's net
+  volume to the last digit. Correct, and detached from the piece that owns it. Written up as F49
+  with three ways out, for the author to pick: it is a question about the cavity model.
+
+### And a hazard worth naming
+
+`scratch/keep_csg.gd` and `scratch/keep_templates.gd` - backups a session took - each declared a
+`class_name` the real tree declares. Godot registers global classes from EVERY `.gd` in the project
+and `scratch/` is gitignored, so git showed nothing while `ShipCsgBake` resolved to a copy that
+predated ADR 0036, and which copy won flipped between runs. Renamed to `.bak` and re-imported.
+Anything kept in `scratch/` for reference belongs under a suffix Godot does not parse.

@@ -1868,3 +1868,30 @@ pipeline could see it.
 
 A sphere carbon now splits into six closed pieces summing to **250.809 m3 against a room of
 250.821**, and a cube carbon to **315.727 against 315.727**. `MeshSeamSplit` was not changed.
+
+
+## F49 - The lump at the ship's core, which no piece is joined to
+
+**Measured 2026-09-23** (ADR 0037), on a cube carbon, and present on every `box_hull` class swept.
+
+Where the nucleus bodies meet at the ship's centre, each body's cavity is inset from it by the wall
+thickness, so the six cavities all stop short of the middle and leave a small HOLLOW BOX of material
+sitting at the core: 1.0028 m3 of shell around a -0.2170 m3 void, a 1 m cube.
+
+**The split divides it correctly** - that is not the question. Each of the six members takes one
+face slab of the cube, 0.1310 m3 apiece, and six of those come to 0.7858 m3, which is the lump's net
+volume exactly. What each member takes is its own material by every rule the split follows.
+
+**The question is whether the lump should exist at all.** Each slab is detached from the piece that
+owns it - cavity surrounds it - so a printed chunk arrives as two solids, one of them a 1 x 1 x 0.2
+plate that belongs nowhere anyone can see. Three ways out, none of them chosen:
+
+1. **Let the cavities meet.** Grow the nucleus members' cavities so their union covers the centre
+   and no residue forms. Changes what a room's interior IS at a junction, so it needs the author.
+2. **Give the lump to one member**, joined or not, so five chunks come out clean and one carries a
+   detached cube. Cheapest, and honest about being a fudge.
+3. **Drop a piece's detached parts below a size.** Simple, and silently discards real material - the
+   pieces would no longer sum to their room, which is the check that catches everything else.
+
+Sphere classes do not have it in any size that matters: their strays measure ~1e-8 m3, float dust.
+A cube helium, boron, carbon and neon all do (0.190, 0.253, 0.131 and 0.680 m3 per piece).
