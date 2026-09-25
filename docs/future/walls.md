@@ -36,10 +36,30 @@ modes map onto the styles like this:
 
 ## What is missing, precisely
 
-1. **The styles are not yet distinguished in the geometry.** Every style currently bakes as the
-   native linkage surface — recorded as a known limit under FOLLOWUPS F32/F33, "flat and native
-   styles are still one surface". This is the bulk of the work.
-2. **A style names the two solids by SIZE, not by which chunk.** `big_native` means "the larger one
+1. **The SURFACE half of a style is not yet distinguished in the geometry** — and, measured
+   2026-09-25, only that half. Setting every joint of a lithium to each of the six styles in turn
+   and baking gives **two distinct results, not six**:
+
+   | styles | pieces | total volume | total area |
+   |---|---|---|---|
+   | `small_flat_insert`, `small_flat_cutoff`, `small_native` | 5 | 555.6307 m³ | 5617.2068 m² |
+   | `big_flat_insert`, `big_flat_cutoff`, `big_native` | 5 | 554.9667 m³ | 5610.3840 m² |
+
+   So **which solid indents which is honoured**; the three linkage surfaces are one surface. That
+   corrects the older wording here, which said every style baked as the native one - the indent half
+   has been working all along, and it is the `flat_insert` / `flat_cutoff` / `native` distinction
+   that is the bulk of the work. RETIRED(2026-09-25): "Every style currently bakes as the native
+   linkage surface".
+2. **A style names the two solids by SIZE, and the author has confirmed that is what they want.**
+   "naming by size can be one of the options in the list of options. so options of big indents
+   small, and small indents big. just make the options approperate, some may be sub options idk"
+   (2026-09-25). The menu already reads exactly that way and has since ADR 0013 - two headed groups,
+   SMALL INDENTS BIG and BIG INDENTS SMALL, each with FLAT INSERTED / FLAT CUTOFF / NATIVE INSERTED
+   beneath it - so the naming question recorded below is **settled, and no ADR amendment is needed**.
+   RETIRED(2026-09-25): the paragraph that follows, which treated naming-by-chunk as the thing to
+   build and ADR 0013 as the obstacle.
+
+   A style names the two solids by SIZE, not by which chunk. `big_native` means "the larger one
    keeps its surface", not "this one does". ADR 0013 chose that deliberately, replacing a naming by
    the attach tree (parent/child) which broke when the tree said one thing and the geometry another.
    But the author's `wall ab` / `wall ba` names a CHUNK, and for two chunks of equal size - which is
