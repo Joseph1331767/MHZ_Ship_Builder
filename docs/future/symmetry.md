@@ -46,7 +46,7 @@ changing the document shape again.
 
 ---
 
-## A PREBUILT SHIP MUST BE SYMMETRIC BY WEIGHT - current phase, from a dev note
+## A PREBUILT SHIP MUST BE SYMMETRIC BY WEIGHT - BUILT (ADR 0044), four classes open as F51
 
 > "after reviewing many of these, i realized that many of our presets are asemetrical in every
 > direction. the rule i created now is we need symetry across at least 1 axis with reguards to our

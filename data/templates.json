@@ -45,19 +45,19 @@
       "description": "Three branches at 120 degrees in one plane. The flattest arrangement that still surrounds the core, and the cheapest to dock at because every tunnel mouth is reachable from the same approach.",
       "dirs": [
         [
-          1.0,
+          0.866025,
           0.0,
-          0.0
+          -0.5
         ],
         [
-          -0.5,
           0.0,
-          0.866025
+          0.0,
+          1.0
         ],
         [
-          -0.5,
+          -0.866025,
           0.0,
-          -0.866025
+          -0.5
         ]
       ]
     },
@@ -65,19 +65,19 @@
       "description": "Three branches swept below the equator, ammonia's trigonal pyramid. The lopsided one: the core keeps a clear face on top, which is where a bridge or a dorsal mast goes.",
       "dirs": [
         [
-          0.942641,
+          0.816351,
           -0.333807,
-          0.0
+          -0.47132
         ],
         [
-          -0.471321,
+          0.0,
           -0.333807,
-          0.816351
+          0.942641
         ],
         [
-          -0.471321,
+          -0.816351,
           -0.333807,
-          -0.816351
+          -0.47132
         ]
       ]
     },
@@ -85,24 +85,24 @@
       "description": "Four branches at 109.5 degrees, the carbon plan. The most symmetric way to put four rooms around one without any two tunnels sharing a plane, and the reason a methane-pattern hull looks equally sane from every angle.",
       "dirs": [
         [
+          0.816496,
           0.57735,
-          0.57735,
-          0.57735
+          0.0
         ],
         [
-          0.57735,
+          0.0,
           -0.57735,
-          -0.57735
+          -0.816496
         ],
         [
-          -0.57735,
+          -0.816496,
           0.57735,
-          -0.57735
+          0.0
         ],
         [
+          0.0,
           -0.57735,
-          -0.57735,
-          0.57735
+          0.816496
         ]
       ]
     },
@@ -135,19 +135,19 @@
       "description": "Five branches: three around the waist and one at each pole. Phosphorus geometry, and the first arrangement with two genuinely different kinds of berth - equatorial and axial - which is where a ship starts having a bow.",
       "dirs": [
         [
-          1.0,
+          0.866025,
           0.0,
-          0.0
+          -0.5
         ],
         [
-          -0.5,
           0.0,
-          0.866025
+          0.0,
+          1.0
         ],
         [
-          -0.5,
+          -0.866025,
           0.0,
-          -0.866025
+          -0.5
         ],
         [
           0.0,
@@ -200,29 +200,29 @@
       "description": "Seven branches: five around the waist plus both poles. Past this the tunnel mouths start crowding each other on the core's surface, which is a real structural limit and not a rendering one.",
       "dirs": [
         [
-          1.0,
+          0.951057,
           0.0,
-          0.0
+          -0.309017
         ],
         [
-          0.309017,
+          0.587785,
           0.0,
-          0.951057
+          0.809017
         ],
         [
-          -0.809017,
+          -0.587785,
           0.0,
-          0.587785
+          0.809017
         ],
         [
-          -0.809017,
+          -0.951056,
           0.0,
-          -0.587785
+          -0.309017
         ],
         [
-          0.309017,
           0.0,
-          -0.951057
+          0.0,
+          -1.0
         ],
         [
           0.0,

@@ -47,6 +47,10 @@ extends RefCounted
 ## `core/` purity: static only, no state, no engine objects, no `res://`.
 
 ## Section names in `data/templates.json`.
+## How near two slots must be, squared, to count as each other's reflection across X. The
+## arrangements are unit directions written to six places, so this only has to clear that dust.
+const MIRROR_SLOT_EPSILON: float = 1.0e-6
+
 const SECTION_ARRANGEMENTS: String = "arrangements"
 const SECTION_ELEMENTS: String = "elements"
 const SECTION_MOLECULES: String = "molecules"
@@ -653,6 +657,67 @@ static func body_count(element: Dictionary) -> int:
 ## still exists and thats incorrect" - and the seams that bury it then hollow its hull away to
 ## slivers. A cluster with nothing at its centre has no such body to lose. The body COUNT is
 ## unchanged either way: one root plus `count - 1` directions.
+## [param order] rearranged so each slot is followed immediately by its mirror across X, when the
+## arrangement holds one.
+##
+## A class takes the FIRST `wanted` of this list, so what matters is that every PREFIX is as
+## balanced as it can be: an even one exactly, an odd one off by the single arm that has no
+## partner. Without it the waist-first order can hand out several arms on the same side - measured,
+## a silicon put all three of its arms at x = +6.4 - and the ship comes out lopsided left to right,
+## which is the one asymmetry the author's rule forbids a prebuild ("we need symetry across at
+## least 1 axis with reguards to our prebuilds ... with a left-right being a min", 2026-09-24).
+##
+## The waist-first preference is kept: pairing only reorders within it, so an arm still goes to the
+## most reachable berth available.
+static func _mirror_paired(slots: Array[Vector3], order: Array[int], wanted: int) -> Array[int]:
+	var out: Array[int] = []
+	var taken: Dictionary = {}
+	# AN ODD COUNT NEEDS ONE ARM THAT IS ITS OWN MIRROR, and it has to be inside the prefix or the
+	# ship is lopsided by a whole arm. Every arrangement with an odd number of berths has such a
+	# slot once it is rotated to sit square on X, so this is a real berth and not a compromise; a
+	# cubic nucleus has none, and a class wanting an odd number of arms off one cannot be balanced
+	# left to right by slot choice at all.
+	if wanted % 2 == 1:
+		for index: int in order:
+			if _mirror_slot(slots, index) == index:
+				taken[index] = true
+				out.append(index)
+				break
+	for index: int in order:
+		if taken.has(index):
+			continue
+		var partner: int = _mirror_slot(slots, index)
+		if partner == index:
+			# Another self-mirrored berth: it balances alone, but taking it here would unpair the
+			# rest, so it waits for the sweep below.
+			continue
+		taken[index] = true
+		out.append(index)
+		if partner >= 0 and not taken.has(partner):
+			taken[partner] = true
+			out.append(partner)
+	for index: int in order:
+		if not taken.has(index):
+			taken[index] = true
+			out.append(index)
+	return out
+
+
+## The slot holding [param index]'s reflection across X: [param index] itself when the slot sits ON
+## the plane and so is its own mirror, or -1 when the arrangement holds no reflection of it.
+static func _mirror_slot(slots: Array[Vector3], index: int) -> int:
+	if index < 0 or index >= slots.size():
+		return -1
+	var want: Vector3 = slots[index]
+	want.x = -want.x
+	if slots[index].distance_squared_to(want) <= MIRROR_SLOT_EPSILON:
+		return index
+	for i: int in slots.size():
+		if i != index and slots[i].distance_squared_to(want) <= MIRROR_SLOT_EPSILON:
+			return i
+	return -1
+
+
 static func _layout(data: ShipData, element: Dictionary) -> Dictionary:
 	var count: int = nucleus_count(element)
 	var nucleus: Array[Vector3] = []
@@ -687,6 +752,7 @@ static func _layout(data: ShipData, element: Dictionary) -> Dictionary:
 		for i: int in slots.size():
 			order.append(i)
 		order.sort_custom(func(a: int, b: int) -> bool: return _waist_first(slots, up, a, b))
+		order = _mirror_paired(slots, order, wanted)
 		for i: int in wanted:
 			extremity.append(slots[order[i]])
 			extremity_slots.append(order[i])

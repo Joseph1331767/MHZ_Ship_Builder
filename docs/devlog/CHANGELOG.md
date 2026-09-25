@@ -3388,3 +3388,44 @@ the field; validator PASSED; resolve and visual checks PASSED; gdformat and gdli
 The placement GHOST shows a single twin even where the commit will make three or seven - it is one
 node. It under-promises, which is the safe direction, and a ghost per reflection is a view change
 worth doing on its own.
+
+
+## [2026-09-25] A prebuilt class is symmetric left to right
+
+ADR 0044, from the dev note of 2026-09-24: "many of our presets are asemetrical in every direction.
+the rule i created now is we need symetry across at least 1 axis ... with a left-right being a min
+... make it based on weight (mirrored weight)".
+
+Nobody had measured which classes failed, so that came first: `tools/ship_symmetry_check.gd` reports
+each class's centre of mass off each plane as a fraction of its own half extent. Weight is the shell
+model already in use, and with one placeholder density a part's weight is its surface area.
+
+**Six classes failed X. Two causes, both fixed.**
+
+Five arrangements were not mirror-closed on X - `trigonal`, `pyramidal`, `tetrahedral`,
+`bipyramidal`, `pentagonal`. They are rotationally symmetric about Y but their spokes did not pair
+across X, which a sum of zero does not catch: a tetrahedron sums to zero and is not mirror-paired.
+Each is rotated about Y by half its own step (30, 30, 45, 30, 18 degrees), which brings a mirror
+plane onto X without changing the arrangement's shape - every direction keeps its length and the set
+keeps its angles.
+
+And arms were handed out waist-first and clustered: a silicon put all three of its arms at x = +6.4.
+They now go out in mirror pairs, so every prefix is as balanced as it can be.
+
+### Verified
+
+Twelve of sixteen classes are now balanced left to right, from ten. `silicon`, `lithium`, `oxygen`
+and `sulphur` moved to passing; `lithium` was fixed by the rotation and `silicon` by the pairing.
+**gdUnit4 340/340**; selfcheck PASSED, hash unchanged at `5536787c6c35d236`; validator PASSED;
+resolve and visual checks PASSED.
+
+### What is left, and why it is not a tidy-up
+
+`fluorine`, `sodium`, `phosphorus` and `chlorine` still fail, each by exactly one arm's weight, and
+they cannot be fixed by slot choice: a class takes one body per proton clamped to eight - the CUBIC
+arrangement - and **a cube has no vertex on the X plane**, so an odd arm count always leaves one arm
+with nowhere balanced to stand. All four have odd valence. F51 has the four ways out; picking one is
+a decision about what a class is.
+
+Every preset's geometry moves with this, because the arrangements rotated - a trigonal class is
+turned 30 degrees about its own axis from where it stood.

@@ -1932,3 +1932,30 @@ Proved on the shell before it was built: straddling faces went from 4 carrying 2
 with the shell otherwise identical. A helium of cubes then divided **236.960 against 236.959 m3,
 0.0% apart**, from 4.5%. Nothing else in the sweep moved, and the 0.39% a neon of cubes had lost to
 ADR 0038's tie-break came back to 0.26%.
+
+
+## F51 - Four classes cannot be balanced left to right by slot choice
+
+**Measured 2026-09-25** (ADR 0044) by `tools/ship_symmetry_check.gd`: `fluorine`, `sodium`,
+`phosphorus` and `chlorine` fail the author's hard X rule, each by exactly one arm's weight.
+
+**The cause is structural, not a mistake.** A class takes one nucleus body per proton, clamped to
+eight - which is the CUBIC arrangement - and one arm per valence electron. Arms are handed out in
+mirror pairs, so an even count balances exactly. **A cube has no vertex on the X plane**, so an ODD
+count is left with one arm that has nowhere balanced to stand. All four have odd valence: 7, 1, 5, 7.
+
+**Four ways out, none chosen - it is a decision about what a class IS:**
+
+1. **Give the odd arm a berth on the plane** that is not a nucleus slot - an arm hanging off the
+   waist rather than off a corner. Keeps every class's body count, adds a placement rule.
+2. **Use a nucleus arrangement that has an X-plane vertex** for odd-valence classes - `pentagonal`
+   and `bipyramidal` both do, after ADR 0044's rotation. Changes what those classes look like.
+3. **Pair the odd arm**, making the arm count even - i.e. valence stops mapping one-to-one onto arms
+   for odd-valence elements. Cheapest to build, and it breaks the chemistry conceit the classes are
+   named for.
+4. **Let them be asymmetric** and narrow the rule to "where the arrangement allows it". Honest, and
+   it gives up the thing the rule was for.
+
+The residual is small - 0.038 to 0.078 of the half extent - so nothing is blocked while it waits.
+`ship_symmetry_check.gd` reports rather than gates, and its `GATE` constant is the one line to flip
+when this is settled.
