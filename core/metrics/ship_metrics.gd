@@ -159,6 +159,62 @@ static func compute_bbox(doc: ShipDoc, data: ShipData, cfg: ShipConfig) -> AABB:
 # --- the full pass ------------------------------------------------------------------
 
 
+## Where the ship's mass sits and how centred that is: `{"centre": Vector3, "balance": Vector3,
+## "best": float, "parts": int}`. `balance` is 0-1 per axis, 1 being dead centre.
+##
+## THE SHIP'S BALANCE, NOT ITS SYMMETRY (ADR 0045). The author's rule for a prebuilt class is
+## symmetry across at least ONE axis - "with 3 orthognal axies to choose from and the constraint
+## that only 1 has to be symetrical" - so `best` is the axis the ship does best on, and that is the
+## single 0-1 number worth showing: "maybe during this builder we just give a 0-1 value of how
+## centered it is, and we draw a cross where the com is" (2026-09-25). Perfecting it by adding
+## ballast is a later mechanic, and none of this pre-empts it.
+##
+## WEIGHT IS VOLUME, FOR NOW, and the author said so: "all hull volumes wil be placeholdered at same
+## density so it translates to volume and shape for now but can be set up via weight". A part's
+## share is its resolved bound's volume - no meshing, so this costs an attach solve and nothing
+## more. When real densities arrive this formula is the one line that changes.
+##
+## INCLUDES MIRRORED TWINS, because a twin is as real as the part it came from - and they are most
+## of what makes a ship balanced in the first place.
+static func balance(doc: ShipDoc, data: ShipData, cfg: ShipConfig) -> Dictionary:
+	var out: Dictionary = {"centre": Vector3.ZERO, "balance": Vector3.ZERO, "best": 0.0, "parts": 0}
+	if doc == null or data == null or cfg == null:
+		return out
+	var shapes: Dictionary = ShipAttach.resolve_shapes(doc, data, cfg)
+	var xforms: Dictionary = ShipAttach.resolve_all_from_shapes(doc, shapes, cfg)
+	var total: float = 0.0
+	var moment: Vector3 = Vector3.ZERO
+	var box: AABB = AABB()
+	var first: bool = true
+	for key: Variant in xforms:
+		var id: String = str(key)
+		var shape_v: Variant = shapes.get(ShipSymmetry.source_of_twin(id))
+		if not (shape_v is ResolvedShape):
+			continue
+		var part: AABB = (xforms[key] as Transform3D) * (shape_v as ResolvedShape).local_aabb()
+		part = part.abs()
+		var weight: float = part.size.x * part.size.y * part.size.z
+		if weight <= 0.0:
+			continue
+		total += weight
+		moment += part.get_center() * weight
+		box = part if first else box.merge(part)
+		first = false
+		out["parts"] = int(out["parts"]) + 1
+	if total <= 0.0 or first:
+		return out
+	var centre: Vector3 = moment / total
+	# Against the ship's OWN half extent, so a small ship and a large one read on one scale.
+	var half: Vector3 = box.size * 0.5
+	var spread: Vector3 = Vector3.ZERO
+	for axis: int in 3:
+		spread[axis] = clampf(1.0 - absf(centre[axis]) / maxf(half[axis], 0.001), 0.0, 1.0)
+	out["centre"] = centre
+	out["balance"] = spread
+	out["best"] = maxf(spread.x, maxf(spread.y, spread.z))
+	return out
+
+
 ## Full grid pass. Fills every field. `sdf` must have been built from the same doc/data/cfg.
 static func compute(sdf: ShipSdf, doc: ShipDoc, data: ShipData, cfg: ShipConfig) -> ShipMetrics:
 	var m: ShipMetrics = ShipMetrics.new()

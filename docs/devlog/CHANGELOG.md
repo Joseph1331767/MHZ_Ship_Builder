@@ -3429,3 +3429,37 @@ a decision about what a class is.
 
 Every preset's geometry moves with this, because the arrangements rotated - a trigonal class is
 turned 30 degrees about its own axis from where it stood.
+
+
+## [2026-09-25] The builder shows where the mass sits, and how centred
+
+ADR 0045, from two corrections by the author - both to the agent's reading rather than to the rule.
+
+The rule is **any one axis**, not X. ADR 0044 read "with a left-right being a min" as making X
+mandatory; the author: "com only has to adhear to the axes that are symetrical, and with 3 orthognal
+axies to choose from and the constraint that only 1 has to be symetrical means that any of our pre
+built shapes should be able to obtain that." Read correctly the four failing classes are worse than
+recorded, not better: they are symmetric on NO axis, because the leftover arm sits on a cube corner
+and is off every plane by the same amount. The framing had hidden that.
+
+And perfecting the balance is a later mechanic: "maybe during this builder we just give a 0-1 value
+of how centered it is, and we draw a cross where the com is. then i can handle prefection in a
+balancing via weight addition later."
+
+So the builder reports and marks, and enforces nothing. `ShipMetrics.balance()` gives the centre of
+mass, a 0-1 per axis and the best of them; weight is volume for now, as the author specified, and
+that is the one line that changes when real densities arrive. The view draws a cross on the ship's
+own axes, sized off the ship, IGNORING DEPTH - the centre of mass is usually inside the hull, which
+is what being centred means, so a depth-tested mark is invisible exactly when the ship is right. A
+bar is calm on an axis the ship is centred on and warning-coloured on one it is not. The budgets
+footer reads `BALANCE 0.92 X`.
+
+### Verified
+
+A sodium reads `centre (1.17, 1.17, -1.17)`, `balance (0.923, 0.923, 0.915)`, best 0.923 over 10
+parts, and the cross is plainly visible through the hull in the warning colour -
+`reports/visual_com_cross.png`, looked at. **gdUnit4 340/340**; selfcheck PASSED, hash unchanged at
+`5536787c6c35d236`; resolve and visual checks PASSED; gdformat and gdlint clean.
+
+The four classes stay in F51 with the author's own remedies recorded against them: resize a body to
+cancel the odd arm's moment, or cull the class.

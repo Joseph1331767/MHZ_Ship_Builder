@@ -1934,7 +1934,7 @@ with the shell otherwise identical. A helium of cubes then divided **236.960 aga
 ADR 0038's tie-break came back to 0.26%.
 
 
-## F51 - Four classes cannot be balanced left to right by slot choice
+## F51 - Four classes are symmetric on no axis at all
 
 **Measured 2026-09-25** (ADR 0044) by `tools/ship_symmetry_check.gd`: `fluorine`, `sodium`,
 `phosphorus` and `chlorine` fail the author's hard X rule, each by exactly one arm's weight.
@@ -1959,3 +1959,25 @@ count is left with one arm that has nowhere balanced to stand. All four have odd
 The residual is small - 0.038 to 0.078 of the half extent - so nothing is blocked while it waits.
 `ship_symmetry_check.gd` reports rather than gates, and its `GATE` constant is the one line to flip
 when this is settled.
+
+
+### Corrected 2026-09-25 (ADR 0045), and the author's own remedies
+
+The rule is **any one axis**, not X: "com only has to adhear to the axes that are symetrical, and
+with 3 orthognal axies to choose from and the constraint that only 1 has to be symetrical means that
+any of our pre built shapes should be able to obtain that." Read that way these four are worse than
+first recorded, not better - they are symmetric on **no axis at all**, because the leftover arm sits
+on a CUBE CORNER and so is off every plane by the same amount. A sodium reads
+`centre (1.17, 1.17, -1.17)`, `balance (0.923, 0.923, 0.915)`.
+
+The author's own remedies, which replace the four guesses recorded above:
+
+> "if their structure makes it such that it cant be obtained then you can always increase the sizes
+> of one component or more to make it obtainable. but some of the structures are wildly un symetrical
+> so my vote is force them to exist in such a way that they are, or cull them."
+
+So: **resize a body to compensate** - the odd arm's moment is known exactly, so the body opposite it
+can be grown to cancel it, which keeps the class's shape and its chemistry conceit - **or cull the
+class**. Neither is chosen yet, and nothing is blocked while it waits: the builder now reports the
+number and marks the centre (ADR 0045) rather than enforcing anything, and balancing by adding
+ballast is a later mechanic the author has already sketched as its own minigame.

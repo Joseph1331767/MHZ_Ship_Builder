@@ -77,6 +77,14 @@ signal part_picked(part_id: String, additive: bool)
 signal pick_cleared
 
 ## A press that moves further than this many pixels is a camera drag, not a click.
+## How long each bar of the centre-of-mass cross is, as a fraction of the ship's own diagonal, and
+## the floor under it so the mark never vanishes on a tiny ship.
+const COM_ARM_FRACTION: float = 0.14
+const COM_ARM_MIN_M: float = 0.5
+
+## At or above this on an axis, the ship counts as centred on it and the bar is drawn calm.
+const COM_CENTRED: float = 0.98
+
 const CLICK_SLOP_PX: float = 4.0
 const PICK_RAY_LENGTH: float = 10000.0
 ## Alpha of everything outside the component open in isolation (ADR 0024).
@@ -179,6 +187,10 @@ var _cfg: ShipConfig = null
 var _builder: ShipBuilder = null
 ## The max-bbox cage. A separate node from the grid so a budget change redraws one and not both.
 var _bbox_cage: MeshInstance3D = null
+## The cross at the ship's centre of mass (ADR 0045). Its own node for the same reason.
+var _com_cross: MeshInstance3D = null
+## The last balance read, so the builder can show the number without measuring again.
+var _balance: Dictionary = {}
 ## The EXPLODED view (ADR 0008): module bakes pulled apart along their seams, shown INSTEAD of
 ## the parts. While it is up this view owns nothing but the camera - no picks, no handles, no
 ## edit keys - because what is on screen is a set of bakes, not the document.
@@ -310,6 +322,10 @@ func _ready() -> void:
 	_bbox_cage = MeshInstance3D.new()
 	_bbox_cage.name = "BBoxCage"
 	_viewport.add_child(_bbox_cage)
+
+	_com_cross = MeshInstance3D.new()
+	_com_cross.name = "CentreOfMass"
+	_viewport.add_child(_com_cross)
 
 	_scene = ShipSceneBuilder.new()
 	_scene.name = "ShipScene"
@@ -516,6 +532,7 @@ func rebuild(doc: ShipDoc, data: ShipData, cfg: ShipConfig) -> void:
 		_scene.rebuild(doc, data, cfg)
 		_push_depth_range()
 	_rebuild_bbox_cage()
+	_rebuild_com_cross(doc, data, cfg)
 
 
 func sync(doc: ShipDoc, data: ShipData, cfg: ShipConfig) -> void:
@@ -525,6 +542,7 @@ func sync(doc: ShipDoc, data: ShipData, cfg: ShipConfig) -> void:
 		_scene.sync(doc, data, cfg)
 		_push_depth_range()
 	_rebuild_bbox_cage()
+	_rebuild_com_cross(doc, data, cfg)
 
 
 func refresh_parts(doc: ShipDoc, data: ShipData, cfg: ShipConfig, ids: PackedStringArray) -> void:
@@ -1736,6 +1754,45 @@ func _rebuild_grid() -> void:
 ## starting hull: twelve full edges at that scale is a box drawn around the entire grid floor and
 ## reads as scenery. Eight short brackets read as limits, which is the CAD convention and is what
 ## the thing actually is.
+## How centred the ship is, 0-1 on its best axis, with the whole reading behind it. Empty before
+## the first sync. See [method ShipMetrics.balance].
+func balance() -> Dictionary:
+	return _balance
+
+
+## A CROSS AT THE CENTRE OF MASS (ADR 0045). "maybe during this builder we just give a 0-1 value of
+## how centered it is, and we draw a cross where the com is" (2026-09-25).
+##
+## Three axis-aligned bars, sized off the ship rather than fixed, so the mark reads the same on a
+## three-metre pod and a twenty-metre hull. It is drawn on the ship's OWN axes because the rule it
+## serves is about those axes; the bar of an axis the ship is centred on is drawn in the line
+## colour, and one it is off on in the warning colour, so which axis is out says itself without a
+## readout.
+func _rebuild_com_cross(doc: ShipDoc, data: ShipData, cfg: ShipConfig) -> void:
+	if _com_cross == null:
+		return
+	_balance = ShipMetrics.balance(doc, data, cfg)
+	if int(_balance.get("parts", 0)) <= 0 or _scene == null:
+		_com_cross.visible = false
+		return
+	var centre: Vector3 = _balance["centre"]
+	var spread: Vector3 = _balance["balance"]
+	var box: AABB = _scene.scene_aabb()
+	var arm: float = maxf(box.size.length() * COM_ARM_FRACTION, COM_ARM_MIN_M)
+	var mesh: ImmediateMesh = ImmediateMesh.new()
+	for axis: int in 3:
+		var along: Vector3 = Vector3.ZERO
+		along[axis] = arm
+		var centred: bool = spread[axis] >= COM_CENTRED
+		var tint: Color = _role_color("line" if centred else "warning", Color(0.35, 0.75, 0.70))
+		mesh.surface_begin(Mesh.PRIMITIVE_LINES, _mark_material(tint))
+		mesh.surface_add_vertex(centre - along)
+		mesh.surface_add_vertex(centre + along)
+		mesh.surface_end()
+	_com_cross.mesh = mesh
+	_com_cross.visible = true
+
+
 func _rebuild_bbox_cage() -> void:
 	if _bbox_cage == null:
 		return
@@ -1784,6 +1841,16 @@ func _bbox_over(half: Vector3) -> bool:
 		maxf(absf(box.position.z), absf(box.end.z))
 	)
 	return reach.x > half.x or reach.y > half.y or reach.z > half.z
+
+
+## A line that IGNORES DEPTH, for a mark that has to be found rather than looked at.
+##
+## The centre of mass is usually inside the hull - that is what being centred means - so a
+## depth-tested cross is invisible exactly when the ship is right. This draws through.
+func _mark_material(c: Color) -> StandardMaterial3D:
+	var m: StandardMaterial3D = _line_material(c)
+	m.no_depth_test = true
+	return m
 
 
 func _line_material(c: Color) -> StandardMaterial3D:

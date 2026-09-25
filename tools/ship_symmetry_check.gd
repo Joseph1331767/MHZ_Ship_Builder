@@ -1,21 +1,26 @@
 extends SceneTree
 ## THE PREBUILT CLASSES' WEIGHT BALANCE, per axis. Headless; run through tools/ship_run.ps1.
 ##
-## The author's rule (dev note 2026-09-24): "we need symetry across at least 1 axis with reguards to
-## our prebuilds. with a left-right being a min, top-bot, and frnt-back can be asymetrical if the
-## themed part calls for it ... make it based on weight (mirrored weight)".
+## The author's rule (dev note 2026-09-24, clarified 2026-09-25): "we need symetry across at least 1
+## axis with reguards to our prebuilds ... make it based on weight (mirrored weight)", and then:
+## "com only has to adhear to the axes that are symetrical, and with 3 orthognal axies to choose
+## from and the constraint that only 1 has to be symetrical means that any of our pre built shapes
+## should be able to obtain that."
 ##
-## So: X is a hard rule, Y and Z are allowed to fail. Weight is the shell model the builder already
+## So: ANY ONE axis passing is a pass. X is not special - that reading was the agent's, and it hid
+## the fact that the four failing classes fail on all three at once.
+##
+## Weight is the shell model the builder already
 ## uses - `surface_area_m2 * areal_density_kg_m2` - and every hull is placeholdered at one density,
 ## so a part's weight is its surface area and a class's centre of mass is the area-weighted mean of
 ## its parts' centres. The offset is reported as a fraction of the class's own half extent, so a
 ## twenty-metre ship and a three-metre one are read on the same scale.
 ##
-## REPORTS, IT DOES NOT GATE - yet. Four classes still fail X by exactly one arm and the reason is
+## REPORTS, IT DOES NOT GATE - yet. Four classes fail on every axis at once and the reason is
 ## structural rather than a mistake (see below), so failing the build on them would only stop work.
 ## When they are resolved this becomes a gate, and the line to change is [constant GATE].
 
-## Exit non-zero when a class fails the X rule. False while the four known ones stand.
+## Exit non-zero when a class is symmetric on no axis at all. False while the four known ones stand.
 const GATE: bool = false
 
 ## Off by more than this fraction of the half extent and the axis is not symmetric. Loose enough to
@@ -51,7 +56,7 @@ func _init() -> void:
 	var cfg: ShipConfig = data.config if data.config != null else ShipConfig.defaults()
 	print("=== prebuilt symmetry check ===")
 	print("  centre of mass off each plane, as a fraction of the half extent")
-	print("  X must pass; Y and Z may fail where the theme calls for it")
+	print("  AT LEAST ONE axis must pass; which one is the class's own business")
 	print("")
 	print("  class              X        Y        Z     passing")
 	var failed: PackedStringArray = PackedStringArray()
@@ -65,7 +70,7 @@ func _init() -> void:
 		for axis: int in 3:
 			if off[axis] <= TOLERANCE:
 				passing += ["x", "y", "z"][axis]
-		if not passing.contains("x"):
+		if passing.is_empty():
 			failed.append(name)
 		print(
 			(
@@ -76,23 +81,29 @@ func _init() -> void:
 					off.y,
 					off.z,
 					passing,
-					"   <- X FAILS" if not passing.contains("x") else ""
+					"   <- NO AXIS" if passing.is_empty() else ""
 				]
 			)
 		)
 	print("")
 	if failed.is_empty():
-		print("=== prebuilt symmetry check PASSED - every class is balanced left to right ===")
+		print("=== prebuilt symmetry check PASSED - every class is balanced on some axis ===")
 		quit(0)
 		return
-	print("  %d of %d fail the X rule: %s" % [failed.size(), ELEMENTS.size(), ", ".join(failed)])
+	print(
+		(
+			"  %d of %d are symmetric on NO axis: %s"
+			% [failed.size(), ELEMENTS.size(), ", ".join(failed)]
+		)
+	)
 	print("")
 	print("  WHY, and it is structural rather than a mistake: a class takes one arm per valence")
 	print("  electron and its nucleus takes one body per proton, clamped to eight - which is the")
-	print("  CUBIC arrangement, and a cube has no vertex on the X plane. Arms are handed out in")
-	print("  mirror pairs (ADR 0044), so an EVEN count balances exactly and an ODD one is left")
-	print("  over by a single arm with nowhere on the plane to stand. All four have odd valence.")
-	print("  Fixing it is a decision about what a class IS, not a tidy-up - see FOLLOWUPS F51.")
+	print("  CUBIC arrangement. Arms are handed out in mirror pairs (ADR 0044), so an EVEN count")
+	print("  balances exactly; all four of these have ODD valence, and the leftover arm sits on a")
+	print("  CUBE CORNER, which is off all three planes at once by the same amount. That is why")
+	print("  they fail every axis rather than only one, and why no slot choice fixes it.")
+	print("  See FOLLOWUPS F51: resize a body to compensate, re-berth the odd arm, or cull.")
 	if GATE:
 		quit(1)
 		return

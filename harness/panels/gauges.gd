@@ -307,11 +307,20 @@ func _refresh_display() -> void:
 		_readouts[index].text = _readout_for(index, cfg)
 		_bars[index].tooltip_text = _tooltip_for(index, cfg)
 		_bars[index].queue_redraw()
+	# BALANCE, 0-1 on the ship's best axis (ADR 0045), beside the cell and area it is measured
+	# with. The cross in the view says WHERE the mass sits; this says how well centred it is, and
+	# the rule it serves only asks for one axis - "with 3 orthognal axies to choose from and the
+	# constraint that only 1 has to be symetrical" (2026-09-25).
+	var balance: Dictionary = _builder.get_view().balance()
+	var centred: String = "---"
+	if int(balance.get("parts", 0)) > 0:
+		centred = "%.2f %s" % [float(balance.get("best", 0.0)), _best_axis(balance)]
 	_footer.text = (
-		"CELL %s M   AREA %s M2"
+		"CELL %s M   AREA %s M2   BALANCE %s"
 		% [
 			NumericField.format_number(_metrics.sample_cell_m),
 			NumericField.format_number(_metrics.surface_area_m2),
+			centred,
 		]
 	)
 	# Alert control is ours from the first call onwards, so all four budgets are reported
@@ -487,3 +496,14 @@ func _role_color(role: String) -> Color:
 	if _ship_theme == null:
 		return Color(0.5, 0.5, 0.5, 1.0)
 	return _ship_theme.color_for_role(role)
+
+
+## Which axis [param balance] is best centred on, as a letter. The rule only asks for one, so
+## naming it is more use than the three numbers.
+func _best_axis(balance: Dictionary) -> String:
+	var spread: Vector3 = balance.get("balance", Vector3.ZERO)
+	var best: int = 0
+	for axis: int in 3:
+		if spread[axis] > spread[best]:
+			best = axis
+	return ["X", "Y", "Z"][best]
