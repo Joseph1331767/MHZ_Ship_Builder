@@ -98,3 +98,22 @@ the merged extent.
   exactly: the definition is instant, the meshes come when asked.
 - **`FINE_CUTS` is the thing that changes** - today a fixed array of fractions, and it would become a
   cell size in metres with a count derived per piece.
+
+## Room size stays as it is - decided 2026-09-24
+
+The chunk counts above are premised on rooms as they are actually built, which is NOT
+`ShipConfig.room_span_m`. That lever is only read when `OPT_ROOM_SPAN` is passed; a default prebuild
+sizes its rooms from a volume budget instead, `template_volume_m3` (8000) divided by the node count:
+
+| class | nodes | room as built | area | with an explicit span |
+|---|---|---|---|---|
+| hydrogen | 1 | 20.0 m | 2400 m2 | 3.0 m, 54 m2 |
+| helium | 1 | 15.9 m | 1512 m2 | 3.0 m, 54 m2 |
+| lithium | 2 | 12.6 m | 952 m2 | 3.0 m, 54 m2 |
+| carbon | 5 | 9.283 m | 517 m2 | 3.0 m, 54 m2 |
+| neon | 9 | 7.937 m | 378 m2 | 3.0 m, 54 m2 |
+
+Raised with the author because it makes `room_span_m: 3.0` dead on every default build and gives a
+hydrogen a 20 m room. **Their answer: leave it, it is working nicely.** So the big chunk counts are
+the real ones, and on-demand materialisation stays a requirement rather than a precaution. Recorded
+here so nobody re-opens it from the config alone.
