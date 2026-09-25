@@ -1,85 +1,101 @@
-# Dicing for the printer, not for a grid
+# Panels and printing: two decompositions, not one
 
-Design note, not built. Recorded 2026-09-24 from the author, so the shape of it is on paper before
-anyone starts. `docs/future/` is not CONTRACT and no code reads it (AGENTS §3).
+Design note, not built. Recorded 2026-09-24 from the author, corrected the same day after two
+misreadings on the agent's part. `docs/future/` is not CONTRACT and no code reads it (AGENTS §3).
 
-## The author's words
+## What the author actually asked for
 
-> "would it be faster to slice at existing mesh liness? so long as huge flat surfaces still slice?
-> so any surface primitave thats too big gets bisected untill all pieces fall under the 3d printer
-> size requirements and double or multi mesh faces can be joined when 3d printer bed is increased
-> past that threshold? ... (different 3d printers will have different size capabilities in the
-> future) so this may be a good thing: slice all poly surfaces seperate >> combine them in future
-> when print beds are large enough to handle 2+ pieces >> ensure flats or polys that are too large
-> (larger then biggest size smallest printer handles) then it needs to be bisected"
+Two separate things, and the first exchange ran them together.
 
-Asked as "does this make sense?", not as a directive. Mostly yes. Three things would change.
+**A printer-size rule:**
 
-## What is right about it
+> "any surface primatave thats too big gets bisected untill all pieces fall under the 3d printer
+> size requirements ... (different 3d printers will have different size capabilities in the future)"
 
-**Cut because a piece does not fit, not because a grid says so.** Today every piece is cut into 64
-fundamental cells (4x4x4, ADR 0032) whether it needs them or not - a carbon comes to 656 cells. Under
-a bed rule, a piece that already fits the bed takes **no cuts at all**, which is most parts on most
-ships. That is the real saving, and it is large.
+**And panels, which is the real idea:**
 
-**Recursive splitting against a build volume is how the trade actually does it.** Every
-print-preparation tool works this way. It is simple, deterministic, and gives the fewest pieces.
+> "i am perfectly fine with our orthognal dicing, just thought the low poly surfaces looked like they
+> could be individual panels that the player could see assembled, one mesh per primative chunk
+> basically) with some min and max size constraints, and some grouping and halfing type stuff."
 
-**A bed size is a real constraint that will change**, and designing for it now costs nothing.
+## Two things the agent got wrong, corrected
 
-## Where the speed actually comes from - not from the mesh lines
+**"Combine them in future when print beds are large enough" means ASSEMBLY, not mesh merging.** The
+author was describing robots putting more panels together per trip, not a geometry operation that
+welds baked pieces back into one. The objection raised against merging - that it would mean
+re-welding caps and proving watertightness - was answering a proposal nobody made.
 
-Cutting along an existing edge loop does **not** make a boolean cheaper. The cost is in the mesh's
-complexity, not in where the plane lands; the engine evaluates the same intersection either way. If
-anything a plane that lies exactly ON existing geometry is the HARDER case for an exact engine, not
-the easier one - coincident faces are the classic degeneracy, and ADR 0039 had to put vertices on a
-plane deliberately to get a boolean to divide a coplanar band the way we wanted.
+**There is no re-bake in this.** The agent argued that a bed size change would move the cut positions
+and so force one. It does not: the pieces are cut ONCE, at the smallest printer's size, and are
+separate from then on. A larger bed changes how many panels a robot carries, not where anything was
+cut. Explode and assemble keep doing what they do - moving parts around. The tension claimed with
+ADR 0032's fundamental cells was therefore imaginary as well.
 
-So: **the saving is in cutting less often, not in cutting somewhere cleverer.** The bed rule gets
-that; the mesh-line part does not add to it.
+## What stands from the first pass
 
-**But cutting at a flat region is still worth preferring, for a different reason.** A cut that lands
-on a flat face leaves two flat mating surfaces: better bed adhesion for the print, and a larger
-bonded area for the robots putting it together. A cut through a curved region leaves two curved
-mating faces that touch along less of themselves. So "prefer a flat" belongs in the rule as a
-HEURISTIC FOR WHERE, once the bed has decided THAT.
+**Cutting at existing mesh lines is not a speed win.** A boolean costs what the mesh's complexity
+costs, not what the plane lands on, and a plane lying exactly ON existing geometry is the harder case
+for an exact engine rather than the easier one (ADR 0039 had to place vertices on a plane
+deliberately to get a coplanar band divided). This matters only if speed was the reason; it is not
+an argument against panels, which are wanted for how they LOOK.
 
-## The three changes
+**`ceil(extent / bed)` beats repeated halving**, if a bed rule is ever built. Bisecting until it fits
+gives powers of two, so a piece 1.05x the bed becomes two halves each using about half the bed.
 
-1. **`ceil(extent / bed)` equal slabs, not repeated halving.** Bisecting until it fits gives powers
-   of two: a piece 1.05x the bed becomes two halves each using about half the bed. Dividing the
-   offending axis into `ceil(extent / bed)` equal slabs is the same amount of code and packs far
-   better - that same piece stays two pieces, but each fills the bed.
+**"Decimate" means reducing polygon count.** The operation described is splitting. Worth keeping the
+words apart so nobody later builds a simplifier when a splitter was meant.
 
-2. **Do not combine pieces back; make the bed an INPUT.** Merging baked pieces means re-welding
-   their caps and proving the result is still watertight - a whole second construction to maintain,
-   and a new way to produce a non-manifold solid, which this project has spent real time on already
-   (ADR 0037). If the cut is a deterministic function of (piece, bed size), then "a bigger bed" is
-   just a different argument that produces fewer, larger pieces directly. Nothing to undo.
+## Panels: one mesh per face of a chunk
 
-3. **"Decimate" is the wrong word for it.** Decimation means REDUCING POLYGON COUNT - simplifying a
-   mesh. What is being described is splitting, or subdivision. Worth keeping straight so nobody
-   later writes a decimator when they meant a splitter.
+The author's clarification - "flats" means faces too LARGE, not flats in general, and the ships are
+low-poly so every primitive has them.
 
-## The one thing that has to be decided with it
+**This fits the codebase better than it might look.** `ShipCsgBake._tidy` already merges a piece's
+coplanar triangles back into n-gons, so "one mesh per primitive face" is largely computed already: a
+cube chunk comes out as a handful of big faces, and the drawn mesh already names them `exterior`,
+`interior` and `cut` (`_grouped`). A panel run would be reading something that exists rather than
+deriving it fresh.
 
-**It breaks the fundamental-cells trick, and that is a real cost.** ADR 0032 cuts a fixed 4x4x4 so
-that every slicing the player picks is a REGROUPING of cells that already exist - which is why no
-slicer setting ever re-bakes. Bed-driven cuts cannot be expressed that way in general: a 2.3 m bed
-does not land on quarters of a piece's extent, so changing the bed changes where the cuts are.
+**It is a SURFACE decomposition, and the cells are a VOLUME one.** They answer different questions
+and should both exist:
 
-That is probably fine - a bed size is a manufacturing constant, not a view toggle, and it will change
-rarely. But it makes bed size a RE-BAKE trigger, so it belongs behind the button that lights when
-stale, never on every edit (ADR 0028, the author's standing rule).
+| | question it answers | what it gives |
+|---|---|---|
+| cells (ADR 0032/0041) | how does this solid break into printable lumps | 4x4x4 chunks per piece |
+| panels | how is this hull plated | one plate per face |
 
-## How it sits with what exists
+For "robots attach and build it", panels are what construction actually looks like - plates going on
+a frame - and the author has said the seam work was for that reason and for texturing. Cells stay
+for manufacturing; the orthogonal dicing is explicitly kept.
 
-- **The seam split (ADR 0036) is a different subdivision and should stay separate.** That one is
-  design and lore: "each ship part in game lore gets 3d printed individually and robots attach and
-  build it". Printer dicing is manufacturing, underneath it. A piece comes from the seam split; the
-  bed rule then decides whether that piece needs breaking further.
-- **Per-node axes (ADR 0041) are already the right frame for printing** - a chunk is printed in its
-  own orientation, so its own axes are the ones the bed cares about.
-- **The capping machinery already exists.** Cutting further and closing the result is largely solved.
-- **The background pass (ADR 0042) is where this would run**, and it would usually run faster than
-  what it replaces, because most pieces would need no cut at all.
+### The three questions that decide whether it is tractable
+
+1. **Exterior only, or the whole shell?** A skin of plates over a frame is the readable version and
+   the cheap one: take the `exterior` surface's n-gons and nothing else. Plating the cavity and the
+   cut faces as well doubles the work and is mostly invisible, since the interior is only seen
+   through a hatch.
+
+2. **What happens on a curved family?** This is the real risk. A cube chunk has about six exterior
+   faces; a `sphere_pod` piece measured in this session has **2254 to 3150 faces**. One panel per
+   face is six plates on a box and three thousand on a sphere, which is not a decomposition, it is
+   confetti. So the grouping the author mentions is not a refinement for curved families - it is the
+   whole job. The rule wants to be "grow a panel over neighbouring faces while it stays within a
+   flatness tolerance, and stop at the max size", which turns a sphere into a few dozen plates and
+   leaves a box at six.
+
+3. **Who owns the corner?** A face has no thickness; a panel needs one, and the obvious thickness is
+   the hull wall. Two panels meeting at an edge both want the material in the corner, so the rule has
+   to say which gets it - a mitre, or one square and one cut to fit. That is the same shape of
+   question as the seam wall (`docs/future/walls.md`: wall ab / wall ba / wall flat), and the same
+   answer would serve both.
+
+### How it would be built, if it is
+
+- **As a view computed from the bake**, like the cells: nothing until it is asked for, and it can
+  ride the background pass that ADR 0042 put the dicing on.
+- **Min and max as the author said**: over the max, split the panel; under the min, merge it into the
+  neighbour it is most nearly coplanar with. Both are cheap on n-gons.
+- **Per-node axes already suit it** (ADR 0041) - a panel is printed and fitted in its chunk's own
+  orientation.
+- **Nothing in `core/` needs to change.** This is a reading of a baked piece, and baked pieces are a
+  harness concern.
