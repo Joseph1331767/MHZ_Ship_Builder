@@ -1,101 +1,100 @@
-# Panels and printing: two decompositions, not one
+# The fundamental grid is the smallest printer
 
-Design note, not built. Recorded 2026-09-24 from the author, corrected the same day after two
-misreadings on the agent's part. `docs/future/` is not CONTRACT and no code reads it (AGENTS §3).
+Design note, not built. Recorded 2026-09-24 from the author, after two misreadings on the agent's
+part were corrected. `docs/future/` is not CONTRACT and no code reads it (AGENTS §3).
 
-## What the author actually asked for
+## The design, in the author's words
 
-Two separate things, and the first exchange ran them together.
+> "our main job here is to make the grid cuts fundamental for the max size of smallest printer, and
+> stride those cuts when forming larger parts, so 1x2, 2x2, 1x3, 2x3, 3x3, 1x9, etc chunk grids for
+> larger printers so no new slicing ever has to happen. lets say the smallest printer max print area
+> is .5mx.5mx.5m. then in game i can make printer size upgradable in .5 increments in any axial
+> direction."
 
-**A printer-size rule:**
+> "there may be pieces that end up way too small due to their relative shape and location as the
+> slicing. so there should be some sort of size measurement where if a piece is too small, we analyze
+> what it can attach to naturally while maintaining the size constraints, and which ever surface
+> accepts it it can hitch a permeant ride with it."
 
-> "any surface primatave thats too big gets bisected untill all pieces fall under the 3d printer
-> size requirements ... (different 3d printers will have different size capabilities in the future)"
+> "we cant define flatness alone theres a size constraint as well" - a standard box face is already
+> bigger than the printer, so a box cannot be six panels.
 
-**And panels, which is the real idea:**
+So:
 
-> "i am perfectly fine with our orthognal dicing, just thought the low poly surfaces looked like they
-> could be individual panels that the player could see assembled, one mesh per primative chunk
-> basically) with some min and max size constraints, and some grouping and halfing type stuff."
+1. **The fundamental cell IS the smallest printer's build volume** - 0.5 m cubed, say.
+2. **Every piece is cut on that grid once.** Every chunk fits the smallest printer by construction.
+3. **A bigger printer STRIDES the grid**: 1x2, 2x2, 2x3, 3x3, 1x9. No new slicing, ever.
+4. **The in-game upgrade is a stride**, one 0.5 m step per axis, which is an integer per axis.
+5. **Runt chunks hitch a ride** with a neighbour that will have them.
 
-## Two things the agent got wrong, corrected
+## This is right, and it is better than what is built
 
-**"Combine them in future when print beds are large enough" means ASSEMBLY, not mesh merging.** The
-author was describing robots putting more panels together per trip, not a geometry operation that
-welds baked pieces back into one. The objection raised against merging - that it would mean
-re-welding caps and proving watertightness - was answering a proposal nobody made.
+**It is ADR 0032's rule with the cell size pinned to a physical constant instead of a fraction.**
+Today every piece is cut 4x4x4, so the cell size is a fraction of the PIECE: a big piece gets big
+cells and a small piece tiny ones, and nothing guarantees any of them fits a printer. Under this
+rule the cell size is fixed and the COUNT varies, so every chunk is printable by definition. That is
+the property the manufacturing fiction actually needs.
 
-**There is no re-bake in this.** The agent argued that a bed size change would move the cut positions
-and so force one. It does not: the pieces are cut ONCE, at the smallest printer's size, and are
-separate from then on. A larger bed changes how many panels a robot carries, not where anything was
-cut. Explode and assemble keep doing what they do - moving parts around. The tension claimed with
-ADR 0032's fundamental cells was therefore imaginary as well.
+**It keeps the no-re-bake property and makes it stronger.** A stride is an exact integer grouping of
+the fundamental grid, so every printer upgrade is a regrouping of chunks that already exist - the
+same trick ADR 0032 uses for the slicer, extended to a thing the player upgrades. The agent's earlier
+worry that bed size would force re-bakes was wrong, and this is why.
 
-## What stands from the first pass
+**And it answers the panel question by dissolving it.** A wall is 0.2 m thick and a cell is 0.5 m, so
+a chunk of a flat wall IS a plate - 0.5 x 0.5 x 0.2. There is no separate panel system to build: the
+orthogonal grid, sized to the printer, is the panelisation. That also settles the author's objection
+to flatness as a criterion - flatness never decides anything, size does, and a flat face too big for
+the bed is cut by the same grid as everything else.
 
-**Cutting at existing mesh lines is not a speed win.** A boolean costs what the mesh's complexity
-costs, not what the plane lands on, and a plane lying exactly ON existing geometry is the harder case
-for an exact engine rather than the easier one (ADR 0039 had to place vertices on a plane
-deliberately to get a coplanar band divided). This matters only if speed was the reason; it is not
-an argument against panels, which are wanted for how they LOOK.
+## What it costs, and the one thing that has to be designed around it
 
-**`ceil(extent / bed)` beats repeated halving**, if a bed rule is ever built. Bisecting until it fits
-gives powers of two, so a piece 1.05x the bed becomes two halves each using about half the bed.
+**The chunk count goes up by roughly forty times.** Measured on a carbon this session: 656 cells
+today, cut in about 12 s. At a 0.5 m grid the count is driven by SURFACE, since these are hollow
+shells - a chunk exists wherever the shell passes through a cell, so roughly `area / 0.25 m2`:
 
-**"Decimate" means reducing polygon count.** The operation described is splitting. Worth keeping the
-words apart so nobody later builds a simplifier when a splitter was meant.
-
-## Panels: one mesh per face of a chunk
-
-The author's clarification - "flats" means faces too LARGE, not flats in general, and the ships are
-low-poly so every primitive has them.
-
-**This fits the codebase better than it might look.** `ShipCsgBake._tidy` already merges a piece's
-coplanar triangles back into n-gons, so "one mesh per primitive face" is largely computed already: a
-cube chunk comes out as a handful of big faces, and the drawn mesh already names them `exterior`,
-`interior` and `cut` (`_grouped`). A panel run would be reading something that exists rather than
-deriving it fresh.
-
-**It is a SURFACE decomposition, and the cells are a VOLUME one.** They answer different questions
-and should both exist:
-
-| | question it answers | what it gives |
+| part | area | chunks at 0.5 m |
 |---|---|---|
-| cells (ADR 0032/0041) | how does this solid break into printable lumps | 4x4x4 chunks per piece |
-| panels | how is this hull plated | one plate per face |
+| nucleus piece (x6) | 538 m2 | ~2150 each |
+| pod (x4) | 992 m2 | ~3970 each |
 
-For "robots attach and build it", panels are what construction actually looks like - plates going on
-a frame - and the author has said the seam work was for that reason and for texturing. Cells stay
-for manufacturing; the orthogonal dicing is explicitly kept.
+That is order **30,000 chunks for one carbon**, against 656. Extrapolating the measured rate, cutting
+and reading them all back as separate solids would run into minutes rather than seconds. (Extrapolated,
+not measured - the slab passes do not scale linearly, and it would be measured properly before anyone
+committed to it.)
 
-### The three questions that decide whether it is tractable
+**So the grid has to be a DEFINITION, not thirty thousand baked meshes.** Store the piece, the grid
+origin and the cell size; materialise a chunk's mesh when something actually needs it - the explode
+view showing one module, an assembly animation, a print job. The player never needs all of them as
+separate solids at once, and the ones they do need are a handful at a time. This is the one real
+engineering consequence, and it is a change of shape rather than a difficulty: the cut is already
+deterministic, so a chunk can be produced from its index on demand.
 
-1. **Exterior only, or the whole shell?** A skin of plates over a frame is the readable version and
-   the cheap one: take the `exterior` surface's n-gons and nothing else. Plating the cavity and the
-   cut faces as well doubles the work and is mostly invisible, since the interior is only seen
-   through a hatch.
+## Runts, and the headroom they imply
 
-2. **What happens on a curved family?** This is the real risk. A cube chunk has about six exterior
-   faces; a `sphere_pod` piece measured in this session has **2254 to 3150 faces**. One panel per
-   face is six plates on a box and three thousand on a sphere, which is not a decomposition, it is
-   confetti. So the grouping the author mentions is not a refinement for curved families - it is the
-   whole job. The rule wants to be "grow a panel over neighbouring faces while it stays within a
-   flatness tolerance, and stop at the max size", which turns a sphere into a few dozen plates and
-   leaves a box at six.
+A fixed grid clips slivers wherever the shell meets a cell boundary at a glancing angle, so the runt
+rule is needed rather than optional. Merge a chunk under some threshold into the neighbour it shares
+the largest face with.
 
-3. **Who owns the corner?** A face has no thickness; a panel needs one, and the obvious thickness is
-   the hull wall. Two panels meeting at an edge both want the material in the corner, so the rule has
-   to say which gets it - a mitre, or one square and one cut to fit. That is the same shape of
-   question as the seam wall (`docs/future/walls.md`: wall ab / wall ba / wall flat), and the same
-   answer would serve both.
+**But a chunk that already fills the bed cannot adopt anything.** If the fundamental cell IS the bed,
+a full cell is at 100% and has no room for a runt. Two ways out, and one has to be picked:
 
-### How it would be built, if it is
+- **Make the fundamental cell a little under the bed** - 0.45 m in a 0.5 m printer, say - so every
+  chunk carries about a third of its volume as headroom for adopting runts.
+- **Let runts merge only into PARTIAL neighbours**, which on a hollow shell is most of them, and
+  accept that a runt surrounded by full cells stays a runt.
 
-- **As a view computed from the bake**, like the cells: nothing until it is asked for, and it can
-  ride the background pass that ADR 0042 put the dicing on.
-- **Min and max as the author said**: over the max, split the panel; under the min, merge it into the
-  neighbour it is most nearly coplanar with. Both are cheap on n-gons.
-- **Per-node axes already suit it** (ADR 0041) - a panel is printed and fitted in its chunk's own
-  orientation.
-- **Nothing in `core/` needs to change.** This is a reading of a baked piece, and baked pieces are a
-  harness concern.
+**And striding interacts with it**: once a runt has been adopted, the grid is no longer a clean
+lattice, so a 2x2 stride over an adopted chunk can exceed two cells' worth. Either the runt rule runs
+AFTER striding, per printer size - cheap, since it is a regrouping - or the stride rule has to check
+the merged extent.
+
+## How it sits with what exists
+
+- **The seam split (ADR 0036) stays above it.** That decides which NODE a piece belongs to, for lore
+  and texturing; this grid decides how that piece is manufactured. Two levels, and they do not fight.
+- **Per-node axes (ADR 0041) are already right** - a chunk is printed and fitted in its own chunk's
+  orientation, and the grid should be axis-aligned to the node, not the world.
+- **The background pass (ADR 0042) is where it would run**, and on-demand materialisation fits it
+  exactly: the definition is instant, the meshes come when asked.
+- **`FINE_CUTS` is the thing that changes** - today a fixed array of fractions, and it would become a
+  cell size in metres with a count derived per piece.
