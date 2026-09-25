@@ -24,11 +24,53 @@ extends RefCounted
 ## and every consumer at once.
 const TWIN_SUFFIX: String = "~m"
 
-## The planes a document may mirror across. "" means symmetry is off entirely.
+## The planes a document may mirror across, one letter each. "" means symmetry is off entirely.
 # A plain Array, not a PackedStringArray: a Packed*Array constructor is a CALL, and GDScript
 # rejects a call in a const initialiser ("isn't a constant expression"). gdparse accepts it,
 # the engine does not.
 const PLANES: Array = ["x", "y", "z"]
+
+## The order axes are always written in, so one set of planes has exactly one spelling and a
+## document that hashed under it keeps hashing the same.
+const AXIS_ORDER: String = "xyz"
+
+
+## The planes [param doc] mirrors across, as single letters in [constant AXIS_ORDER].
+##
+## [member ShipDoc.symmetry_plane] HOLDS A SET, not one plane (ADR 0043): "x", "xy", "xyz", or ""
+## for off. A document written before that carries a single letter and still means exactly what it
+## always did, which is why the field was widened rather than replaced - "x" spells the same, so
+## every saved ship hashes the same.
+static func planes_of(doc: ShipDoc) -> PackedStringArray:
+	return axes_of(doc.symmetry_plane) if doc != null else PackedStringArray()
+
+
+## [param planes] as single letters, in [constant AXIS_ORDER], each at most once. Anything that is
+## not an axis letter is dropped, so a malformed field reads as fewer planes rather than as an
+## error.
+static func axes_of(planes: String) -> PackedStringArray:
+	var out: PackedStringArray = PackedStringArray()
+	for axis: String in AXIS_ORDER:
+		if planes.contains(axis):
+			out.append(axis)
+	return out
+
+
+## [param planes] in the one spelling this class writes: ordered, deduplicated, letters only.
+static func normalise_planes(planes: String) -> String:
+	return "".join(axes_of(planes.to_lower()))
+
+
+## [param planes] with [param axis] turned on or off - the and/or the author asked for, "where
+## reflections can happen across all 3 axis at once" (2026-09-21).
+static func with_plane(planes: String, axis: String, on: bool) -> String:
+	var out: String = ""
+	for candidate: String in axes_of(planes):
+		if candidate != axis:
+			out += candidate
+	if on and PLANES.has(axis):
+		out += axis
+	return normalise_planes(out)
 
 
 ## True when [param part_id] or ANY ancestor is flagged asymmetric. THIS is the cascade, and it is
@@ -82,25 +124,66 @@ static func set_asymmetric(doc: ShipDoc, part_id: String, value: bool) -> Packed
 static func generates_twin(
 	doc: ShipDoc, part_id: String, xform: Transform3D, cfg: ShipConfig
 ) -> bool:
-	if doc == null or cfg == null:
-		return false
-	if not PLANES.has(doc.symmetry_plane):
-		return false
-	if is_effectively_asymmetric(doc, part_id):
-		return false
-	var axis: int = plane_axis(doc.symmetry_plane)
-	if axis < 0:
-		return false
-	return absf(xform.origin[axis]) > absf(cfg.symmetry_plane_epsilon)
+	return not reflections_of(doc, part_id, xform, cfg).is_empty()
 
 
-## Twin id for a source part. Format is fixed: "<source_id>~m".
-static func twin_id(source_id: String) -> String:
-	return source_id + TWIN_SUFFIX
+## EVERY reflection [param part_id] generates, as axis sets - `["x"]`, or `["x", "y", "xy"]`.
+##
+## A part off the plane on n of the document's planes has 2^n - 1 twins: one per non-empty subset
+## of those axes (ADR 0043). A part sitting ON a plane within
+## [member ShipConfig.symmetry_plane_epsilon] mirrors onto itself there, so that axis is left out
+## of the reckoning entirely rather than producing a twin on top of the original - which is what
+## keeps the document root single whatever the planes say.
+static func reflections_of(
+	doc: ShipDoc, part_id: String, xform: Transform3D, cfg: ShipConfig
+) -> PackedStringArray:
+	var out: PackedStringArray = PackedStringArray()
+	if doc == null or cfg == null or is_effectively_asymmetric(doc, part_id):
+		return out
+	var off: PackedStringArray = PackedStringArray()
+	for axis: String in planes_of(doc):
+		var index: int = plane_axis(axis)
+		if index >= 0 and absf(xform.origin[index]) > absf(cfg.symmetry_plane_epsilon):
+			off.append(axis)
+	# Every non-empty subset, counted in binary so the order is deterministic and the single-plane
+	# case comes out as the one entry it always was.
+	for mask: int in range(1, 1 << off.size()):
+		var chosen: String = ""
+		for i: int in off.size():
+			if (mask >> i) & 1 == 1:
+				chosen += off[i]
+		out.append(chosen)
+	return out
+
+
+## Twin id for a source part, reflected across [param axes].
+##
+## FORMAT: "<source_id>~m" for a document with ONE plane, and "<source_id>~m<axes>" for one with
+## several - "p_0007~mxy". The bare form is kept deliberately: it is what every saved ship, every
+## consumer and every test has always seen, and a document with one plane must not change because
+## the field can now hold more (ADR 0043). Twin ids are DERIVED and never stored, so the longer
+## form breaks no file.
+static func twin_id(source_id: String, axes: String = "") -> String:
+	return source_id + TWIN_SUFFIX + normalise_planes(axes)
 
 
 static func is_twin_id(id: String) -> bool:
-	return id.ends_with(TWIN_SUFFIX) and id.length() > TWIN_SUFFIX.length()
+	var at: int = id.rfind(TWIN_SUFFIX)
+	if at <= 0:
+		return false
+	# Whatever follows the marker has to be axis letters and nothing else, or this is a part whose
+	# own id merely happens to contain the marker.
+	for letter: String in id.substr(at + TWIN_SUFFIX.length()):
+		if not PLANES.has(letter):
+			return false
+	return true
+
+
+## Which axes a twin id is reflected across: "" for the bare single-plane form.
+static func axes_of_twin(twin: String) -> String:
+	if not is_twin_id(twin):
+		return ""
+	return twin.substr(twin.rfind(TWIN_SUFFIX) + TWIN_SUFFIX.length())
 
 
 ## Source part id for a twin. Returns [param twin] unchanged when it is not a twin id, so callers
@@ -108,7 +191,7 @@ static func is_twin_id(id: String) -> bool:
 static func source_of_twin(twin: String) -> String:
 	if not is_twin_id(twin):
 		return twin
-	return twin.substr(0, twin.length() - TWIN_SUFFIX.length())
+	return twin.substr(0, twin.rfind(TWIN_SUFFIX))
 
 
 ## Axis index for a plane name: 0/1/2, or -1 when symmetry is off or the name is unknown.

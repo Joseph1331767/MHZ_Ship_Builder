@@ -130,7 +130,7 @@ static func _cap(cfg: ShipConfig) -> float:
 static func _is_symmetric(doc: ShipDoc, part_id: String, cfg: ShipConfig) -> bool:
 	if doc == null or cfg == null:
 		return false
-	if ShipSymmetry.plane_axis(doc.symmetry_plane) < 0:
+	if ShipSymmetry.planes_of(doc).is_empty():
 		return false
 	return not ShipSymmetry.is_effectively_asymmetric(doc, part_id)
 

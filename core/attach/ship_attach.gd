@@ -685,7 +685,7 @@ static func resolve_shapes(doc: ShipDoc, data: ShipData, cfg: ShipConfig) -> Dic
 ## nothing about WHERE the part is - the on-plane test needs a transform and lives in
 ## _add_symmetry_twins().
 static func _may_twin(doc: ShipDoc, part_id: String) -> bool:
-	if ShipSymmetry.plane_axis(doc.symmetry_plane) < 0:
+	if ShipSymmetry.planes_of(doc).is_empty():
 		return false
 	return not ShipSymmetry.is_effectively_asymmetric(doc, part_id)
 
@@ -757,18 +757,23 @@ static func resolve_all_from_shapes(
 static func _add_symmetry_twins(doc: ShipDoc, cfg: ShipConfig, out: Dictionary) -> void:
 	if doc == null:
 		return
-	var plane: String = doc.symmetry_plane
-	if ShipSymmetry.plane_axis(plane) < 0:
+	var planes: PackedStringArray = ShipSymmetry.planes_of(doc)
+	if planes.is_empty():
 		return
+	# ONE TWIN PER REFLECTION (ADR 0043). A part off the plane on several of the document's axes
+	# has one twin per non-empty subset of them - three for two axes, seven for three - and a
+	# single-plane document still produces the one bare `~m` twin it always did.
+	var single: bool = planes.size() == 1
 	# Iterates the DOC, not `out`, so writing twins into `out` cannot feed itself.
 	for id: String in ordered_part_ids(doc):
 		var xform_v: Variant = out.get(id)
 		if not (xform_v is Transform3D):
 			continue
 		var xform: Transform3D = xform_v
-		if not ShipSymmetry.generates_twin(doc, id, xform, cfg):
-			continue
-		out[ShipSymmetry.twin_id(id)] = ShipMirror.reflect(xform, plane)
+		for axes: String in ShipSymmetry.reflections_of(doc, id, xform, cfg):
+			out[ShipSymmetry.twin_id(id, "" if single else axes)] = ShipMirror.reflect_axes(
+				xform, axes
+			)
 	# The expanded parts of a component instance ("<instance>/<inner>") mirror on their
 	# instance's terms - its asymmetric flag - but each by its OWN position, exactly as the parts
 	# of an ordinary subtree do: the half of a component that straddles the plane stays single.
@@ -779,9 +784,11 @@ static func _add_symmetry_twins(doc: ShipDoc, cfg: ShipConfig, out: Dictionary) 
 		if not ShipComponents.is_expanded_id(key) or ShipSymmetry.is_twin_id(key):
 			continue
 		var inner_xform: Transform3D = out[key]
-		if not ShipSymmetry.generates_twin(doc, ShipComponents.instance_of(key), inner_xform, cfg):
-			continue
-		out[ShipSymmetry.twin_id(key)] = ShipMirror.reflect(inner_xform, plane)
+		var instance: String = ShipComponents.instance_of(key)
+		for axes: String in ShipSymmetry.reflections_of(doc, instance, inner_xform, cfg):
+			out[ShipSymmetry.twin_id(key, "" if single else axes)] = ShipMirror.reflect_axes(
+				inner_xform, axes
+			)
 
 
 ## Every part id in a deterministic order: doc.part_order() first, then anything it left out

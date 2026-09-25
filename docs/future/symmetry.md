@@ -5,7 +5,7 @@ notes here, part of this is **current-phase work** (section 1), recorded here un
 
 ---
 
-## 1. Mirror on any combination of axes — current phase
+## 1. Mirror on any combination of axes — BUILT (ADR 0043, 2026-09-25)
 
 > "mirror is kinda been out of alignment for a minute.. as i can only select x, y, or z, when it
 > should be x, and/or, y, and/or z, where reflections can happen across all 3 axis at once. there

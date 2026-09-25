@@ -51,7 +51,15 @@ var units: String = UNITS_METRES
 ## Part id of the tree root; "" for an empty document.
 var root: String = ""
 
-## Bilateral symmetry plane: "x", "y", "z", or "" for off. Defaults to "x".
+## The symmetry planes, as axis letters in x-y-z order: "x", "xz", "xyz", or "" for off. Defaults
+## to "x".
+##
+## A SET, NOT ONE PLANE (ADR 0043). "mirror is kinda been out of alignment for a minute.. as i can
+## only select x, y, or z, when it should be x, and/or, y, and/or z, where reflections can happen
+## across all 3 axis at once" (2026-09-21). The field was WIDENED rather than replaced: a document
+## written before this carries one letter, which spells the same in the new form and so hashes the
+## same, and nothing in a saved ship had to change. Ask [method ShipSymmetry.planes_of] rather
+## than reading the letters here.
 ##
 ## SYMMETRY IS ON BY DEFAULT — see [ShipSymmetry]. In Spore 2008 it was automatic and unbreakable;
 ## breaking it per-part came later and CASCADES to descendants. Never read a part's `asymmetric`
@@ -194,7 +202,10 @@ static func from_dict(d: Dictionary) -> ShipDoc:
 	doc.root = _as_string(d.get("root", null), "")
 	# Absent in pre-symmetry files: default to "x" so an old ship gains mirroring
 	# rather than silently losing it.
-	doc.symmetry_plane = _as_string(d.get("symmetry_plane", null), "x")
+	# Normalised on the way in, so one set of planes has one spelling however it was written.
+	doc.symmetry_plane = ShipSymmetry.normalise_planes(
+		_as_string(d.get("symmetry_plane", null), "x")
+	)
 
 	var raw_settings: Dictionary = _as_dict(d.get("settings", null))
 	var next_part: int = 1

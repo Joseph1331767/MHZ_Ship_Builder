@@ -161,7 +161,7 @@ static func seams(
 	var out: Array[Dictionary] = []
 	if doc == null or cfg == null:
 		return out
-	var plane: String = doc.symmetry_plane
+	var single: bool = ShipSymmetry.planes_of(doc).size() == 1
 	for id: String in ShipAttach.ordered_part_ids(doc):
 		if id == doc.root:
 			continue
@@ -185,14 +185,19 @@ static func seams(
 		var hole: Dictionary = hole_for(mode, joint, data, cfg)
 		var style: String = joint.seam_style if joint != null else STYLE_FLAT
 		out.append(_record(id, host, frame, mode, hole, style))
-		var twin: String = ShipSymmetry.twin_id(id)
-		if not xforms.has(twin):
-			continue
-		# The twin stands on the host's twin when the host has one; a host sitting on the
-		# symmetry plane has none, and the twin stands on the host itself.
-		var host_twin: String = ShipSymmetry.twin_id(host)
-		var twin_host: String = host_twin if xforms.has(host_twin) else host
-		out.append(_record(twin, twin_host, ShipMirror.reflect(frame, plane), mode, hole, style))
+		# ONE SEAM PER REFLECTION (ADR 0043), matching the twins the attach pass made.
+		for axes: String in ShipSymmetry.reflections_of(doc, id, xforms[id], cfg):
+			var suffix: String = "" if single else axes
+			var twin: String = ShipSymmetry.twin_id(id, suffix)
+			if not xforms.has(twin):
+				continue
+			# The twin stands on the host's twin when the host has one; a host sitting on the
+			# symmetry plane has none, and the twin stands on the host itself.
+			var host_twin: String = ShipSymmetry.twin_id(host, suffix)
+			var twin_host: String = host_twin if xforms.has(host_twin) else host
+			out.append(
+				_record(twin, twin_host, ShipMirror.reflect_axes(frame, axes), mode, hole, style)
+			)
 	# The INNER seams of every component instance (ADR 0024): each inner part on the inner part
 	# it hangs from - the definition root's children on the instance itself, which stands for
 	# that root. Their mode, hole and style come from the definition's own joints (ADR 0025),
@@ -222,12 +227,19 @@ static func seams(
 		var hole: Dictionary = hole_for(mode, joint, data, cfg)
 		var style: String = joint.seam_style if joint != null else STYLE_FLAT
 		out.append(_record(key, host, frame, mode, hole, style))
-		var twin: String = ShipSymmetry.twin_id(key)
-		if not xforms.has(twin):
-			continue
-		var host_twin: String = ShipSymmetry.twin_id(host)
-		var twin_host: String = host_twin if xforms.has(host_twin) else host
-		out.append(_record(twin, twin_host, ShipMirror.reflect(frame, plane), mode, hole, style))
+		# An inner part mirrors on its INSTANCE's terms (ADR 0024), so the reflections are the
+		# instance's, one seam each (ADR 0043).
+		var instance: String = ShipComponents.instance_of(key)
+		for axes: String in ShipSymmetry.reflections_of(doc, instance, xforms[key], cfg):
+			var suffix: String = "" if single else axes
+			var twin: String = ShipSymmetry.twin_id(key, suffix)
+			if not xforms.has(twin):
+				continue
+			var host_twin: String = ShipSymmetry.twin_id(host, suffix)
+			var twin_host: String = host_twin if xforms.has(host_twin) else host
+			out.append(
+				_record(twin, twin_host, ShipMirror.reflect_axes(frame, axes), mode, hole, style)
+			)
 	out.append_array(_sibling_seams(doc, shapes, xforms, cfg, data, out))
 	return out
 
@@ -260,7 +272,7 @@ static func _sibling_seams(
 	for seam: Dictionary in placed_seams:
 		seen[ShipDoc.joint_key_for(str(seam[SEAM_CHILD]), str(seam[SEAM_HOST]))] = true
 	var rank: Dictionary = _placement_rank(doc, xforms)
-	var plane: String = doc.symmetry_plane
+	var single: bool = ShipSymmetry.planes_of(doc).size() == 1
 	for pair: PackedStringArray in _joined_pairs(doc, xforms):
 		var a: String = pair[0]
 		var b: String = pair[1]
@@ -278,17 +290,25 @@ static func _sibling_seams(
 		var hole: Dictionary = hole_for(mode, joint, data, cfg)
 		var style: String = joint.seam_style if joint != null else STYLE_FLAT
 		out.append(_record(child, host, frame, mode, hole, style, true))
-		var twin_child: String = ShipSymmetry.twin_id(child)
-		var twin_host: String = ShipSymmetry.twin_id(host)
-		if not xforms.has(twin_child):
-			continue
-		if not xforms.has(twin_host):
-			twin_host = host
-		out.append(
-			_record(
-				twin_child, twin_host, ShipMirror.reflect(frame, plane), mode, hole, style, true
+		for axes: String in ShipSymmetry.reflections_of(doc, child, xforms[child], cfg):
+			var suffix: String = "" if single else axes
+			var twin_child: String = ShipSymmetry.twin_id(child, suffix)
+			var twin_host: String = ShipSymmetry.twin_id(host, suffix)
+			if not xforms.has(twin_child):
+				continue
+			if not xforms.has(twin_host):
+				twin_host = host
+			out.append(
+				_record(
+					twin_child,
+					twin_host,
+					ShipMirror.reflect_axes(frame, axes),
+					mode,
+					hole,
+					style,
+					true
+				)
 			)
-		)
 	return out
 
 

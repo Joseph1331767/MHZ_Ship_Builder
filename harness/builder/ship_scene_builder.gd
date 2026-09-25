@@ -410,18 +410,22 @@ func show_ghost(
 ## Uses the same epsilon test [ShipSymmetry.generates_twin] applies to a stored part, so the
 ## preview cannot promise a twin the commit will not make. It cannot call that function directly -
 ## a pending part has no id - so the ownership half of the question is asked about `owner_id`.
+##
+## ONE GHOST, EVEN WHEN THE COMMIT WILL MAKE SEVERAL (ADR 0043). With two or three planes on, a
+## drop off all of them produces three or seven twins; the ghost is a single node and shows the
+## first. That under-promises, which is the safe direction - the preview never shows a twin the
+## commit will not make - and a ghost per reflection is a view change worth doing on its own.
 func _preview_twin(xform: Transform3D, owner_id: String) -> Variant:
 	if _doc == null:
-		return null
-	var axis: int = ShipSymmetry.plane_axis(_doc.symmetry_plane)
-	if axis < 0:
 		return null
 	if owner_id != "" and ShipSymmetry.is_effectively_asymmetric(_doc, owner_id):
 		return null
 	var epsilon: float = _cfg.symmetry_plane_epsilon if _cfg != null else 0.01
-	if absf(xform.origin[axis]) <= absf(epsilon):
-		return null
-	return ShipMirror.reflect(xform, _doc.symmetry_plane)
+	for plane: String in ShipSymmetry.planes_of(_doc):
+		var axis: int = ShipSymmetry.plane_axis(plane)
+		if axis >= 0 and absf(xform.origin[axis]) > absf(epsilon):
+			return ShipMirror.reflect(xform, plane)
+	return null
 
 
 ## The mirrored half of the ghost. Same mesh, same material, reflected transform.

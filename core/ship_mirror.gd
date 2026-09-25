@@ -55,6 +55,18 @@ static func reflect(t: Transform3D, plane: String) -> Transform3D:
 	return Transform3D(r * t.basis, r * t.origin)
 
 
+## [param t] reflected across EVERY plane named in [param axes] - "x", "xy", "xyz" - in order.
+##
+## Reflections compose: mirroring across x and then y is the same rigid motion as the single
+## reflection a document with both planes wants for its "xy" twin (ADR 0043). An empty string
+## returns [param t] untouched, so a caller need not test for it.
+static func reflect_axes(t: Transform3D, axes: String) -> Transform3D:
+	var out: Transform3D = t
+	for axis: String in ShipSymmetry.axes_of(axes):
+		out = reflect(out, axis)
+	return out
+
+
 ## The attach numbers a real part would need to land where the reflection puts a derivative.
 ## Returns `{"yaw": float, "pitch": float, "rot": Vector3}`.
 ##

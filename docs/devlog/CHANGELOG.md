@@ -3352,3 +3352,39 @@ visual checks PASSED; gdformat and gdlint clean.
 
 `ship_builder.gd` is at 1999 lines against gdlint's 2000 cap, so this went in as four lines of
 comment and two of code. The next flow to touch it needs a helper class, not a method.
+
+
+## [2026-09-25] Symmetry is a set of planes, not one
+
+ADR 0043, and the oldest item on the board - recorded in `docs/future/symmetry.md` on 2026-09-21 and
+carried since.
+
+> "mirror is kinda been out of alignment for a minute.. as i can only select x, y, or z, when it
+> should be x, and/or, y, and/or z, where reflections can happen across all 3 axis at once."
+
+`ShipDoc.symmetry_plane` now holds a SET, written as axis letters in x-y-z order: "x", "xz", "xyz",
+or "" for off. A part off n of those planes gets 2^n - 1 twins, one per non-empty subset, and an axis
+the part sits ON is left out of the reckoning rather than making a twin on top of the original.
+
+**The field was widened rather than replaced, and that is the load-bearing choice.** A document
+written before this carries one letter, which spells the same in the new form - so it serialises the
+same, hashes the same, and means the same. No ruleset bump, no migration, nothing in a saved ship
+touched. A second field would have changed the canonical form of every document for a feature most
+of them do not use.
+
+Twin ids keep the bare `~m` for a one-plane document and take their axes for a document with several
+(`p_0007~mxy`); they are derived and never stored, so the longer form breaks no file. Reflections
+compose through `ShipMirror.reflect_axes`, so x-then-y IS the "xy" twin. The MIRROR row toggles, and
+OFF clears rather than being a fourth plane.
+
+### Verified
+
+**gdUnit4 340/340** with five new, including the ones that assert the old twin-id format verbatim;
+selfcheck PASSED with the hash unchanged at `5536787c6c35d236`, which is the whole point of widening
+the field; validator PASSED; resolve and visual checks PASSED; gdformat and gdlint clean.
+
+### Known partial
+
+The placement GHOST shows a single twin even where the commit will make three or seven - it is one
+node. It under-promises, which is the safe direction, and a ghost per reflection is a view change
+worth doing on its own.

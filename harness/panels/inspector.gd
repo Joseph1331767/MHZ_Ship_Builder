@@ -380,7 +380,7 @@ func _build_symmetry_section() -> void:
 		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		button.add_theme_font_size_override("font_size", ShipTheme.font_small())
 		button.tooltip_text = (
-			"MIRROR THE WHOLE SHIP ACROSS THIS PLANE"
+			"MIRROR THE WHOLE SHIP ACROSS THIS PLANE - ANY COMBINATION, NOT ONE AT A TIME"
 			if plane != ""
 			else "NO MIRRORING - EVERY PART STANDS ALONE"
 		)
@@ -398,16 +398,32 @@ func _build_symmetry_section() -> void:
 	_body.add_child(_symmetry_label)
 
 
-## Set which plane the document mirrors across. Goes through the edit protocol like any other
-## document change, so it is undoable and the budget guard sees it - flipping the plane can change
-## how many parts generate twins, which changes the complexity total.
+## TOGGLE one plane, or turn symmetry off entirely with OFF (ADR 0043).
+##
+## X, Y and Z are independent - "it should be x, and/or, y, and/or z, where reflections can happen
+## across all 3 axis at once" (2026-09-21) - so pressing one adds or removes that plane and leaves
+## the others alone. OFF is not a fourth plane; it clears them all.
+##
+## Goes through the edit protocol like any other document change, so it is undoable and the budget
+## guard sees it - a plane going on or off changes how many parts generate twins, which changes the
+## complexity total.
 func _on_mirror_plane_pressed(plane: String) -> void:
 	var doc: ShipDoc = _builder.get_doc()
-	if doc == null or doc.symmetry_plane == plane:
+	if doc == null:
+		_refresh_mirror_buttons(doc)
+		return
+	var planes: String = (
+		""
+		if plane.is_empty()
+		else ShipSymmetry.with_plane(
+			doc.symmetry_plane, plane, not doc.symmetry_plane.contains(plane)
+		)
+	)
+	if doc.symmetry_plane == planes:
 		_refresh_mirror_buttons(doc)
 		return
 	_builder.begin_edit("mirror plane")
-	doc.symmetry_plane = plane
+	doc.symmetry_plane = planes
 	# Every part can gain or lose a twin, so the whole document is the changed set.
 	var ids: PackedStringArray = PackedStringArray()
 	for id: Variant in doc.parts.keys():
@@ -416,12 +432,15 @@ func _on_mirror_plane_pressed(plane: String) -> void:
 	_refresh_mirror_buttons(_builder.get_doc())
 
 
+## Each axis button shows whether THAT plane is on; OFF shows lit only when none is.
 func _refresh_mirror_buttons(doc: ShipDoc) -> void:
 	var live: String = doc.symmetry_plane if doc != null else ""
 	for i: int in _plane_buttons.size():
 		var button: Button = _plane_buttons[i]
-		if is_instance_valid(button):
-			button.set_pressed_no_signal(str(MIRROR_PLANES[i]) == live)
+		if not is_instance_valid(button):
+			continue
+		var plane: String = str(MIRROR_PLANES[i])
+		button.set_pressed_no_signal(live.is_empty() if plane.is_empty() else live.contains(plane))
 
 
 func _make_readout_label(node_name: String) -> Label:
