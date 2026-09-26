@@ -133,6 +133,7 @@ var _auto_alert: bool = true
 var _status_label: Label = null
 var _post_rect: ColorRect = null
 var _mode_option: OptionButton = null
+var _view_toggles: ShipViewToggles = null
 var _undo_button: Button = null
 var _redo_button: Button = null
 ## EXPLODE / ASSEMBLE (ADR 0008). The exploded view shows bakes, not the document, so any edit
@@ -206,6 +207,7 @@ func _ready() -> void:
 	_build_tutorial()
 	_build_post_process()
 	_view.setup(_ship_theme, self)
+	_view_toggles.use(_view)
 	_explode_opts = ShipExplodeControl.new(
 		_view.get_parent() as Control, _view, _config, _ship_theme
 	)
@@ -1191,11 +1193,9 @@ func _build_header() -> PanelContainer:
 	_mode_option.item_selected.connect(_on_mode_selected)
 	bar.add_child(_mode_option)
 
-	var dither: CheckButton = CheckButton.new()
-	dither.text = "DITHER"
-	dither.button_pressed = true
-	dither.toggled.connect(_on_dither_toggled)
-	bar.add_child(dither)
+	# DITHER and WALLS live in ShipViewToggles: both only forward to the theme or the view, so
+	# they are a seam rather than a split, and the next such toggle costs this file nothing.
+	_view_toggles = ShipViewToggles.new(bar, _ship_theme)
 
 	bar.add_child(_make_button("HELP", _on_help_pressed))
 	bar.add_child(_make_button("FRAME", _on_frame_pressed))
@@ -1575,11 +1575,6 @@ func _on_pick_cleared() -> void:
 func _on_mode_selected(index: int) -> void:
 	if _view != null:
 		_view.set_display_mode(index)
-
-
-func _on_dither_toggled(pressed: bool) -> void:
-	if _ship_theme != null:
-		_ship_theme.set_dither(pressed)
 
 
 func _on_frame_pressed() -> void:

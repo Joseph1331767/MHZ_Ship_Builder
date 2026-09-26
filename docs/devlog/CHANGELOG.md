@@ -3504,3 +3504,41 @@ with the nucleus dissolved and all fifteen links sealed. Looked at
 panels close the nucleus and block the left arm; off, the rooms read open through to the arms.
 **gdUnit4 341/341**; selfcheck PASSED, hash unchanged at `5536787c6c35d236`; data validator PASSED
 (0 warnings); resolve and visual (5 modes) checks PASSED; gdformat and gdlint clean.
+
+
+## [2026-09-26] A home for the WALLS toggle, and a layer that drops in every mode
+
+"find it a home, add the toggl, make it work" - the switch for ADR 0046's wall layer.
+
+**The home is a new class**, and it had to be: `ship_builder.gd` stood at gdlint's 2000-line cap and
+its 30-public-method cap at the same time. `.gdlintrc` is explicit that the cap is "a smoke alarm,
+not an order to split" and that a good extraction is "a self-contained, statically testable unit
+with no reference back to the file it came from" - so the question was whether a real seam existed,
+not where line 2000 fell. DITHER and WALLS are one: each forwards to the theme or the view and reads
+nothing of the builder's own state. `ShipViewToggles` takes both, the builder drops from 1999 lines
+to 1994, and the next toggle of this kind costs it nothing. The view is handed over with `use()`,
+because `_build_header()` runs before `_build_layout()` has made the ShipView3D.
+
+**The switch is a `WALLS` CheckButton beside DITHER**, starting off. `set_walls_shown()` moves the
+button and the layer together, so a tool or a hotkey cannot leave the bar lying about what is on
+screen - which is what the three new `TestViewToggles` cases hold in place.
+
+**It works in every render type now, not only INTERIOR.** A `material_override` beats any
+per-surface override, so `ShipExplodeView` dresses a piece per surface while there is a wall to
+drop and keeps the single override otherwise. The same toggle changes 6,897 px in INTERIOR and
+24,729 px in X-RAY - much more in X-RAY, which is what a translucent hull should do.
+
+### The check earned its keep
+
+`tools/ship_check_views.gd` failed, and correctly: it asserts that switching the render type changes
+an exploded module's material, and it read `solid.material_override` to find out. With the layer
+dropped that is null in every mode, so the switch read as a no-op. It reads the EFFECTIVE material
+now - the surface override where there is one, the override otherwise.
+
+### Verified
+
+Looked at `reports/visual_walls_compare.png` (INTERIOR and X-RAY, layer on and off) and
+`reports/visual_walls_modes.png` (all six render types with the layer dropped) - every mode comes out
+as it should, so moving to per-surface materials cost none of them. **gdUnit4 344/344**; selfcheck
+PASSED, hash unchanged at `5536787c6c35d236`; data validator PASSED (0 warnings); resolve, explode
+and visual (5 modes) checks PASSED; gdformat and gdlint clean.

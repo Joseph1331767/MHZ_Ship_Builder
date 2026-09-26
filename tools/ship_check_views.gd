@@ -183,6 +183,22 @@ func _describe_part_ray(view: Object, cam: Camera3D) -> String:
 	return _describe_ray(view, cam.global_position, (at - cam.global_position).normalized())
 
 
+## The material a module's first surface ACTUALLY wears. A piece whose WALLS layer is dropped
+## (ADR 0046) carries its materials per surface, because a `material_override` beats a per-surface
+## one and the wall could never be dropped otherwise - so reading the override alone reports null
+## for every render type and the switch reads as a no-op. Surface 0 is the exterior wherever a
+## piece has one (`PolyMesh.to_array_mesh_grouped` orders them exterior, interior, cut, wall).
+##
+## RETIRED(ADR 0046): `solid.material_override` on its own, which is what this checked until the
+## walls became a layer - and it failed the moment they did, which is the tool working.
+static func _module_material(solid: MeshInstance3D) -> Material:
+	if solid.mesh != null and solid.get_surface_override_material_count() > 0:
+		var per_surface: Material = solid.get_surface_override_material(0)
+		if per_surface != null:
+			return per_surface
+	return solid.material_override
+
+
 func check_explode_display_mode(explode: Object) -> void:
 	var view: Object = _builder.call("get_view")
 	var nodes: Array = explode.call("module_nodes")
@@ -193,9 +209,9 @@ func check_explode_display_mode(explode: Object) -> void:
 	var other: int = ShipSceneBuilder.DisplayMode.FLAT
 	if started == other:
 		other = ShipSceneBuilder.DisplayMode.FRESNEL
-	var before: Material = solid.material_override
+	var before: Material = _module_material(solid)
 	view.call("set_display_mode", other)
-	if solid.material_override == before:
+	if _module_material(solid) == before:
 		(
 			_failures
 			. append(

@@ -114,6 +114,7 @@ class Module:
 
 
 var _scene: ShipSceneBuilder = null
+var _hidden_wall_material: StandardMaterial3D = null
 var _sdf: ShipSdf = null
 var _cfg: ShipConfig = null
 var _queue: PackedStringArray = PackedStringArray()
@@ -766,6 +767,20 @@ func refresh_materials() -> void:
 		_apply_materials(module)
 
 
+## What a dropped wall wears outside INTERIOR: fully transparent, both sides, unshaded. One
+## instance for every piece, built once. The INTERIOR set has its own in
+## [method ShipSceneBuilder.inside_materials], because there the wall is one entry of a set the
+## scene builds whole; the five lines are the same five lines.
+func _hidden_wall() -> StandardMaterial3D:
+	if _hidden_wall_material == null:
+		_hidden_wall_material = StandardMaterial3D.new()
+		_hidden_wall_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		_hidden_wall_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		_hidden_wall_material.albedo_color = Color(0.0, 0.0, 0.0, 0.0)
+		_hidden_wall_material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	return _hidden_wall_material
+
+
 func _in_isolation(id: String) -> bool:
 	return ShipSymmetry.source_of_twin(ShipComponents.instance_of(id)) == _isolated
 
@@ -808,12 +823,22 @@ func _apply_materials(module: Module) -> void:
 		_apply_door_materials(module, _door_material(mats["cut"]), null, true)
 		return
 	var pair: Array = _scene.materials_for(_mode, module.selected)
+	# THE WALLS LAYER REACHES EVERY MODE, not only INTERIOR (ADR 0046). A `material_override`
+	# beats any per-surface override, so a piece is dressed per surface while there is a wall to
+	# drop, and keeps the single override it has always had otherwise.
+	var drop: Material = _hidden_wall() if _scene.walls_hidden else null
 	for solid: MeshInstance3D in module.solids:
 		var mesh: Mesh = solid.mesh
+		var per_surface: bool = drop != null and mesh != null
+		solid.material_override = null if per_surface else pair[0]
 		if mesh != null:
 			for i: int in mesh.get_surface_count():
-				solid.set_surface_override_material(i, null)
-		solid.material_override = pair[0]
+				var is_wall: bool = (
+					per_surface and mesh.surface_get_name(i) == ShipCsgBake.SURFACE_WALL
+				)
+				solid.set_surface_override_material(
+					i, (drop if is_wall else pair[0]) if per_surface else null
+				)
 		solid.visible = ShipSceneBuilder.mode_shows_solid(_mode)
 	for wire: MeshInstance3D in module.wires:
 		wire.material_override = pair[1]

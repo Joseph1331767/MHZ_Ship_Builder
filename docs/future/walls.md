@@ -95,3 +95,13 @@ a property of the assembly. Raised with the author and open.
 
 Note that this is orthogonal to the three modes above: the layer is about what is DRAWN and
 eventually what is PRINTED, the modes are about what SHAPE the seam takes.
+
+
+### The toggle (2026-09-26)
+
+> "find it a home, add the toggl, make it work"
+
+`ShipViewToggles` is the home - a `WALLS` CheckButton beside DITHER in the top bar, starting OFF.
+It works in every render type, not only INTERIOR: a `material_override` beats a per-surface one, so
+`ShipExplodeView` dresses a piece per surface while there is a wall to drop. Measured, the same
+toggle moves 6,897 px in INTERIOR and 24,729 px in X-RAY.
