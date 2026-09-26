@@ -39,3 +39,6 @@ secrets/
 # --- OS ---
 Thumbs.db
 .DS_Store
+
+# The author's own reference captures - kept locally, never in the repo.
+reference images testing/
