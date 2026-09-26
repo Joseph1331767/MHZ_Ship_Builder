@@ -81,10 +81,15 @@ const CUT_BACK_ROOMS: String = "cut_back_rooms"
 ## A whole room's slicing job is keyed by its keeper under this prefix.
 const ROOM_PREFIX: String = "room:"
 
-## The three named surfaces every drawn mesh carries - see [method _grouped].
+## The named surfaces every drawn mesh carries - see [method _grouped].
 const SURFACE_EXTERIOR: String = "exterior"
 const SURFACE_INTERIOR: String = "interior"
 const SURFACE_CUT: String = "cut"
+
+## THE WALL A SEAM CLOSES (ADR 0046), its own surface so it can be taken off and the room read as
+## the open space it would otherwise be. "walls should be isolated from the shape its actually
+## apart of, such that when walls layer is removed you see an open room" (2026-09-25).
+const SURFACE_WALL: String = "wall"
 
 ## A corner this close to a primitive's surface is ON it - see [method _grouped]. The wall is a
 ## hundred times this, and a tessellation's corners are on the surface to float precision.
@@ -325,7 +330,9 @@ static func bake(
 	var meshes: Dictionary = {}
 	for members: PackedStringArray in plan["rooms"]:
 		for id: String in members:
-			meshes[id] = _grouped(solids[id], members, cutters, outer, inner)
+			meshes[id] = _grouped(
+				solids[id], members, cutters, outer, inner, plan["cuts"], plan["grown"]
+			)
 	report["meshes"] = meshes
 	report["split"] = plan["split"]
 	report["rooms"] = plan["rooms"]
@@ -370,6 +377,8 @@ static func bake_extras(
 	var outer: Dictionary = plan["outer"]
 	var inner: Dictionary = plan["inner"]
 	var cutters: Dictionary = plan["cutters"]
+	var cuts: Dictionary = plan["cuts"]
+	var grown: Dictionary = plan["grown"]
 	var frames: Dictionary = plan.get("frames", {})
 	var stage: Node3D = Node3D.new()
 	stage.name = "CsgExtrasStage"
@@ -455,7 +464,9 @@ static func bake_extras(
 		var keys: Array = members.duplicate()
 		var keeper: String = members[0]
 		if room_shells.has(keeper):
-			room_meshes[keeper] = _grouped(room_shells[keeper], members, cutters, outer, inner)
+			room_meshes[keeper] = _grouped(
+				room_shells[keeper], members, cutters, outer, inner, cuts, grown
+			)
 			keys.append(ROOM_PREFIX + keeper)
 		for key: String in keys:
 			var list: Array = []
@@ -467,7 +478,7 @@ static func bake_extras(
 						{
 							"cell": leaf["cell"],
 							"solid": solid,
-							"mesh": _grouped(solid, members, cutters, outer, inner),
+							"mesh": _grouped(solid, members, cutters, outer, inner, cuts, grown),
 							"wire": _feature_wire(solid),
 						}
 					)
@@ -762,10 +773,26 @@ static func _grouped(
 	members: PackedStringArray,
 	cutters: Dictionary,
 	outer: Dictionary,
-	inner: Dictionary
+	inner: Dictionary,
+	cuts: Dictionary = {},
+	grown: Dictionary = {}
 ) -> ArrayMesh:
 	var bodies: Array = []
 	var rooms: Array = []
+	# THE WALLS THIS PIECE CARRIES. A walled seam authors no plate: the two cavities simply do not
+	# merge, and the INDENTED part's cavity is cut back by the neighbour's GROWN body (see
+	# ShipMeshBake's walled branch). So the face standing where the neighbour pushed in - the floor
+	# of that socket - IS the wall, and it is found by asking the same grown field that made it.
+	var walls: Array = []
+	for id: String in members:
+		for cut: Variant in cuts.get(id, []) as Array:
+			var key: String = str((cut as Dictionary).get("inner", ""))
+			if not cutters.has(key):
+				continue
+			var owner_id: String = _owner_of_cutter(key, grown)
+			if owner_id.is_empty():
+				continue
+			walls.append([cutters[key], _offset_of(cutters[key], grown[owner_id])])
 	for id: String in members:
 		var body_key: String = ShipMeshBake._cutter_key(id, ShipMeshBake.CUT_BODY)
 		var room_key: String = ShipMeshBake._cutter_key(id, ShipMeshBake.CUT_ROOM)
@@ -778,23 +805,43 @@ static func _grouped(
 	for i: int in solid.face_count():
 		var on_body: bool = true
 		var on_room: bool = true
+		var on_wall: bool = not walls.is_empty()
 		for id: int in solid.faces[i]:
 			var v: Vector3 = solid.vertices[id]
 			if on_body and not _on_any(v, bodies):
 				on_body = false
 			if on_room and not _on_any(v, rooms):
 				on_room = false
-			if not on_body and not on_room:
+			if on_wall and not _on_any(v, walls):
+				on_wall = false
+			if not on_body and not on_room and not on_wall:
 				break
-		if on_body:
+		# THE WALL IS ASKED FIRST, because it is also a cavity face: it bounds the room, so the
+		# cavity field owns it too, and asking the cavity first would swallow every wall there is.
+		if on_wall:
+			groups[i] = 3
+		elif on_body:
 			groups[i] = 0
 		elif on_room:
 			groups[i] = 1
 		else:
 			groups[i] = 2
 	return solid.to_array_mesh_grouped(
-		groups, PackedStringArray([SURFACE_EXTERIOR, SURFACE_INTERIOR, SURFACE_CUT])
+		groups, PackedStringArray([SURFACE_EXTERIOR, SURFACE_INTERIOR, SURFACE_CUT, SURFACE_WALL])
 	)
+
+
+## Which part a cutter key belongs to, when [param grown] has a surface for it.
+##
+## [method ShipMeshBake._cutter_key] joins the id and the kind with U+0001 - a character no part id
+## can hold - so the owner is simply everything before it. Guessing at the separator is how this
+## first read zero walls on a ship that has plenty.
+static func _owner_of_cutter(key: String, grown: Dictionary) -> String:
+	var at: int = key.find("")
+	if at <= 0:
+		return ""
+	var id: String = key.substr(0, at)
+	return id if grown.has(id) else ""
 
 
 ## Where [param surface]'s own corners sit in [param field]: the median of a spread of them.

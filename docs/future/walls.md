@@ -76,3 +76,22 @@ that every printed chunk is its own solid and the chunks fit back together. Whic
 pair carries, each side still gets capped - the cap follows whatever surface the wall leaves behind.
 The author's phrase for the two together: the walls "get capped and closed individually to fit
 perfectly back together but be seperate".
+
+
+## Built since: the walls are a LAYER (ADR 0046, 2026-09-25)
+
+> "walls should be isolated from the shape its actually apart of, such that when walls layer is
+> removed you see an open room"
+
+**Step 1 is built.** Every baked piece names its wall faces `ShipCsgBake.SURFACE_WALL`, and
+`ShipView3D.set_walls_hidden()` drops the layer - INTERIOR mode drops it by default. A walled seam
+authors no plate, so the wall is the INDENTED part's own cavity face standing where its neighbour's
+grown body pushed in; naming it is what makes it droppable. Measured on a carbon: 0.00 m2 with every
+seam open, 493.25 m2 with all fifteen sealed.
+
+**Step 2 is not, and it is the one with a cost.** Lifting walls into their own solids - so a panel
+is printed on its own - makes each chunk **no longer watertight by itself**; watertightness becomes
+a property of the assembly. Raised with the author and open.
+
+Note that this is orthogonal to the three modes above: the layer is about what is DRAWN and
+eventually what is PRINTED, the modes are about what SHAPE the seam takes.

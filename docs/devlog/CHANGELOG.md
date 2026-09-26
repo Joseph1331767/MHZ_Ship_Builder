@@ -3463,3 +3463,44 @@ parts, and the cross is plainly visible through the hull in the warning colour -
 
 The four classes stay in F51 with the author's own remedies recorded against them: resize a body to
 cancel the odd arm's moment, or cull the class.
+
+
+## [2026-09-25] The walls are their own layer
+
+ADR 0046, from the author's note: "walls should be isolated from the shape its actually apart of,
+such that when walls layer is removed you see an open room". No contention with the intent; one
+caveat stands, that a chunk with its wall lifted OUT is no longer watertight on its own, so
+watertightness becomes a property of the assembly. That is the cost of step 2, and step 2 is not
+taken here.
+
+A walled seam authors no plate - the two cavities simply do not merge - so the wall is the INDENTED
+part's own cavity face, standing where its neighbour's grown body pushed in. There is nothing to
+remove, only a face to stop drawing. So every baked piece now names it `ShipCsgBake.SURFACE_WALL`,
+found by asking the same grown field that made it, and classified BEFORE body and room because a
+wall is also a cavity face and the cavity would otherwise swallow it.
+`ShipView3D.set_walls_hidden()` is the switch; INTERIOR defaults to hidden, being the mode that
+looks into rooms. On the scene builder it is a property with a private setter, because that class is
+at gdlint's thirty-method cap.
+
+### Two things the measurement caught
+
+**A pipe that should have been a U+0001.** `_owner_of_cutter` split the cutter key on `|`, but
+`ShipMeshBake._cutter_key` joins with U+0001. It never matched, so the first run read 0.00 m2 of
+wall on a ship full of them.
+
+**A test fixture that was testing the wrong thing.** `TestCsgBake._carbon(family, false)` said
+"walled means walled" and then ERASED the open joints. ADR 0034 settled that the link is the joint
+record and never mere contact, and a side-by-side nucleus has no parent-child link either - so
+erasing does not wall a seam, it deletes it, and the bodies read as separate rooms that merely
+intersect, each uncut. Measured: 5214 m2 of exterior unlinked against 4741 m2 sealed, 18 m2 of wall
+against 493 m2. The fixture seals now, and every test that used it still passes.
+
+### Verified
+
+The layer tracks the seams and nothing else - on a carbon with box_hull rooms, 0.00 m2 with all
+twenty seams open (the surface is not even emitted), 18.17 m2 as the template builds it, 493.25 m2
+with the nucleus dissolved and all fifteen links sealed. Looked at
+`reports/visual_walls_compare.png`: the same sealed carbon in INTERIOR mode, layer on and off - on,
+panels close the nucleus and block the left arm; off, the rooms read open through to the arms.
+**gdUnit4 341/341**; selfcheck PASSED, hash unchanged at `5536787c6c35d236`; data validator PASSED
+(0 warnings); resolve and visual (5 modes) checks PASSED; gdformat and gdlint clean.

@@ -751,6 +751,21 @@ func set_rooms_whole(on: bool) -> void:
 		_explode.set_rooms_whole(on)
 
 
+## THE WALLS LAYER (ADR 0046). A walled seam authors no plate - the two cavities simply do not
+## merge - so the wall is each room's own surface standing where its neighbour pushed in, and it
+## is named `ShipCsgBake.SURFACE_WALL` on every baked piece. Dropping it leaves the open room the
+## pair would otherwise be. Off is the INTERIOR mode's default, which is the mode that looks into
+## rooms; the exploded pieces carry the same named surface, so this reaches them too.
+func set_walls_hidden(on: bool) -> void:
+	if _scene == null or _scene.walls_hidden == on:
+		return
+	_scene.walls_hidden = on
+	if _explode != null:
+		# The exploded pieces wear the very same `inside_materials` set, so they only need
+		# telling to ask for it again.
+		_explode.refresh_materials()
+
+
 func is_exploded() -> bool:
 	return _exploded
 

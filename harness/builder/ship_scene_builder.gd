@@ -163,6 +163,12 @@ class PartVisual:
 	var has_seam: bool = false
 
 
+## THE WALLS LAYER, off by default in the INTERIOR mode (ADR 0046). A PROPERTY rather than a
+## setter because this class stands at gdlint's thirty-public-method cap; the setter is private,
+## so assigning it still rebuilds the materials and the budget is untouched.
+var walls_hidden: bool = true:
+	set = _set_walls_hidden
+
 var _theme: ShipTheme = null
 var _mesh_gen: ShipMeshGen = ShipMeshGen.new()
 ## SHADED_WIRE, not FLAT. The solid material is UNSHADED (see _solid_material), so a FLAT
@@ -212,6 +218,7 @@ var _depth_near: float = 0.0
 var _depth_far: float = 0.0
 ## The INTERIOR cutaway plane the interior materials wear (ADR 0028).
 var _cut_plane: Vector4 = NO_CUT
+
 ## Part hidden because it is the one currently being re-placed; "" when none.
 var _suppressed: String = ""
 ## Last document and config handed to sync()/rebuild(). Cached ONLY so the ghost can answer
@@ -933,7 +940,7 @@ func materials_for(mode: int, selected: bool) -> Array:
 ## wall thickness at every opening) both sides; nothing is translucent and there is no wire, so
 ## the near wall is simply not there and the far cavity wall faces the camera from any angle.
 func inside_materials(selected: bool) -> Dictionary:
-	var key: String = "inside|%d" % int(selected)
+	var key: String = "inside|%d|%d" % [int(selected), int(walls_hidden)]
 	if _solid_materials.has(key):
 		return _solid_materials[key]
 	# The faceted shader is cull_disabled by design (mirrored twins, F7); here each surface is
@@ -950,14 +957,30 @@ func inside_materials(selected: bool) -> Dictionary:
 	# builder that culled by side and therefore the one place the inversion showed - as the near
 	# outer wall drawing as a solid blob and the far cavity wall as a black hole (ADR 0028). The
 	# read is fixed; the compensation comes off with it.
+	# THE WALL LAYER COMES OFF HERE (ADR 0046). A walled seam authors no plate - the two cavities
+	# simply do not merge - so the wall is each room's own surface standing where its neighbour
+	# pushed in, and taking it away leaves the open room the pair would otherwise be: "walls should
+	# be isolated from the shape its actually apart of, such that when walls layer is removed you
+	# see an open room" (2026-09-25). INTERIOR is the mode that looks into rooms, so it is the mode
+	# that drops them; the surface is named on every mesh, so any other view can drop it too.
 	var out: Dictionary = {
 		"exterior": _faceted_material(DisplayMode.SHADED_WIRE, selected, false, "front"),
 		"interior": _faceted_material(DisplayMode.SHADED_WIRE, selected, false, "back"),
 		"cut": _faceted_material(DisplayMode.SHADED_WIRE, selected, false),
+		# Shown, a wall wears the CUT material: both sides drawn, because a wall is the one
+		# surface the camera can legitimately meet from either room.
+		"wall":
+		(
+			_hidden_material()
+			if walls_hidden
+			else _faceted_material(DisplayMode.SHADED_WIRE, selected, false)
+		),
 		"wire": null,
 	}
-	for name: String in ["exterior", "interior", "cut"]:
-		var m: ShaderMaterial = out[name]
+	for name: String in ["exterior", "interior", "cut", "wall"]:
+		var m: ShaderMaterial = out[name] as ShaderMaterial
+		if m == null:  # the wall while the layer is off - a plain hidden StandardMaterial3D
+			continue
 		m.set_shader_parameter("cut_plane", _cut_plane)
 		m.set_shader_parameter("depth_strength", INTERIOR_DEPTH_STRENGTH)
 	# The cavity wall is a bowl, and a bowl lit flat reads as a ball (measured: "filled solid").
@@ -1096,6 +1119,13 @@ func scene_aabb() -> AABB:
 
 ## Rebuild every cached material against the current palette. Called after a palette flip
 ## (ShipTheme.palette_changed) so an alerting budget recolours the 3D view too.
+func _set_walls_hidden(on: bool) -> void:
+	if on == walls_hidden:
+		return
+	walls_hidden = on
+	refresh_materials()
+
+
 func refresh_materials() -> void:
 	_solid_materials.clear()
 	_wire_materials.clear()
@@ -1205,6 +1235,22 @@ func _solid_material(mode: int, selected: bool, flipped: bool) -> Material:
 ## shading is computed in the shader against a fixed world direction. Without this, every face is
 ## one flat colour and SHADED_WIRE is indistinguishable from FLAT — which is exactly what shipped
 ## and exactly what the author reported.
+## A material that draws nothing and occludes nothing - how a named surface is taken OUT of a mesh
+## that was built with it in.
+##
+## A null override would restore the mesh's own material and draw the surface, which is the
+## opposite. Alpha zero under alpha blending writes no colour, and Godot's default depth draw for a
+## transparent material is opaque-only, so it writes no depth either: the faces behind it show
+## through, which is the whole point of dropping the layer.
+func _hidden_material() -> StandardMaterial3D:
+	var m: StandardMaterial3D = StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.albedo_color = Color(0.0, 0.0, 0.0, 0.0)
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	return m
+
+
 func _faceted_material(
 	mode: int, selected: bool, _flipped: bool, cull: String = ""
 ) -> ShaderMaterial:

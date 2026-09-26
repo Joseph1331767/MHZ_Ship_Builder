@@ -28,11 +28,43 @@ func _carbon(family: String, open_nucleus: bool) -> ShipDoc:
 	)
 	if not open_nucleus:
 		assert_int(ShipComponents.dissolve(doc, doc.root).size()).is_equal(6)
-		# The definition's open links come back with the protons (ADR 0025); walled means walled.
-		for jid: String in doc.joints.keys():
-			if (doc.joints[jid] as ShipJoint).mode == ShipJoint.MODE_OPEN:
-				doc.joints.erase(jid)
+		# The definition's open links come back with the protons (ADR 0025); walled means walled,
+		# so they are SEALED. Erasing them instead - which this did until 2026-09-25 - leaves the
+		# protons with no link at all, and a nucleus laid out side by side has no parent-child
+		# link either, so ADR 0034's rule ("THE LINK IS THE JOINT RECORD, never mere contact")
+		# means no seam is authored: the six bodies read as separate rooms that merely intersect,
+		# each uncut. Measured on a carbon, the difference is plain - 5214 m2 of exterior unlinked
+		# against 4741 m2 sealed, and 18 m2 of wall against 493 m2.
+		_all_seams(doc, ShipJoint.MODE_SEALED)
 	return doc
+
+
+## Every joint of [param doc] set to [param mode]. Returns how many changed.
+func _all_seams(doc: ShipDoc, mode: String) -> int:
+	var changed: int = 0
+	for jid: String in doc.joints:
+		var joint: ShipJoint = doc.joints[jid]
+		if joint.mode != mode:
+			joint.mode = mode
+			changed += 1
+	return changed
+
+
+## The total area of every surface named [param surface_name] across a bake's drawn meshes.
+func _surface_area(report: Dictionary, surface_name: String) -> float:
+	var total: float = 0.0
+	for id: String in report["meshes"] as Dictionary:
+		var mesh: ArrayMesh = (report["meshes"] as Dictionary)[id]
+		for s: int in mesh.get_surface_count():
+			if mesh.surface_get_name(s) != surface_name:
+				continue
+			var arrays: Array = mesh.surface_get_arrays(s)
+			var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+			var index: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
+			for k: int in range(0, index.size() - 2, 3):
+				var a: Vector3 = verts[index[k]]
+				total += (0.5 * (verts[index[k + 1]] - a).cross(verts[index[k + 2]] - a).length())
+	return total
 
 
 ## A part's plain shell, for scale: the difference of its two surfaces as built.
@@ -593,3 +625,31 @@ func test_the_merge_never_breaks_a_piece_the_gate_passed() -> void:
 			)
 			. is_true()
 		)
+
+
+func test_the_wall_layer_is_named_and_tracks_the_seams() -> void:
+	# "walls should be isolated from the shape its actually apart of, such that when walls layer
+	# is removed you see an open room" (2026-09-25, ADR 0046). A walled seam authors no plate -
+	# the two cavities simply do not merge - so the wall is the INDENTED part's own cavity face
+	# standing where its neighbour's grown body pushed in, and naming it is what lets a view drop
+	# it. The test the layer has to pass is that it tracks the seams and nothing else: no walled
+	# seam, no wall.
+	var opened: ShipDoc = _carbon("box_hull", true)
+	_all_seams(opened, ShipJoint.MODE_OPEN)
+	var open_report: Dictionary = await ShipCsgBake.bake(self, opened, _data, _cfg)
+	(
+		assert_float(_surface_area(open_report, ShipCsgBake.SURFACE_WALL))
+		. append_failure_message("every seam open, so no face of any piece is a wall")
+		. is_equal_approx(0.0, 0.0001)
+	)
+
+	# Sealed, every one of those seams stands a wall, and it is a real area rather than a sliver.
+	var sealed: ShipDoc = _carbon("box_hull", false)
+	var walls: float = _surface_area(
+		await ShipCsgBake.bake(self, sealed, _data, _cfg), ShipCsgBake.SURFACE_WALL
+	)
+	(
+		assert_float(walls)
+		. append_failure_message("every seam sealed, so every one of them stands a wall")
+		. is_greater(100.0)
+	)

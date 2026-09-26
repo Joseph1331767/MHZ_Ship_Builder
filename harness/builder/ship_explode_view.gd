@@ -758,6 +758,14 @@ func set_isolated(instance_id: String, washed: Material = null) -> void:
 		_apply_materials(module)
 
 
+## Re-ask the scene for every piece's materials - after the walls layer is turned on or off, say
+## (ADR 0046). The set itself lives in [method ShipSceneBuilder.inside_materials]; this only drops
+## what the pieces are wearing.
+func refresh_materials() -> void:
+	for module: Module in _modules:
+		_apply_materials(module)
+
+
 func _in_isolation(id: String) -> bool:
 	return ShipSymmetry.source_of_twin(ShipComponents.instance_of(id)) == _isolated
 
