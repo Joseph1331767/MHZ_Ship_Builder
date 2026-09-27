@@ -3886,3 +3886,72 @@ pressable and is not would teach the wrong thing.
 Looked at `reports/visual_hint_card.png` - BASIC and DEV, the card alone and the card above the
 legend. **gdUnit4 455/455**; selfcheck PASSED with the hash unchanged; resolve, explode and visual
 (5 modes) checks PASSED; gdformat and gdlint clean.
+
+
+## [2026-09-27] The grand separation, part one: the seam styles leave the builder
+
+The author: "we keep running into that budget so do a grand seperation so we can have more room, or
+increase the limit which i actually dont have a recomendation for i know some of this is in benifite
+of agentic work having smaller more modular structures."
+
+**Measured before cutting.** `ship_builder.gd` at 1,999 lines, by section:
+
+| section | lines | funcs | public |
+|---|---:|---:|---:|
+| layout | 257 | 8 | 0 |
+| toolbar | 222 | 16 | 0 |
+| editing | 202 | 11 | 7 |
+| baked view and its update | 195 | 19 | 0 |
+| **seam styles (ADR 0009)** | **188** | **10** | **0** |
+
+The seam styles were the right first cut, and not because they were biggest: they are a whole
+FEATURE with a boundary - the catalogue of styles, the menu, which connections a selection implies,
+and the single edit that applies one style to all of them - and they reach the builder through
+nothing but its PUBLIC surface. `get_doc()`, `get_selection()`, `get_view()`, `set_status()`,
+`begin_edit()`, `commit_edit()`. No private state borrowed, none left behind, which is the test
+`.gdlintrc` actually states: "a self-contained, statically testable unit with no reference back to
+the file it came from."
+
+`ShipSeamMenu` also took `_joint_id_for` with it as a doc-taking static, so the builder's own link
+cycling now calls `ShipSeamMenu.joint_id_for(_doc, a, b)` and neither owns the other.
+
+**1,999 -> 1,798 lines.** Still exactly 30 public methods.
+
+### Two near-misses worth recording
+
+**The const excision ate four neighbours.** Walking backwards from `SEAM_STYLE_ITEMS`' docstring to
+the previous blank line ran straight through `LINK_CYCLE`, `SHIP_DIR`, `POST_LAYER` and
+`POST_SHADER_PATH`, whose docstrings are contiguous with it. Caught by the parse gate immediately -
+"Identifier LINK_CYCLE not declared" - and restored.
+
+**The signal connected to a thing that did not exist yet.** `_build_layout()` wires the view's
+right-click to `_seam_menu.open_at`, and the menu was being constructed on the line AFTER
+`_build_layout()`. `_ready` aborted there, so the start chooser never built, the display modes never
+applied, and the visual check reported fifteen failures that were all one ordering mistake. The
+construction moved above the layout.
+
+### The recommendation the author asked for, on the cap
+
+**Keep 2000. Do not raise it.** It has now produced four extractions and every one of them is a real
+thing with a name - `ShipModal`, `ShipViewToggles`, `ShipLayersControl`, `ShipSeamMenu` - rather
+than an arbitrary half of a file. That is the smoke alarm working as `.gdlintrc` describes it, and
+the author's own reason for asking ("agentic work having smaller more modular structures") is an
+argument for the pressure, not against it.
+
+**The harder wall is the 30-PUBLIC-METHOD cap, and extraction does not move it** - the seam work
+took ten functions out and the public count did not change, because all ten were private. That cap
+is also the one with a real argument against it: `API_CONTRACT_UI.md` section 0 designates
+`ShipBuilder` as "the application root and the ONLY surface panels may talk to", and a facade's job
+is to have many public methods. If a 31st is ever genuinely needed, the honest move is a
+file-scoped `# gdlint:ignore=max-public-methods` with the contract line quoted as the reason, not a
+project-wide raise.
+
+**The next cut, when it is needed**, is layout (257), toolbar (222) or the baked view (195) - all
+three are zero-public. None is needed yet: 202 lines of headroom covers the near-term roadmap.
+
+### Verified
+
+**gdUnit4 459/459** (up from 455 - four new cases pin the style table against `ShipJoint`'s
+constants, which the table spells as literals on purpose). Selfcheck PASSED with the hash unchanged;
+data validator PASSED (0 warnings); resolve, explode and visual (5 modes) checks PASSED, the last of
+which drives the seam menu end to end and is what proves the extraction did not change behaviour.

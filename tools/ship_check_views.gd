@@ -243,7 +243,10 @@ func _mouse(at: Vector2, pressed: bool) -> InputEventMouseButton:
 
 func check_seam_menu() -> void:
 	var view: Object = _builder.call("get_view")
-	var menu: Object = _builder.get("_context_menu")
+	# Asked of the feature, not of the builder: the seam styles moved to ShipSeamMenu on
+	# 2026-09-27 and took `_context_menu` with them (F40 on tool-reached members).
+	var seam: Object = _builder.get("_seam_menu")
+	var menu: Object = seam.menu() if seam != null else null
 	var doc: ShipDoc = _builder.call("get_doc")
 	if view == null or menu == null or doc == null:
 		_failures.append("seam menu: nothing to drive")

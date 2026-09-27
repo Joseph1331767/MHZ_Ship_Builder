@@ -48,7 +48,6 @@ signal attach_preview_changed(
 signal placement_state_changed(is_active: bool)
 
 ## In-scene dialog kinds. There is no native dialog here and never will be.
-
 const POST_SHADER_PATH: String = "res://shaders/palette_post.gdshader"
 ## Above every panel, so the quantizer catches the whole app viewport.
 const POST_LAYER: int = 100
@@ -58,27 +57,8 @@ const SHIP_DIR: String = "user://ships"
 ## reference; they ARE ShipSeams.MODE_WALL / MODE_DOORWAY / MODE_HATCHED / MODE_OPEN.
 const LINK_CYCLE: Array = ["wall", "doorway", "hatched", "open"]
 
-## The three ways two solids can be resolved where they meet, in the order the menu lists them,
-## with the labels the author used for them. String literals rather than ShipJoint's constants
-## only so this class-level const carries no cross-class reference; they ARE ShipJoint.SEAM_*.
-## The six seam styles, laid out as the TWO AXES they are (ADR 0013): which solid indents the
-## other, and what the linkage surface is. A `header` entry is a heading rather than a choice.
-##
-## RETIRED(ADR 0013, 2026-09-04): a flat list of six names drawn from two unrelated schemes - two
-## of them by the attach tree ("PARENT INDENTS CHILD") and four by a plane position ("IN-BUMP
-## SLICE"). Same six behaviours, one scheme: "i think its more appropriate to classify it as big
-## indents small, or small indents big. then to append on the toggles with that of flat inserted,
-## flat cutoff, or native inserted."
-const SEAM_STYLE_ITEMS: Array = [
-	{"header": "SMALL INDENTS BIG"},
-	{"id": "small_flat_insert", "label": "FLAT INSERTED"},
-	{"id": "small_flat_cutoff", "label": "FLAT CUTOFF"},
-	{"id": "small_native", "label": "NATIVE INSERTED"},
-	{"header": "BIG INDENTS SMALL"},
-	{"id": "big_flat_insert", "label": "FLAT INSERTED"},
-	{"id": "big_flat_cutoff", "label": "FLAT CUTOFF"},
-	{"id": "big_native", "label": "NATIVE INSERTED"},
-]
+## RETIRED(2026-09-27): SEAM_STYLE_ITEMS and the whole seam-style feature -> [ShipSeamMenu]
+## (harness/builder/ship_seam_menu.gd), which owns the table, the menu and the edit it makes.
 
 const HEADER_HEIGHT: int = 30
 const LEFT_WIDTH: int = 236
@@ -163,11 +143,10 @@ var _bake_hud: ShipBakeHud = null
 ## Whether a ship that arrives bakes itself (ADR 0028); the visual check turns it off.
 var _resolve_on_load_enabled: bool = true
 ## The right-click seam menu (ADR 0009), and the pair it was opened on.
-var _context_menu: ShipContextMenu = null
+var _seam_menu: ShipSeamMenu = null
 ## Every connection the open seam menu will restyle, as `[child, host]` pairs. Captured when the
 ## menu opens rather than read back when an item is pressed, so a selection that changes under an
 ## open menu cannot retarget it.
-var _seam_pairs: Array[PackedStringArray] = []
 
 var _start_dialog: ShipStartDialog = null
 var _tutorial: ShipTutorial = null
@@ -201,8 +180,10 @@ func _ready() -> void:
 	_history = ShipHistory.new()
 	_bake_session = ShipBakeSession.new(self, _current_doc, _show_bake, _on_bake_progress)
 
+	# BEFORE the layout: `_build_layout()` connects the view's right-click straight to
+	# `_seam_menu.open_at`, so the feature has to exist by then.
+	_seam_menu = ShipSeamMenu.new(self, _ship_theme)
 	_build_layout()
-	_build_context_menu()
 	_modal_ui = ShipModal.new(self, _ship_theme, float(DIALOG_WIDTH))
 	_modal = _modal_ui.layer()
 	_build_start_dialog()
@@ -448,7 +429,7 @@ func _set_link(a: String, b: String, link: String) -> void:
 			inner.hatch_family = _default_hatch()
 		ShipComponents.set_inner_joint(_doc, a, b, inner)
 		return
-	var existing: String = _joint_id_for(a, b)
+	var existing: String = ShipSeamMenu.joint_id_for(_doc, a, b)
 	if link == ShipSeams.MODE_WALL:
 		if not existing.is_empty():
 			_doc.joints.erase(existing)
@@ -465,18 +446,6 @@ func _set_link(a: String, b: String, link: String) -> void:
 	joint.mode = _joint_mode_for_link(link)
 	if link == ShipSeams.MODE_HATCHED and joint.hatch_family.is_empty():
 		joint.hatch_family = _default_hatch()
-
-
-## The id of the joint over the unordered pair, or "".
-func _joint_id_for(a: String, b: String) -> String:
-	if _doc == null:
-		return ""
-	var key: String = ShipDoc.joint_key_for(a, b)
-	for jid: String in _doc.joints:
-		var joint: ShipJoint = _doc.joints[jid]
-		if ShipDoc.joint_key_for(joint.a, joint.b) == key:
-			return jid
-	return ""
 
 
 static func _joint_mode_for_link(link: String) -> String:
@@ -1187,7 +1156,7 @@ func _build_layout() -> void:
 	_view.part_picked.connect(_on_part_picked)
 	_view.part_double_clicked.connect(_on_part_double_clicked)
 	_view.pick_cleared.connect(_on_pick_cleared)
-	_view.seam_menu_requested.connect(_on_seam_menu_requested)
+	_view.seam_menu_requested.connect(_seam_menu.open_at)
 	view_frame.add_child(_view)
 	# THE DIRECTIVE, bottom centre of the VIEW, so it follows the view's width at every rung and
 	# never floats over a side panel. A sibling of the view, like the layers explorer.
@@ -1739,174 +1708,6 @@ func _on_bake_pressed() -> void:
 	)
 	show_message("BAKE REPORT", body)
 	set_status("BAKE COMPLETE")
-
-
-# ---------------------------------------------------------------- seam styles (ADR 0009)
-
-
-func _build_context_menu() -> void:
-	_context_menu = ShipContextMenu.new()
-	_context_menu.name = "ContextMenu"
-	_context_menu.setup(_ship_theme)
-	_context_menu.chosen.connect(_on_seam_style_chosen)
-	add_child(_context_menu)
-
-
-## Right-clicking a selection offers the seam styles for every connection INSIDE it.
-##
-## ANY NUMBER OF PARTS, not two: "add ability to select as many modules as desired, right click and
-## change the connection surfaces for all at same time even if they differed before." A connection
-## counts when BOTH of its ends are selected, which is the reading that generalises the old
-## two-part behaviour exactly - select a pair and you get their one seam, select a chain and you
-## get every seam along it, and a part selected on its own has no connection to anything else in
-## the selection and so offers nothing.
-##
-## Where the chosen ones do not already agree, nothing is marked as current, because none of them
-## is.
-func _on_seam_menu_requested(position: Vector2) -> void:
-	if _doc == null or _context_menu == null or _exploded:
-		return
-	var chosen: Dictionary = {}
-	for raw: String in _selection:
-		var pid: String = ShipSymmetry.source_of_twin(raw)
-		if _doc.parts.has(pid):
-			chosen[pid] = true
-	# Inner parts of a component included (ADR 0025): pairs_within knows what hangs off what.
-	_seam_pairs = ShipSeams.pairs_within(_doc, PackedStringArray(chosen.keys()))
-	if _seam_pairs.is_empty():
-		if chosen.size() > 1:
-			set_status("NONE OF THOSE PARTS ARE CONNECTED TO EACH OTHER")
-		return
-
-	var items: Array[Dictionary] = []
-	for item: Dictionary in SEAM_STYLE_ITEMS:
-		items.append(item)
-	# The position arrives in the 3D VIEW's coordinates and the menu lives under this Control:
-	# carry it across, or a menu opened at the pointer lands wherever the two frames differ by.
-	var offset: Vector2 = (
-		_view.get_global_transform_with_canvas().origin - get_global_transform_with_canvas().origin
-	)
-	var title: String = (
-		"SEAM: %s <-> %s"
-		% [_part_label(_seam_pairs[0][0]).to_upper(), _part_label(_seam_pairs[0][1]).to_upper()]
-	)
-	if _seam_pairs.size() > 1:
-		title = "%d SEAMS" % _seam_pairs.size()
-	_context_menu.open(position + offset, title, items, _common_seam_style())
-
-
-## The style every chosen connection already carries, or "" when they differ - which is what the
-## menu shows as "no current choice" rather than picking one of them to look current.
-func _common_seam_style() -> String:
-	var common: String = ""
-	for pair: PackedStringArray in _seam_pairs:
-		var style: String = _seam_style_of(pair[0], pair[1])
-		if common.is_empty():
-			common = style
-		elif common != style:
-			return ""
-	return common
-
-
-func _seam_style_of(a: String, b: String) -> String:
-	return ShipSeams.style_for(_doc, a, b)
-
-
-## Applies one style to every connection the menu was opened over, as a SINGLE edit - so a
-## selection of a dozen seams is one undo, not a dozen.
-func _on_seam_style_chosen(style: String) -> void:
-	if _doc == null or _seam_pairs.is_empty():
-		return
-	var live: Array[PackedStringArray] = []
-	for pair: PackedStringArray in _seam_pairs:
-		if _is_part_alive(pair[0]) and _is_part_alive(pair[1]):
-			live.append(pair)
-	if live.is_empty():
-		set_status("THOSE PARTS ARE GONE")
-		return
-	if live.size() == 1 and _seam_style_of(live[0][0], live[0][1]) == style:
-		set_status("SEAM ALREADY %s" % _seam_style_label(style))
-		return
-
-	begin_edit("seam style")
-	var changed: int = 0
-	for pair: PackedStringArray in live:
-		if _apply_seam_style(pair[0], pair[1], style):
-			changed += 1
-	commit_edit(PackedStringArray())
-	if live.size() == 1:
-		set_status(
-			(
-				"SEAM %s <-> %s: %s"
-				% [
-					_part_label(live[0][0]).to_upper(),
-					_part_label(live[0][1]).to_upper(),
-					_seam_style_label(style)
-				]
-			)
-		)
-	else:
-		set_status("%d OF %d SEAMS -> %s" % [changed, live.size(), _seam_style_label(style)])
-
-
-## Sets one connection's style, creating the joint record if the pair never had one. Returns
-## whether anything actually moved.
-func _apply_seam_style(a: String, b: String, style: String) -> bool:
-	if _seam_style_of(a, b) == style:
-		return false
-	# Two chunks of one component: the style lives in the definition's joint (ADR 0025).
-	if ShipSeams.within_one_instance(_doc, a, b):
-		var inner: ShipJoint = ShipComponents.inner_joint_for(_doc, a, b)
-		if inner == null:
-			inner = ShipJoint.new()
-			inner.mode = ShipJoint.MODE_SEALED
-		inner.seam_style = style
-		return ShipComponents.set_inner_joint(_doc, a, b, inner)
-	var existing: String = _joint_id_for(a, b)
-	var joint: ShipJoint = null
-	if existing.is_empty():
-		# A style needs a record to live on. A pair with no joint is a WALL, so the record this
-		# creates says exactly what was already true and changes only the seam's SHAPE.
-		joint = ShipJoint.new()
-		joint.id = _doc.new_joint_id()
-		joint.a = a if a <= b else b
-		joint.b = b if a <= b else a
-		joint.mode = ShipJoint.MODE_SEALED
-		_doc.joints[joint.id] = joint
-	else:
-		joint = _doc.joints[existing]
-	joint.seam_style = style
-	return true
-
-
-## The menu label for a style, qualified by the group it sits under.
-##
-## SEAM_STYLE_ITEMS carries heading rows as well as choices (ADR 0013), and a heading has no id -
-## reading one cost a runtime error the PASSED banner said nothing about, which is exactly the
-## case AGENTS section 8a exists for.
-static func _seam_style_label(style: String) -> String:
-	var group: String = ""
-	for item: Dictionary in SEAM_STYLE_ITEMS:
-		if item.has("header"):
-			group = str(item["header"])
-			continue
-		if str(item.get("id", "")) == style:
-			var label: String = str(item.get("label", style))
-			return label if group.is_empty() else "%s - %s" % [group, label]
-	return style.to_upper()
-
-
-## A part's display name, or its id when it has none.
-## A document part or an inner part of a component (ADR 0024).
-func _is_part_alive(pid: String) -> bool:
-	return _doc.parts.has(pid) or ShipComponents.inner_exists(_doc, pid)
-
-
-func _part_label(pid: String) -> String:
-	var part: ShipPart = _doc.part_at(pid)
-	if part == null:
-		return pid
-	return part.display_name if not part.display_name.is_empty() else pid
 
 
 ## One line of the bake report: how many seams the field laid and how each is closed.
