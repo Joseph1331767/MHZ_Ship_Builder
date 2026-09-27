@@ -3630,3 +3630,93 @@ Looked at `reports/visual_shapes.png` (a blended carbon, and cylinder rooms as d
 spars) and `reports/visual_picker.png`. **gdUnit4 351/351** with a test per ask; selfcheck PASSED,
 hash unchanged at `5536787c6c35d236`; data validator PASSED (0 warnings); resolve, explode and visual
 (5 modes) checks PASSED; gdformat and gdlint clean.
+
+
+## [2026-09-27] UX steps 0-7: four dead bindings fixed, and the guidance authored as data
+
+The author's overnight brief asked for a child-usable builder and said how to get there: "use
+thinktank, iteration, idea-on-paper-first, ui mechanic cloning taking best from known mechanics".
+So the paper came first - `docs/future/ux.md`, committed separately - and this entry is the subset
+that document marks SAFE TO BUILD UNSUPERVISED: steps 0 through 7, and nothing else. Everything
+from step 8 on changes how a gesture feels, changes the layout, touches F13's code, or is a taste
+call, and waits for the author.
+
+The running application looks exactly as it did, except that Ctrl+Z works, the snap picker reaches
+the keyboard, a loaded ship can be edited again, and the tutorial has stopped naming buttons that
+were deleted.
+
+### The fixes
+
+**Ctrl+Z and Ctrl+Y were dead** (B1) whenever the 3D view had focus - which it takes on every left
+click. `_dispatch_press` passed a bare keycode to `_handle_axis_key`, `KEY_Z` and `KEY_Y` are both
+in `AXIS_LOCK_KEYS`, and `_gui_input` then called `accept_event()`. Undo silently set an axis lock.
+The view has no ctrl or meta KEY chords at all - every ctrl in it is on a MOUSE event - so the
+guard is on the whole dispatch rather than on one table, and the next ctrl chord the builder adds
+does not have to rediscover this.
+
+**There were two angular snap lattices** (B3) and the picker drove one. The inspector's SNAP DEG
+writes `ShipPlacement.snap_deg`; `doc.settings["snap_deg"]` is stamped once at document creation
+and never written again. `_snap_degrees()` read the document FIRST, so choosing 5.000 moved mouse
+drags and typed fields while the numpad and the arrows went on stepping the founding 0.5 forever.
+The live picker is asked first now. Two docstrings were wrong with it: one claimed the arrows use
+"the same lattice the numpad rotations and the typed fields use", and two places said a quarter
+turn at 0.5 degrees is sixty taps. It is 180.
+
+**A loaded ship had no way back** (B5). A ship that arrives resolves itself and lands baked (ADR
+0028), and a baked view routes every event to the explode handler. The exit existed and had ZERO
+callers in `harness/` - the only references in the repo were three lines of `tools/`. There is an
+EDIT button beside EXPLODE now.
+
+**A held key flushed the undo stack** (B9). The numpad and arrow bindings pass their echo events
+through on purpose, and every echo pushed a whole `doc.to_dict()`; against a depth of 64 that is
+the entire history gone in about two seconds of held numpad-4. Pushes now fold into the one before
+them when the label AND the ids match within 400 ms.
+
+**The tutorial named two buttons that have never existed.** Step 6 said to press MAKE ROOM in the
+tree panel; the buttons there are ALL CHILDREN, NO CHILDREN, BREAK SYMMETRY, MAKE COMP, MAKE UNIQUE
+and LINK. Step 7 said LINK HATCH. Step 8 could not clear at all. Worse, step 6's predicate passed
+the moment a TEMPLATE ship loaded, because every template part carries a display name that already
+differs from its family - it was ticked before the player had done anything.
+
+### Two things the tools caught, and one the agent did
+
+**`ship_visual_check.gd` reached three more private members by string.** The plan warned to grep for
+`_modal` before moving the dialog; that grep was too narrow, and `_dialog_title`, `_dialog_body` and
+`_close_dialog` went with it. Five checks failed at once. The tool asks the dialog for its own text
+now, and the builder keeps `_close_dialog()` as a named verb.
+
+**The undo coalescing was wrong, and the visual check proved it.** Keyed on the label and a time
+window alone, one undo swallowed two DIFFERENT seam-style edits, because a tool makes edits faster
+than any human. `push()` took an additive third parameter - the ids the edit touched - and an edit
+that names no parts never folds. The contract's two-argument form still compiles and behaves
+identically.
+
+**A tenth dead binding, found while authoring the keymap.** With a component open and no ghost up,
+ESC goes to `set_selection(empty)` and the component stays open - while the status line says
+"EDITING COMPONENT ... - ESC TO CLOSE" and the on-screen legend repeats it. Two surfaces promising
+a key that does nothing. RECORDED, not fixed: it was not in the surveyed and judged step list, and
+the author is asleep.
+
+### The two new artifacts, which nothing reads yet
+
+**`ShipKeymap`** - 68 rows over twelve contexts: 46 live, 13 that lie, 8 dead, 1 bound to no key at
+all. It records the broken ones honestly rather than describing an input map the builder does not
+have, because a table that lies is worse than no table. 14 tests assert its shape, that no chord
+repeats inside one context, that every handler anchor names a file that exists, and that each rung
+of the tier ladder contains the one below it.
+
+**`ShipHintText`** - the whole directive-bar state table as a pure static resolver: 42 states, the
+priority ladder, and the verbosity decay that keeps "constant real time teaching" from becoming
+nagging by the hundredth hour. 69 tests, one per state asserting the exact literal, so a change to
+a string is a deliberate edit and never an accident.
+
+Neither is wired to anything. That is what makes them safe to land unsupervised, and it means the
+ladder and every literal are tested artifacts before the renderer that shows them exists.
+
+### Verified
+
+`ship_builder.gd` went 1997 -> 1935 lines with the modal lifted into `ShipModal` (which also gained
+the keyboard it never had - ENTER commits, ESC backs out), and stayed at exactly 30 public methods.
+**gdUnit4 442/442**, up from 351: 8 history, 14 keymap, 69 hint text. Selfcheck PASSED with the hash
+unchanged at `5536787c6c35d236`; data validator PASSED (0 warnings); resolve, explode and visual (5
+modes) checks PASSED; gdformat and gdlint clean.

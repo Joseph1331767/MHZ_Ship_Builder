@@ -148,20 +148,22 @@ func _build_steps() -> void:
 			"check": _check_stepped,
 		},
 		{
-			"title": "6. NAME A ROOM",
+			"title": "6. MIRROR IT",
 			"body":
 			(
-				"EVERY PART IS A ROOM. SELECT ONE AND PRESS MAKE ROOM IN THE TREE PANEL TO NAME "
-				+ "IT - OR SELECT SEVERAL AND PRESS MAKE ROOM TO JOIN THEM INTO ONE ROOM."
+				"SHIPS START MIRRORED LEFT TO RIGHT. UNDER MIRROR IN THE INSPECTOR, ADD Y OR Z "
+				+ "TO MIRROR UP AND DOWN OR FRONT AND BACK AS WELL - OR PRESS OFF TO BUILD ONE "
+				+ "SIDE ON ITS OWN."
 			),
-			"check": _check_named_room,
+			"check": _check_mirrored,
 		},
 		{
 			"title": "7. HATCH TWO ROOMS",
 			"body":
 			(
-				"SELECT TWO PARTS THAT MEET AND PRESS LINK HATCH. THAT IS THE CONNECTION DATA "
-				+ "THE HULL IS BUILT AGAINST - PRESS IT AGAIN TO TAKE THE HATCH BACK OUT."
+				"SELECT TWO PARTS THAT MEET AND PRESS LINK IN THE TREE PANEL. EACH PRESS "
+				+ "CYCLES THE JOIN: OPEN, A HATCH, A DOORWAY, A SOLID WALL. THAT IS THE "
+				+ "CONNECTION DATA THE HULL IS BUILT AGAINST."
 			),
 			"check": _check_hatched,
 		},
@@ -170,10 +172,10 @@ func _build_steps() -> void:
 			"body":
 			(
 				"WATCH THE BUDGET BARS ALONG THE BOTTOM - COMPLEXITY, BOUNDING BOX, VOLUME, "
-				+ "WEIGHT AND COST. WHEN THE HULL IS READY, PRESS BAKE. THAT IS THE WHOLE "
-				+ "BUILDER."
+				+ "WEIGHT AND COST. WHEN THE HULL IS READY, PRESS UPDATE MESHES TO BUILD THE "
+				+ "REAL PIECES, THEN PRESS E TO PULL THEM APART AND LOOK INSIDE."
 			),
-			"check": _check_never,
+			"check": _check_baked,
 		},
 	]
 
@@ -215,21 +217,37 @@ static func _is_stepped(p: ShipPart) -> bool:
 ## ShipDoc.create_new and a placed part starts unnamed, so any other name on a part is one the
 ## player gave it - through MAKE ROOM, or by joining several parts into a room, whose instance
 ## carries the name it was given.
-func _check_named_room() -> bool:
-	return _any_part(func(p: ShipPart) -> bool: return _player_named(p))
+## THE MIRROR SET MOVED OFF ITS FOUNDING VALUE. `ShipDoc.symmetry_plane` defaults to "x"
+## (`ship_doc.gd:67`), so "has a plane" is true before the player touches anything - asking for a
+## CHANGE is what makes this a step rather than a tick. Adding Y or Z reads two or three; OFF
+## reads none; only the untouched founding "x" reads one.
+##
+## RETIRED(2026-09-27): `_check_named_room`, whose step told the player to press a MAKE ROOM
+## button that has never existed in the tree panel - the buttons there are ALL CHILDREN, NO
+## CHILDREN, BREAK SYMMETRY, MAKE COMP, MAKE UNIQUE and LINK. Its predicate was wrong the same
+## way this one nearly was: `_player_named` passed the moment a TEMPLATE ship loaded, because
+## every template part is given a display name ("C POD 6") that already differs from its family.
+func _check_mirrored() -> bool:
+	if _doc() == null:
+		return false
+	return ShipSymmetry.planes_of(_doc()).size() != 1
 
 
 func _check_hatched() -> bool:
 	return _hatch_count() > 0
 
 
-func _check_never() -> bool:
-	return false
-
-
-func _player_named(part: ShipPart) -> bool:
-	var given: String = part.display_name.strip_edges()
-	return not given.is_empty() and given != part.family
+## THE PIECES HAVE BEEN PULLED APART. Exploding is the one thing here no automatic path does: a
+## ship that arrives RESOLVES ITSELF and lands BAKED (ADR 0028), so `is_baked()` would be true
+## before the player pressed anything, exactly the trap the old step 6 fell into.
+##
+## RETIRED(2026-09-27): `_check_never`, which could not clear at all, so the card's last step
+## stood unticked forever however finished the ship was.
+func _check_baked() -> bool:
+	if _builder == null:
+		return false
+	var view: ShipView3D = _builder.get_view()
+	return view != null and view.is_exploded()
 
 
 func _first_unfinished() -> int:

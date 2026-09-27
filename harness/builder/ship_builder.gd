@@ -48,7 +48,6 @@ signal attach_preview_changed(
 signal placement_state_changed(is_active: bool)
 
 ## In-scene dialog kinds. There is no native dialog here and never will be.
-enum DialogMode { MESSAGE, CONFIRM, PROMPT, LIST }
 
 const POST_SHADER_PATH: String = "res://shaders/palette_post.gdshader"
 ## Above every panel, so the quantizer catches the whole app viewport.
@@ -140,6 +139,7 @@ var _redo_button: Button = null
 ## EXPLODE / ASSEMBLE (ADR 0008). The exploded view shows bakes, not the document, so any edit
 ## assembles first - see _leave_explode().
 var _explode_button: Button = null
+var _edit_button: Button = null
 var _rooms_button: Button = null
 ## Whether an open room explodes as its member pieces (false) or as one whole shell (true).
 ## "an explode control toggle to choose to explode rooms or keep them whole" (2026-09-05).
@@ -167,15 +167,11 @@ var _seam_pairs: Array[PackedStringArray] = []
 
 var _start_dialog: ShipStartDialog = null
 var _tutorial: ShipTutorial = null
+var _modal_ui: ShipModal = null
+## The modal's full-rect layer, kept as a member of its own because
+## `tools/ship_visual_check.gd` reaches `_builder.get("_modal")` BY NAME (FOLLOWUPS F40 on
+## tool-reached members). The dialog itself lives in [ShipModal].
 var _modal: Control = null
-var _modal_dim: ColorRect = null
-var _dialog_title: Label = null
-var _dialog_body: Label = null
-var _dialog_input: LineEdit = null
-var _dialog_list: ItemList = null
-var _dialog_cancel: Button = null
-var _dialog_mode: int = DialogMode.MESSAGE
-var _dialog_cb: Callable = Callable()
 
 
 func _ready() -> void:
@@ -203,7 +199,8 @@ func _ready() -> void:
 
 	_build_layout()
 	_build_context_menu()
-	_build_modal()
+	_modal_ui = ShipModal.new(self, _ship_theme, float(DIALOG_WIDTH))
+	_modal = _modal_ui.layer()
 	_build_start_dialog()
 	_build_tutorial()
 	_build_post_process()
@@ -639,11 +636,33 @@ func set_status(text: String) -> void:
 ## no way to name it ("also doesnt let player name it"), purely because the dialog machinery was
 ## private to this file.
 func prompt(title: String, body: String, default_text: String, cb: Callable) -> void:
-	_open_dialog(title, body, DialogMode.PROMPT, cb, PackedStringArray(), default_text)
+	_open_dialog(title, body, ShipModal.Mode.PROMPT, cb, PackedStringArray(), default_text)
 
 
 func show_message(title: String, body: String) -> void:
-	_open_dialog(title, body, DialogMode.MESSAGE, Callable(), PackedStringArray(), "")
+	_open_dialog(title, body, ShipModal.Mode.MESSAGE, Callable(), PackedStringArray(), "")
+
+
+## Every dialog in the app goes through here and then straight out to [ShipModal]. Kept as one
+## private forwarder rather than pointing five call sites at `_modal_ui` so the dialog stays one
+## named thing in this file.
+func _open_dialog(
+	title: String,
+	body: String,
+	mode: int,
+	cb: Callable,
+	items: PackedStringArray,
+	default_text: String
+) -> void:
+	if _modal_ui != null:
+		_modal_ui.open(title, body, mode, cb, items, default_text)
+
+
+## Take the dialog back down without answering it. Kept as a named verb on the builder because
+## `tools/ship_visual_check.gd` drives it by string to clear a refusal before the next step.
+func _close_dialog() -> void:
+	if _modal_ui != null:
+		_modal_ui.close()
 
 
 # ---------------------------------------------------------------- placement plumbing
@@ -733,7 +752,11 @@ func _commit(changed_ids: PackedStringArray, check_budget: bool) -> bool:
 		if ShipComponents.is_expanded_id(pid):
 			_doc.store_inner(pid)
 			inner_edit = true
-	_history.push(_doc, _pending_label)
+	# The ids are what make two pushes one gesture, so a held numpad key folds into one undo
+	# while two edits to different parts keep their own (ShipHistory._coalesces).
+	var touched: PackedStringArray = changed_ids.duplicate()
+	touched.sort()
+	_history.push(_doc, _pending_label, "".join(touched))
 	if changed_ids.is_empty() or inner_edit:
 		_refresh_view(false)
 	else:
@@ -855,6 +878,22 @@ func _set_exploded(on: bool) -> void:
 		set_status("ASSEMBLED")
 	if _explode_button != null:
 		_explode_button.text = "ASSEMBLE" if _exploded else "EXPLODE"
+
+
+## LEAVE THE BAKED VIEW for the primitives, so the ship can be edited again.
+##
+## A LOADED SHIP HAD NO WAY BACK. A ship that arrives RESOLVES ITSELF (ADR 0028) and lands with
+## `_baked = true`; a baked view routes every event to `_handle_explode_input`, which deliberately
+## keeps the gizmo, the clone and the placement out because what is on screen is a set of bakes
+## and not the document. The exit existed - `_set_baked(false)` - and had ZERO callers anywhere in
+## `harness/`: the only references in the repo were three lines of `tools/`. So opening a saved
+## ship gave you a hull you could look at and not touch, with nothing on screen saying why
+## (docs/future/ux.md section 2.5, B5).
+##
+## The button is always live: `_set_baked(false)` returns early when nothing is baked. Lighting it
+## only when it can do something belongs with the hint bar (step 11), not with the way out.
+func _on_edit_pressed() -> void:
+	_set_baked(false)
 
 
 func _on_explode_pressed() -> void:
@@ -1204,6 +1243,9 @@ func _build_header() -> PanelContainer:
 	bar.add_child(_make_button("FRAME", _on_frame_pressed))
 	_explode_button = _make_button("EXPLODE", _on_explode_pressed)
 	bar.add_child(_explode_button)
+	_edit_button = _make_button("EDIT", _on_edit_pressed)
+	_edit_button.tooltip_text = "LEAVE THE BAKED MESHES AND GO BACK TO EDITING THE SHIP"
+	bar.add_child(_edit_button)
 	_rooms_button = _make_button("ROOMS: PIECES", _on_rooms_pressed)
 	_rooms_button.tooltip_text = "EXPLODE A ROOM INTO ITS PIECES, OR KEEP IT WHOLE"
 	bar.add_child(_rooms_button)
@@ -1341,8 +1383,8 @@ func _build_post_process() -> void:
 func _on_palette_changed(_palette: PackedColorArray) -> void:
 	if _view != null:
 		_view.on_palette_changed()
-	if _modal_dim != null:
-		_modal_dim.color = _ship_theme.color_for_role_a("background", 0.78)
+	if _modal_ui != null:
+		_modal_ui.refresh_theme()
 
 
 # ---------------------------------------------------------------- dialogs
@@ -1417,110 +1459,6 @@ func _on_start_cancelled() -> void:
 	set_status("KEPT THE CURRENT SHIP")
 
 
-func _build_modal() -> void:
-	_modal = Control.new()
-	_modal.name = "ModalLayer"
-	_modal.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_modal.mouse_filter = Control.MOUSE_FILTER_STOP
-	_modal.visible = false
-	add_child(_modal)
-
-	_modal_dim = ColorRect.new()
-	_modal_dim.set_anchors_preset(Control.PRESET_FULL_RECT)
-	_modal_dim.color = _ship_theme.color_for_role_a("background", 0.78)
-	_modal.add_child(_modal_dim)
-
-	var center: CenterContainer = CenterContainer.new()
-	center.set_anchors_preset(Control.PRESET_FULL_RECT)
-	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_modal.add_child(center)
-
-	var frame: PanelContainer = PanelContainer.new()
-	frame.custom_minimum_size = Vector2(ShipTheme.pxf(float(DIALOG_WIDTH)), 0.0)
-	center.add_child(frame)
-
-	var box: VBoxContainer = VBoxContainer.new()
-	frame.add_child(box)
-
-	_dialog_title = Label.new()
-	_dialog_title.add_theme_font_size_override("font_size", ShipTheme.font_title())
-	box.add_child(_dialog_title)
-	box.add_child(HSeparator.new())
-
-	_dialog_body = Label.new()
-	_dialog_body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	box.add_child(_dialog_body)
-
-	_dialog_input = LineEdit.new()
-	_dialog_input.visible = false
-	box.add_child(_dialog_input)
-
-	_dialog_list = ItemList.new()
-	_dialog_list.visible = false
-	_dialog_list.custom_minimum_size = Vector2(ShipTheme.pxf(0.0), ShipTheme.pxf(200.0))
-	box.add_child(_dialog_list)
-
-	var buttons: HBoxContainer = HBoxContainer.new()
-	buttons.alignment = BoxContainer.ALIGNMENT_END
-	box.add_child(buttons)
-	_dialog_cancel = _make_button("CANCEL", _on_dialog_cancel)
-	buttons.add_child(_dialog_cancel)
-	buttons.add_child(_make_button("OK", _on_dialog_ok))
-
-
-func _open_dialog(
-	title: String,
-	body: String,
-	mode: int,
-	cb: Callable,
-	items: PackedStringArray,
-	default_text: String
-) -> void:
-	if _modal == null:
-		return
-	_dialog_mode = mode
-	_dialog_cb = cb
-	_dialog_title.text = title
-	_dialog_body.text = body
-	_dialog_input.visible = mode == DialogMode.PROMPT
-	_dialog_input.text = default_text
-	_dialog_list.visible = mode == DialogMode.LIST
-	_dialog_list.clear()
-	for item: String in items:
-		_dialog_list.add_item(item)
-	_dialog_cancel.visible = mode != DialogMode.MESSAGE
-	_modal.visible = true
-	if mode == DialogMode.PROMPT:
-		_dialog_input.grab_focus()
-		_dialog_input.select_all()
-
-
-func _close_dialog() -> void:
-	if _modal != null:
-		_modal.visible = false
-	_dialog_cb = Callable()
-
-
-func _on_dialog_ok() -> void:
-	var payload: String = ""
-	if _dialog_mode == DialogMode.PROMPT:
-		payload = _dialog_input.text
-	elif _dialog_mode == DialogMode.LIST:
-		var picked: PackedInt32Array = _dialog_list.get_selected_items()
-		if picked.is_empty():
-			return
-		payload = _dialog_list.get_item_text(picked[0])
-	var cb: Callable = _dialog_cb
-	var mode: int = _dialog_mode
-	_close_dialog()
-	if mode != DialogMode.MESSAGE and cb.is_valid():
-		cb.call(payload)
-
-
-func _on_dialog_cancel() -> void:
-	_close_dialog()
-
-
 # ---------------------------------------------------------------- toolbar
 
 
@@ -1589,7 +1527,7 @@ func _on_new_pressed() -> void:
 	_open_dialog(
 		"NEW SHIP",
 		"DISCARD THE CURRENT SHIP AND START OVER?",
-		DialogMode.CONFIRM,
+		ShipModal.Mode.CONFIRM,
 		_on_new_confirmed,
 		PackedStringArray(),
 		""
@@ -1617,7 +1555,7 @@ func _on_save_pressed() -> void:
 		return
 	set_status("SAVE PANEL UNAVAILABLE - USING THE BASIC PROMPT")
 	_open_dialog(
-		"SAVE SHIP", "FILE NAME", DialogMode.PROMPT, _save_named, PackedStringArray(), "ship"
+		"SAVE SHIP", "FILE NAME", ShipModal.Mode.PROMPT, _save_named, PackedStringArray(), "ship"
 	)
 
 
@@ -1646,7 +1584,7 @@ func _on_open_pressed() -> void:
 	if items.is_empty():
 		show_message("OPEN SHIP", "NO SAVED SHIPS IN %s" % SHIP_DIR)
 		return
-	_open_dialog("OPEN SHIP", "PICK A FILE", DialogMode.LIST, _open_named, items, "")
+	_open_dialog("OPEN SHIP", "PICK A FILE", ShipModal.Mode.LIST, _open_named, items, "")
 
 
 ## Loading is budget-exempt (SPEC section 8). An over-budget ship opens as a visible
@@ -1666,7 +1604,7 @@ func _on_import_pressed() -> void:
 	_open_dialog(
 		"IMPORT COMPONENTS",
 		"PICK A CLASS OR A SAVED SHIP",
-		DialogMode.LIST,
+		ShipModal.Mode.LIST,
 		_import_named,
 		items,
 		""
@@ -1938,7 +1876,11 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	var key: InputEventKey = event as InputEventKey
 	if key == null or not key.pressed or key.echo:
 		return
-	if _modal != null and _modal.visible:
+	# A dialog owns the keyboard while it is up - no hotkey may fire behind it - and until
+	# 2026-09-27 that was the whole story, so every dialog had to be finished with the mouse.
+	if _modal_ui != null and _modal_ui.is_open():
+		if _modal_ui.handle_key(key):
+			get_viewport().set_input_as_handled()
 		return
 	if _handle_hotkey(key):
 		get_viewport().set_input_as_handled()

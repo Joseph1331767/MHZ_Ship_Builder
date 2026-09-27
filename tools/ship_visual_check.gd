@@ -1509,16 +1509,16 @@ func _hatched(doc: ShipDoc, a: String, b: String) -> bool:
 	return joint != null and joint.mode == ShipJoint.MODE_HATCHED
 
 
-## The builder's one in-scene dialog: its title while it is showing, "" when it is not.
+## The dialog's own text. ASKED OF THE DIALOG: the modal moved to [ShipModal] on 2026-09-27 and
+## the builder members this used to read by string went with it (F40).
 func _dialog_title() -> String:
-	var modal: Control = _builder.get("_modal")
-	if modal == null or not modal.visible:
-		return ""
-	return (_builder.get("_dialog_title") as Label).text
+	var modal: ShipModal = _builder.get("_modal_ui") as ShipModal
+	return modal.title_text() if modal != null and modal.is_open() else ""
 
 
 func _dialog_body() -> String:
-	return (_builder.get("_dialog_body") as Label).text
+	var modal: ShipModal = _builder.get("_modal_ui") as ShipModal
+	return modal.body_text() if modal != null else ""
 
 
 ## A step that must not have ended in a refusal. Closes the dialog if one is up, so the next

@@ -114,9 +114,12 @@ const ORBIT_KEY_PX: float = 24.0
 ## as a corner and short enough that the eight of them never join up into a box.
 const BBOX_BRACKET_FRACTION: float = 0.125
 
-## Numpad rotation. Each press turns the part by the document's own snap increment, which is the
+## Numpad rotation. Each press turns the part by the player's own snap increment, which is the
 ## whole point of calling them rotation SNAPS; holding Shift multiplies it, because reaching a
-## quarter turn at the shipped 0.5 degrees is sixty taps otherwise.
+## quarter turn at the shipped 0.5 degrees is a hundred and eighty taps otherwise.
+##
+## RETIRED(2026-09-27): "sixty taps" -> 180 (90 / 0.5), and "the document's own" -> the player's,
+## since `_snap_degrees()` now asks the live picker before the document.
 const NUMPAD_COARSE: float = 15.0
 
 ## Numpad key -> [axis, direction]. The middle key of each row zeroes that axis, which is why the
@@ -1057,7 +1060,8 @@ func _handle_key(key: InputEventKey) -> bool:
 		# cannot re-announce a state that has not changed - but PASSED THROUGH for the numpad
 		# rotations and the arrow steps, which are the two bindings a player holds down on
 		# purpose. At the shipped 0.5 degree snap, a numpad key that did not repeat would need
-		# sixty taps to reach a quarter turn.
+		# a hundred and eighty taps to reach a quarter turn.
+		# RETIRED(2026-09-27): "sixty taps" - 90 / 0.5 is 180, not 60.
 		if not (NUMPAD_ROTATE.has(key.keycode) or ARROW_DELTA.has(key.keycode)):
 			return held
 		if not key.pressed:
@@ -1073,7 +1077,18 @@ func _handle_key(key: InputEventKey) -> bool:
 ## The press dispatch, split off so _handle_key keeps to gdlint's six-return budget - the same
 ## reason _handle_axis_key exists. Order matters only where two tables could both claim a key,
 ## which none of these four do.
+##
+## A CHORD CARRYING CTRL OR META IS NOT OURS. Nothing in this view is bound to one - every ctrl in
+## here is on a MOUSE event - while the builder owns CTRL+Z, CTRL+SHIFT+Z and CTRL+Y. The view
+## takes focus on every left click (`_handle_left_button`), and a claimed key is consumed with
+## `accept_event()`, so without this line CTRL+Z reached `AXIS_LOCK_KEYS`, silently set the Z axis
+## lock, and never reached undo. CTRL+Y did the same through the Y lock. Both were dead for as
+## long as the axis locks have existed; the survey of 2026-09-27 found them (docs/future/ux.md
+## section 2.5, B1). Guarding the whole dispatch rather than one table also means the next ctrl
+## chord the builder adds does not have to rediscover this.
 func _dispatch_press(key: InputEventKey) -> bool:
+	if key.ctrl_pressed or key.meta_pressed:
+		return false
 	if key.keycode == KEY_P:
 		_attached_pivot = not _attached_pivot
 		_refresh_hints()
@@ -1142,9 +1157,21 @@ func _handle_numpad(key: InputEventKey) -> bool:
 	return true
 
 
-## The document's own angular snap increment - "a snaping system of .5 degrees (changeable)" - so
-## the numpad steps by whatever the player set rather than by a number baked in here.
+## The angular snap increment - "a snaping system of .5 degrees (changeable)" - so the numpad and
+## the arrows step by whatever the player set rather than by a number baked in here.
+##
+## THE LIVE PICKER WINS, and it has to be asked FIRST. There are two places a snap is written and
+## they are not the same place: the inspector's SNAP DEG selector writes
+## `ShipPlacement.snap_deg` (`inspector.gd`, the only writer in the repo), while
+## `doc.settings["snap_deg"]` is stamped once by `ShipDoc.create_new` and then never touched
+## again. Reading the document first - which this did until 2026-09-27 - meant choosing 5.000 in
+## the picker moved mouse drags and typed fields onto a five degree lattice while the numpad and
+## the arrows went on stepping the founding 0.5 forever, with no way to tell from the screen
+## (docs/future/ux.md section 2.3a, B3). The document value stays as the floor under a doc built
+## before a picker existed.
 func _snap_degrees() -> float:
+	if _placement != null and _placement.snap_deg > 0.0:
+		return maxf(_placement.snap_deg, 0.01)
 	if _doc != null and _doc.settings.has("snap_deg"):
 		var raw: Variant = _doc.settings["snap_deg"]
 		if raw is float or raw is int:

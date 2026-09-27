@@ -2009,3 +2009,35 @@ The four classes symmetric on no axis fail because one arm sits on a cube corner
 opposite it a denser shape is a way to cancel that moment without resizing anything, which is one of
 the author's own remedies in a form that is now cheap to try. Not attempted, and the check still
 reports the same four.
+
+
+## F53 - ESC does not leave a component, and two surfaces say it does
+
+Found 2026-09-27 while authoring `ShipKeymap`, not by the UX survey.
+
+`ShipBuilder._leave_isolation()` is reached from exactly two places: `cancel_placement()` and
+`_on_part_double_clicked`. With a component open and NO ghost up, `_handle_edit_hotkey` sends ESC
+to `set_selection(PackedStringArray())` and the component stays open.
+
+Meanwhile `_isolate()` sets the status line to "EDITING COMPONENT ... - ESC TO CLOSE" and the
+on-screen legend (`ship_view3d.gd:1272`) repeats the same promise. So two surfaces tell the player
+a key works and it does not - the same shape as B1 (Ctrl+Z) and B7 (the wheel), and the fourth
+member of that family found so far.
+
+NOT FIXED. It was not in the step list of `docs/future/ux.md` section 5.1, which was surveyed,
+judged and marked safe; adding an unreviewed input change to an overnight run is how a "safe"
+batch stops being one. `ShipKeymap` carries the row with `status` DEAD and the note, so the hold-?
+card will not print it as if it worked.
+
+The fix is one branch in `_handle_edit_hotkey`: ESC leaves isolation before it clears the
+selection, since a player inside a component means the inner thing when they press it.
+
+## F54 - ShipHistory.push gained an additive third parameter
+
+`docs/API_CONTRACT.md:414` pins `func push(doc: ShipDoc, label: String) -> void`. On 2026-09-27 it
+gained `key: String = ""`, naming what the edit touched, so that a held key folds into one undo
+while two edits to different parts keep their own.
+
+ADDITIVE, in the shape F18-F47 established: the pinned two-argument form still compiles and behaves
+exactly as before, because an empty key never folds. Nothing that was written against the contract
+had to change. Reported here rather than edited into the contract, per AGENTS section 9.
