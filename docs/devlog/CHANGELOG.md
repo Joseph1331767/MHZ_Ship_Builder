@@ -3720,3 +3720,71 @@ the keyboard it never had - ENTER commits, ESC backs out), and stayed at exactly
 **gdUnit4 442/442**, up from 351: 8 history, 14 keymap, 69 hint text. Selfcheck PASSED with the hash
 unchanged at `5536787c6c35d236`; data validator PASSED (0 warnings); resolve, explode and visual (5
 modes) checks PASSED; gdformat and gdlint clean.
+
+
+## [2026-09-27] The four views, and why the morning build looked identical
+
+The author ran last night's build and saw nothing: "i dont see any changes when i run, its still
+somewhat a messy ui experiance."
+
+They were right, and the cause was a judgement call, not a failure. `docs/future/ux.md` section 5.2
+scoped the overnight run to steps 0-7 and defined them as exactly the invisible subset - four dead
+bindings, a refactor behind forwarders, string corrections, and two files wired to nothing. The doc
+says so in as many words: "leave the running application looking exactly as it does now except that
+Ctrl+Z works". Everything the author would SEE was marked "author's eyes" and left. Told to run with
+it overnight, the agent optimised for reversibility instead of for progress that could be seen, and
+eight hours of work landed where nobody could look at it.
+
+### The views, which is what they asked for twice
+
+`ShipUiMode` - **BASIC / MODERATE / ADVANCED / DEV**, a picker at the head of the toolbar, each rung
+showing everything the rung below shows plus its own.
+
+**DEV IS TODAY'S UI, UNTOUCHED**, and that is the author's own instruction: "keep the current view as
+'dev working view'". It is what makes this safe to land at all - the view they work in every day is a
+rung of the ladder rather than something replaced by it, so a mistake in the other three costs one
+click to escape. It is also the honest name: everything in it is there because a developer needed
+it.
+
+What BASIC drops: the tree, the inspector, the budgets, the layers explorer, the render-type picker,
+DITHER, ROOMS, EXPLODE, EDIT, UPDATE MESHES and BAKE - and the right-hand column with them. What it
+keeps is asserted rather than assumed: the palette, FRAME, undo/redo and the file verbs, because a
+rung that cannot build a ship is a screenshot and not a view.
+
+**The column carries the width, not the panel.** `LEFT_WIDTH` and `RIGHT_WIDTH` are
+`custom_minimum_size` on the COLUMNS, so hiding every panel inside one leaves a gutter exactly as
+wide as it was. The widths move with the rung, or BASIC is a narrow view of a ship with two grey bars
+beside it.
+
+### Two things found by looking at the screenshots
+
+**The layers explorer has been invisible since the day it was written.** It was constructed at
+`ship_builder.gd:1148`, BEFORE `view_frame.add_child(_view)` at `:1153`; siblings draw in tree order
+and the SubViewport is opaque, so the 3D view covered it for its whole life. `ShipExplodeControl` is
+built after `_build_layout()` for exactly this reason and visibly works. Moved.
+
+**Godot strips characters from node names.** The button built as "ROOMS: PIECES" is really named
+"ROOMS PIECES", so looking it up by its label found nothing and it stayed on screen at every rung.
+Lookups go through `validate_node_name()` now, and a test asserts every key survives it.
+
+### What is honest rather than finished
+
+**ADVANCED and DEV are currently identical** - nothing has been identified as dev-only yet. That is
+the truth rather than a gap to paper over, and DEV is where such things go as they are found. The
+author has already allowed for it: "we may cull some views later if the easiest view is just as
+composable as the rest".
+
+**The rungs hide whole panels, not sections inside them.** Tiering a panel's own contents is the next
+step and belongs to the panels, which are the other agent's lane (AGENTS section 6) and go in one
+contiguous handoff. So BASIC still shows the palette's manufacturer picker and component list.
+
+**It opens on DEV every run and deliberately does not remember.** Persisting the rung would mean a
+run that ended in BASIC opens the next one in BASIC - including a run of `ship_visual_check.gd`,
+which asserts against panels BASIC hides, so the gate would start failing for a reason nowhere near
+the change that caused it.
+
+### Verified
+
+Looked at `reports/visual_modes.png` - all four rungs, side by side, on the same carbon.
+**gdUnit4 449/449**; selfcheck PASSED, hash unchanged at `5536787c6c35d236`; resolve, explode and
+visual (5 modes) checks PASSED; gdformat and gdlint clean.

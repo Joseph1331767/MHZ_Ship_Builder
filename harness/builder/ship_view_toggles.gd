@@ -28,6 +28,8 @@ func _init(bar: Container, theme: ShipTheme) -> void:
 
 func _add(bar: Container, label: String, on: bool, handler: Callable) -> CheckButton:
 	var b: CheckButton = CheckButton.new()
+	# Named, so [ShipUiMode] can tier it - a control built by hand gets no name from Godot.
+	b.name = label
 	b.text = label
 	b.button_pressed = on
 	b.focus_mode = Control.FOCUS_NONE

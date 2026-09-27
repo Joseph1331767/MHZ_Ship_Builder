@@ -133,6 +133,7 @@ var _status_label: Label = null
 var _post_rect: ColorRect = null
 var _mode_option: OptionButton = null
 var _view_toggles: ShipViewToggles = null
+var _ui_mode: ShipUiMode = null
 var _layers: ShipLayersControl = null
 var _undo_button: Button = null
 var _redo_button: Button = null
@@ -213,6 +214,8 @@ func _ready() -> void:
 
 	_new_document()
 	_mount_panels()
+	# LAST, so every panel it hides has already been mounted into its slot.
+	_ui_mode.use(self)
 
 	if not data_ok:
 		set_status("DATA LOAD INCOMPLETE - CHECK data/ PACKS")
@@ -1144,13 +1147,16 @@ func _build_layout() -> void:
 	body.add_child(view_frame)
 	_view = ShipView3D.new()
 	_view.name = "ShipView3D"
-	# THE LAYERS EXPLORER, top left of the view - what the builder draws, never what it holds.
-	_layers = ShipLayersControl.new(view_frame, _ship_theme)
 	_view.part_picked.connect(_on_part_picked)
 	_view.part_double_clicked.connect(_on_part_double_clicked)
 	_view.pick_cleared.connect(_on_pick_cleared)
 	_view.seam_menu_requested.connect(_on_seam_menu_requested)
 	view_frame.add_child(_view)
+	# THE LAYERS EXPLORER, top left of the view - what the builder draws, never what it holds.
+	# AFTER the view, or it is invisible: the SubViewport is opaque and siblings draw in tree
+	# order, so built first it was covered by the 3D view for its whole life. ShipExplodeControl
+	# is built after _build_layout() for the same reason, and visibly works.
+	_layers = ShipLayersControl.new(view_frame, _ship_theme)
 
 	var right: VBoxContainer = VBoxContainer.new()
 	right.name = "RightColumn"
@@ -1213,6 +1219,11 @@ func _build_header() -> PanelContainer:
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	bar.add_child(spacer)
 
+	# THE RUNG PICKER FIRST, before the verbs it governs. The author asked for the views and then
+	# for the current UI to survive as one of them, which is what DEV is.
+	_ui_mode = ShipUiMode.new(bar, _ship_theme)
+	bar.add_child(VSeparator.new())
+
 	bar.add_child(_make_button("NEW", _on_new_pressed))
 	bar.add_child(_make_button("OPEN", _on_open_pressed))
 	bar.add_child(_make_button("SAVE", _on_save_pressed))
@@ -1224,6 +1235,7 @@ func _build_header() -> PanelContainer:
 	bar.add_child(VSeparator.new())
 
 	_mode_option = OptionButton.new()
+	_mode_option.name = "RenderTypeOption"
 	_mode_option.add_item("FLAT", ShipSceneBuilder.DisplayMode.FLAT)
 	_mode_option.add_item("WIRE", ShipSceneBuilder.DisplayMode.WIREFRAME)
 	_mode_option.add_item("SHADED+WIRE", ShipSceneBuilder.DisplayMode.SHADED_WIRE)
@@ -1259,8 +1271,12 @@ func _build_header() -> PanelContainer:
 	return frame
 
 
+## NAMED FROM ITS LABEL, so [ShipUiMode] can address a button without matching on display text -
+## EXPLODE reads ASSEMBLE once the view is exploded and ROOMS: PIECES reads ROOMS: WHOLE, while a
+## node name set at build time never moves.
 func _make_button(label: String, handler: Callable) -> Button:
 	var b: Button = Button.new()
+	b.name = label
 	b.text = label
 	b.focus_mode = Control.FOCUS_NONE
 	b.pressed.connect(handler)
