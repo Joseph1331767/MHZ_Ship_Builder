@@ -20,6 +20,11 @@ const DOOR_CLOSE_UP_M: float = 1.6
 const MAX_BAKE_FRAMES: int = 1800
 const HOST_SCENE: String = "res://harness/dev_host.tscn"
 
+## Frames between each beat of the placement, for the queued ghost ray to resolve.
+const PLACE_FRAMES: int = 14
+
+var _parts_before: int = 0
+var _ghost_before: Vector3 = Vector3.ZERO
 var _host: Node = null
 var _builder: Node = null
 var _frames: int = 0
@@ -57,9 +62,85 @@ func _process(_delta: float) -> bool:
 		_next(ShipSceneBuilder.DisplayMode.INSIDE, 5)
 	elif _stage == 5 and _frames >= DOOR_FRAMES:
 		_save("visual_resolved_doors.png")
+		_arm_ghost()
+	elif _stage == 6 and _frames >= PLACE_FRAMES:
+		_drag_ghost()
+	elif _stage == 7 and _frames >= PLACE_FRAMES:
+		_drop_ghost()
+	elif _stage == 8 and _frames >= PLACE_FRAMES:
+		_check_placed()
 		_report()
 		done = true
 	return done
+
+
+## CAN A PART STILL BE PLACED? Nothing else in the repo asks: `ship_visual_check.gd` drives
+## `_handle_placement_input` DIRECTLY and so cannot see a closed `_gui_input`, which is exactly
+## how a baked-on-arrival view swallowed every placement event and left the player with a ghost
+## that would not move - "its a dead end" (2026-09-27). Driven here through `_gui_input`, from a
+## ship that has just resolved itself, which is the state the bug lived in.
+func _arm_ghost() -> void:
+	_builder.call("_set_baked", false)
+	var data: ShipData = _builder.call("get_data")
+	_parts_before = (_builder.call("get_doc") as ShipDoc).parts.size()
+	_builder.call("begin_placement", data.family_ids()[0], "")
+	if not bool((_builder.call("get_placement") as Object).get("active")):
+		_failures.append("place: the palette did not arm a ghost at all")
+	_ghost_before = _ghost_at()
+	_advance(6)
+
+
+## THE GHOST RAY IS QUEUED, never resolved inline, so the press and the read sit frames apart.
+func _drag_ghost() -> void:
+	_gui(_place_press(true))
+	_gui(_place_motion())
+	_advance(7)
+
+
+func _drop_ghost() -> void:
+	if _ghost_at().is_equal_approx(_ghost_before):
+		_failures.append("place: the ghost did not follow the pointer")
+	_gui(_place_press(false))
+	_advance(8)
+
+
+func _check_placed() -> void:
+	var after: int = (_builder.call("get_doc") as ShipDoc).parts.size()
+	if after <= _parts_before:
+		_failures.append("place: a release did not commit the ghost (%d parts, still)" % after)
+
+
+func _ghost_at() -> Vector3:
+	return ((_builder.call("get_placement").call("preview_transform")) as Transform3D).origin
+
+
+func _gui(event: InputEvent) -> void:
+	(_builder.call("get_view") as Control).call("_gui_input", event)
+
+
+## Off centre, so the ray lands on the hull's flank rather than dead on its pole.
+func _place_at() -> Vector2:
+	return (_builder.call("get_view") as Control).size * Vector2(0.56, 0.46)
+
+
+func _place_press(down: bool) -> InputEventMouseButton:
+	var mb: InputEventMouseButton = InputEventMouseButton.new()
+	mb.button_index = MOUSE_BUTTON_LEFT
+	mb.pressed = down
+	mb.position = _place_at()
+	return mb
+
+
+func _place_motion() -> InputEventMouseMotion:
+	var mm: InputEventMouseMotion = InputEventMouseMotion.new()
+	mm.position = _place_at()
+	mm.button_mask = MOUSE_BUTTON_MASK_LEFT
+	return mm
+
+
+func _advance(stage: int) -> void:
+	_stage = stage
+	_frames = 0
 
 
 func _next(mode: int, stage: int) -> void:
@@ -135,8 +216,21 @@ func _read_back() -> void:
 	var doc: ShipDoc = _builder.call("get_doc")
 	var data: ShipData = _builder.call("get_data")
 	var cfg: ShipConfig = _builder.call("get_config")
+	# HELD, NOT WORN (2026-09-27). A ship that arrives still resolves itself - ADR 0028 is intact
+	# and the bake is made - but it no longer REPLACES the editable view, because a baked view
+	# sends every event to the explode handler and the player could not place a part into it:
+	# "i click the part, a ghost version of it spawns, then i cant move, or apply the ghost
+	# version at all its a dead end." So the assertion is that the bake EXISTS and that the view
+	# is still editable, and then SHOW BAKED is pressed and the pieces read back as before.
+	if bool(_builder.get("_baked")) or bool(view.call("is_baked")):
+		_failures.append("the ship came up BAKED, so nothing can be placed into it")
+	var session: Object = _builder.get("_bake_session")
+	if session == null or (session.get("last") as Dictionary).is_empty():
+		_failures.append("the ship did not come up resolved (no bake in hand)")
+		return
+	_builder.call("_set_baked", true)
 	if not bool(_builder.get("_baked")) or not bool(view.call("is_baked")):
-		_failures.append("the ship did not come up resolved (baked view not showing)")
+		_failures.append("SHOW BAKED did not put the resolved pieces on screen")
 	var placed: int = ShipAttach.resolve_all(doc, data, cfg).size()
 	var modules: int = int(explode.call("module_count"))
 	if modules != placed:

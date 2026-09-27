@@ -124,6 +124,16 @@ var _redo_button: Button = null
 ## assembles first - see _leave_explode().
 var _explode_button: Button = null
 var _edit_button: Button = null
+
+## Whether the bake that is being waited on should go ON SCREEN when it lands, or just be held.
+##
+## A SHIP THAT RESOLVES ITSELF MUST NOT TAKE THE TOOLS AWAY. `_resolve_on_load` bakes on arrival
+## (ADR 0028) and that landed the view BAKED - and a baked view sends every event to
+## `_handle_explode_input`, which deliberately keeps the placement, the gizmo and the clone out.
+## So the palette still armed a ghost and the view then ignored it: "i click the part, a ghost
+## version of it spawns, then i cant move, or apply the ghost version at all its a dead end"
+## (2026-09-27). The bake is still made and still kept; it simply is not worn until asked for.
+var _show_on_land: bool = true
 var _rooms_button: Button = null
 ## Whether an open room explodes as its member pieces (false) or as one whole shell (true).
 ## "an explode control toggle to choose to explode rooms or keep them whole" (2026-09-05).
@@ -898,12 +908,13 @@ func _set_exploded(on: bool) -> void:
 		_explode_opts.set_shown(false)
 		_view.set_exploded(false)
 		# Back into the baked view when there is one - the assembled ship is the finished pieces
-		# where they stand, not the preview primitives (ADR 0023).
+		# where they stand, not the preview primitives (ADR 0023). EXPLODE and then ASSEMBLE is a
+		# user asking for the pieces, so it raises the flag a resolve-on-load lowered.
 		if not _bake_session.last.is_empty():
+			_show_on_land = true
 			_show_bake()
 		set_status("ASSEMBLED")
-	if _explode_button != null:
-		_explode_button.text = "ASSEMBLE" if _exploded else "EXPLODE"
+	_refresh_view_buttons()
 
 
 ## LEAVE THE BAKED VIEW for the primitives, so the ship can be edited again.
@@ -919,7 +930,7 @@ func _set_exploded(on: bool) -> void:
 ## The button is always live: `_set_baked(false)` returns early when nothing is baked. Lighting it
 ## only when it can do something belongs with the hint bar (step 11), not with the way out.
 func _on_edit_pressed() -> void:
-	_set_baked(false)
+	_set_baked(not _baked)
 
 
 func _on_explode_pressed() -> void:
@@ -948,6 +959,8 @@ func _on_rooms_pressed() -> void:
 func _update_meshes() -> void:
 	if _doc == null or _view == null:
 		return
+	# Asking for a bake is asking to SEE one. `_resolve_on_load` lowers this again straight after.
+	_show_on_land = true
 	if not _bake_session.busy and _bake_hud != null:
 		_bake_hud.refresh_button(false)
 		_bake_hud.show_progress(0.0)
@@ -965,6 +978,17 @@ func _show_bake() -> void:
 	if not _bake_session.has_extras():
 		_bake_session.request_extras()
 	_connect_explode()
+	# HELD, NOT WORN. The bake is in hand for EXPLODE and for SHOW BAKED; the view stays on the
+	# primitives, where the ship can still be built.
+	#
+	# THE FLAG DOES NOT RESET ITSELF HERE. This runs TWICE per bake (ADR 0042): once with the
+	# pieces and again when the diced cells land behind them. Clearing it on the first call let
+	# the second one show the bake anyway, which looked exactly like the bug it was meant to fix.
+	# It stays down until a USER asks - `_update_meshes()` or SHOW BAKED raise it.
+	if not _show_on_land and not _exploded:
+		if _bake_hud != null:
+			_bake_hud.refresh_button(_bake_session.stale)
+		return
 	var sdf: ShipSdf = ShipSdf.build(_doc, _data, _config)
 	_view.set_rooms_whole(_rooms_whole)
 	if _exploded:
@@ -974,6 +998,7 @@ func _show_bake() -> void:
 		_baked = true
 		_view.set_baked(true, sdf, _selection, _bake_session.last)
 	_explode_opts.refresh()
+	_refresh_view_buttons()
 	if _bake_hud != null:
 		_bake_hud.refresh_button(_bake_session.stale)
 
@@ -984,11 +1009,23 @@ func _resolve_on_load() -> void:
 		return
 	set_status("RESOLVING SHIP...")
 	_update_meshes()
+	# AFTER, because _update_meshes() raises the flag for every user-initiated bake.
+	_show_on_land = false
 
 
 ## Leave the baked view for the primitives (the visual check uses this); the bake is kept.
+## The two view buttons say what pressing them WILL DO, not what is on screen - so the one that
+## leaves the baked view reads EDIT while it is up, and SHOW BAKED while it is not.
+func _refresh_view_buttons() -> void:
+	if _explode_button != null:
+		_explode_button.text = "ASSEMBLE" if _exploded else "EXPLODE"
+	if _edit_button != null:
+		_edit_button.text = "EDIT" if _baked else "SHOW BAKED"
+
+
 func _set_baked(on: bool) -> void:
 	if on:
+		_show_on_land = true
 		if _bake_session.last.is_empty() or _bake_session.stale:
 			_update_meshes()
 		else:
@@ -997,6 +1034,7 @@ func _set_baked(on: bool) -> void:
 	if not _baked:
 		return
 	_baked = false
+	_refresh_view_buttons()
 	if _view != null:
 		_view.set_baked(false)
 	set_status("PREVIEW")
@@ -1286,7 +1324,7 @@ func _build_header() -> PanelContainer:
 	_explode_button = _make_button("EXPLODE", _on_explode_pressed)
 	bar.add_child(_explode_button)
 	_edit_button = _make_button("EDIT", _on_edit_pressed)
-	_edit_button.tooltip_text = "LEAVE THE BAKED MESHES AND GO BACK TO EDITING THE SHIP"
+	_edit_button.tooltip_text = "SWAP BETWEEN THE BAKED MESHES AND THE SHAPES YOU EDIT"
 	bar.add_child(_edit_button)
 	_rooms_button = _make_button("ROOMS: PIECES", _on_rooms_pressed)
 	_rooms_button.tooltip_text = "EXPLODE A ROOM INTO ITS PIECES, OR KEEP IT WHOLE"

@@ -3973,3 +3973,57 @@ compute, when the gauges are tiered.
 
 **gdUnit4 459/459**; selfcheck PASSED with the hash unchanged; resolve and visual (5 modes) checks
 PASSED. Looked at `reports/visual_hint_fed.png`.
+
+
+## [2026-09-27] A ship that resolves itself no longer takes the tools away
+
+The author, running a full test: "i cant add any parts to the ship, i click the part, a ghost
+version of it spawns, then i cant move, or apply the ghost version at all its a dead end."
+
+Reproduced and measured: after founding, `is_baked()` was **true**. `ship_view3d.gd:792` sends every
+event in a baked view to `_handle_explode_input`, which deliberately keeps the placement, the gizmo
+and the clone out - so the palette still armed a ghost and the view then ignored the mouse
+completely. Not a regression from this week: bake-on-arrival has done it since ADR 0028 landed, and
+the EDIT button added on 2026-09-27 gave a way OUT of that state without changing the state the
+player starts in.
+
+**The bake is now held, not worn.** `_resolve_on_load` still bakes - ADR 0028 is intact and the
+pieces are in hand for EXPLODE - but the view stays on the primitives, where a ship can still be
+built. EDIT became a toggle both ways and reads SHOW BAKED when the primitives are up.
+
+### Why no gate caught it, and the gate that does now
+
+`tools/ship_visual_check.gd` places parts by calling `_handle_placement_input` **directly**. It
+never exercises `_gui_input`, which is the branch that was closed - so every placement assertion in
+the repo passed while placement was impossible with a mouse.
+
+`ship_resolve_check.gd` now arms a ghost, presses, drags and releases through `_gui_input` on a ship
+that has just resolved itself, and asserts the ghost FOLLOWED and the release COMMITTED. Proved
+non-vacuous by restoring the bug and watching it fail with "the ship came up BAKED, so nothing can
+be placed into it".
+
+Two things the queued ghost ray taught along the way: `_queue_ghost_ray` resolves on a later physics
+frame, so a diagnostic that reads `preview_transform()` on the same frame reports a frozen ghost
+whatever the truth is - it did, twice, before the harness was written to span frames.
+
+### What else moved with it
+
+`_show_bake()` runs TWICE per bake (ADR 0042 - once with the pieces, again when the diced cells land
+behind them), so a flag that cleared itself on the first call let the second show the bake anyway.
+It stays down until a USER raises it: `_update_meshes()`, SHOW BAKED, or ASSEMBLE, which lands on
+the finished pieces by ADR 0023.
+
+`ship_resolve_check.gd` asserted the baked view was UP, exactly as ux.md R5 predicted it would. It
+now asserts the bake exists, that the view is still editable, and then presses SHOW BAKED and reads
+the pieces back as before.
+
+### Still open
+
+The start dialog still makes the player choose a shape before anything exists. That is R12/R13 - the
+empty document and the founding click - and it is not built. It needs an ADR because `ShipDoc` is
+founded ON a root part today.
+
+### Verified
+
+**gdUnit4 459/459**; selfcheck PASSED with the hash unchanged; resolve, explode and visual (5 modes)
+checks PASSED.
