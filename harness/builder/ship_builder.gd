@@ -762,7 +762,24 @@ func _hint_state() -> Dictionary:
 		ShipHintText.STATE_STATUS: _status_text,
 		# A STRING, not a flag: the resolver NAMES the part on the cursor.
 		ShipHintText.STATE_PLACING: _placing_name(),
+		# THE SCHEMA LINE AND THE STRIP, which read as defaults until they are fed (F57). Only
+		# what can be sourced exactly: the piece count off the last bake, the two lattices off
+		# the live placement, the pivot off the view. STATE_SEAMS, STATE_COMPLEXITY and
+		# STATE_BUDGET still default - the first needs an SDF solve and the other two a metrics
+		# pass, and a hint is not worth either on every state change.
+		ShipHintText.STATE_PIECES: _baked_piece_count(),
+		ShipHintText.STATE_SNAP_DEG: _placement.snap_deg if _placement != null else 0.0,
+		ShipHintText.STATE_SNAP_M: _placement.snap_m if _placement != null else 0.0,
+		ShipHintText.STATE_PIVOT_HELD:
+		bool(_view.get("_attached_pivot")) if _view != null else false,
 	}
+
+
+## Solids in the last bake, or 0 when nothing has been built.
+func _baked_piece_count() -> int:
+	if _bake_session == null or _bake_session.last.is_empty():
+		return 0
+	return (_bake_session.last.get("solids", {}) as Dictionary).size()
 
 
 ## The family on the cursor, or "" when nothing is being placed.

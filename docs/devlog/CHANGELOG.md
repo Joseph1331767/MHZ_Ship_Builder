@@ -3955,3 +3955,21 @@ three are zero-public. None is needed yet: 202 lines of headroom covers the near
 constants, which the table spells as literals on purpose). Selfcheck PASSED with the hash unchanged;
 data validator PASSED (0 warnings); resolve, explode and visual (5 modes) checks PASSED, the last of
 which drives the seam menu end to end and is what proves the extraction did not change behaviour.
+
+
+## [2026-09-27] The headroom, spent
+
+The 201 lines `ShipSeamMenu` freed went straight into what they had been blocking: the hint card's
+schema line and toggle strip, which had been rendering the resolver's defaults (F57).
+
+`BAKED - 0 PIECES` on a fourteen-piece bake now reads `BAKED - 14 PIECES`, and the strip's
+`SNAP 5deg` - a default, while the live lattice was 0.5 - reads `SNAP 0.5deg`.
+
+Only what can be sourced EXACTLY: the piece count off the last bake report, the two lattices off the
+live `ShipPlacement`, the pivot off the view. `STATE_SEAMS`, `STATE_COMPLEXITY` and `STATE_BUDGET`
+still default, because the first needs an `ShipSdf` solve and the other two a metrics pass, and a
+hint is not worth either on every state change. They want feeding from the values the gauges already
+compute, when the gauges are tiered.
+
+**gdUnit4 459/459**; selfcheck PASSED with the hash unchanged; resolve and visual (5 modes) checks
+PASSED. Looked at `reports/visual_hint_fed.png`.

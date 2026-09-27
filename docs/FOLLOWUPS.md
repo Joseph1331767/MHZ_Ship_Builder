@@ -2096,3 +2096,13 @@ THE REAL BLOCKER IS THE LINE BUDGET, and it now gates most of the remaining road
 R12 all name `ship_builder.gd` and all need a handful of lines. The next extraction should be
 chosen and taken deliberately rather than shaved for, the way the modal was in step 0 - the
 file/save/open flow and the isolation flow are both candidates.
+
+### Resolved in part, 2026-09-27
+
+`ShipSeamMenu` took the seam-style feature out (1,999 -> 1,798 lines) and the headroom was spent
+immediately: `STATE_PIECES`, `STATE_SNAP_DEG`, `STATE_SNAP_M` and `STATE_PIVOT_HELD` are fed, so the
+card reads `BAKED - 14 PIECES` and `SNAP 0.5deg` instead of `0 PIECES` and a defaulted lattice.
+
+STILL DEFAULTED, and deliberately: `STATE_SEAMS` needs an `ShipSdf` solve and `STATE_COMPLEXITY` /
+`STATE_BUDGET` need a metrics pass. A hint is not worth either on every state change - they want
+feeding from the values the gauges already compute, when the gauges are tiered (R6).
