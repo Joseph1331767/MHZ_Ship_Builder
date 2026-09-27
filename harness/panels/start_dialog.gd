@@ -64,6 +64,9 @@ var _template_list: ItemList = null
 var _template_ids: PackedStringArray = PackedStringArray()
 var _template_detail: Label = null
 var _room_picker: OptionButton = null
+var _electron_picker: OptionButton = null
+var _proton_blend: OptionButton = null
+var _electron_blend: OptionButton = null
 var _link_picker: OptionButton = null
 var _hall_picker: OptionButton = null
 var _room_span: NumericField = null
@@ -225,7 +228,14 @@ func _build_template_box(box: VBoxContainer) -> void:
 	_template_detail.add_theme_font_size_override("font_size", ShipTheme.font_small())
 	_template_box.add_child(_template_detail)
 
-	_room_picker = _shape_row("ROOM SHAPE")
+	# A SHAPE PER GROUP (dev note 2026-09-24): "the player options for the prebuilt structures need
+	# expanding with options for outter/electron node shapes, tunnel shapes, proton shapes", each
+	# with a second shape blended through the cluster - "so a protons shapes can be shape1 and
+	# shape2 ... so a proton cluster can exist with cubes and spheres blended".
+	_room_picker = _shape_row("PROTON SHAPE")
+	_proton_blend = _shape_row("  + BLEND")
+	_electron_picker = _shape_row("ELECTRON SHAPE")
+	_electron_blend = _shape_row("  + BLEND")
 	_hall_picker = _shape_row("TUNNEL SHAPE")
 
 	var cfg: ShipConfig = _builder.get_config() if _builder != null else ShipConfig.defaults()
@@ -330,17 +340,25 @@ func _fill_shape_pickers() -> void:
 	var data: ShipData = _builder.get_data() if _builder != null else null
 	if data == null or _room_picker == null or _hall_picker == null:
 		return
+	if _electron_picker == null or _proton_blend == null or _electron_blend == null:
+		return
 	if _room_picker.item_count > 0:
 		return
 	var families: PackedStringArray = data.family_ids()
+	# A BLEND PICKER LEADS WITH "NONE", so its indices run one ahead of the plain ones.
+	for blend: OptionButton in [_proton_blend, _electron_blend]:
+		blend.add_item("- NONE -")
+		blend.set_item_metadata(0, "")
 	var tube: int = 0
 	for i: int in families.size():
 		var fid: String = families[i]
 		var label: String = _label_of(fid).to_upper()
-		_room_picker.add_item(label)
-		_room_picker.set_item_metadata(i, fid)
-		_hall_picker.add_item(label)
-		_hall_picker.set_item_metadata(i, fid)
+		for picker: OptionButton in [_room_picker, _electron_picker, _hall_picker]:
+			picker.add_item(label)
+			picker.set_item_metadata(i, fid)
+		for blend: OptionButton in [_proton_blend, _electron_blend]:
+			blend.add_item(label)
+			blend.set_item_metadata(i + 1, fid)
 		if _base_of(fid) == "CYLINDER":
 			tube = i
 	var room_default: int = 0
@@ -349,6 +367,9 @@ func _fill_shape_pickers() -> void:
 			room_default = i
 			break
 	_room_picker.select(room_default)
+	_electron_picker.select(room_default)
+	_proton_blend.select(0)
+	_electron_blend.select(0)
 	_hall_picker.select(tube)
 
 
@@ -374,7 +395,13 @@ func _selected_template() -> String:
 
 func _template_options() -> Dictionary:
 	return {
+		# OPT_ROOM_FAMILY stays the fallback both node groups resolve against, so it carries the
+		# proton shape: a template asked for only that still builds the ship it always did.
 		ShipTemplates.OPT_ROOM_FAMILY: _picker_id(_room_picker),
+		ShipTemplates.OPT_PROTON_FAMILY: _picker_id(_room_picker),
+		ShipTemplates.OPT_PROTON_FAMILY_B: _picker_id(_proton_blend),
+		ShipTemplates.OPT_ELECTRON_FAMILY: _picker_id(_electron_picker),
+		ShipTemplates.OPT_ELECTRON_FAMILY_B: _picker_id(_electron_blend),
 		ShipTemplates.OPT_HALL_FAMILY: _picker_id(_hall_picker),
 		ShipTemplates.OPT_ROOM_SPAN: _room_span.get_value() if _room_span != null else 0.0,
 		ShipTemplates.OPT_TUNNEL_LENGTH:

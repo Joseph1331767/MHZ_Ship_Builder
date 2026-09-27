@@ -465,3 +465,130 @@ func test_the_link_mode_option_brings_the_hatches_back() -> void:
 	assert_int(doc.joints.size()).is_greater(0)
 	for jid: String in doc.joints:
 		assert_str((doc.joints[jid] as ShipJoint).mode).is_equal(ShipJoint.MODE_HATCHED)
+
+
+## "the player options for the prebuilt structures need expanding with options for outter/electron
+## node shapes, tunnel shapes, proton shapes" (dev note 2026-09-24). Three groups, three shapes.
+func test_each_group_takes_its_own_shape() -> void:
+	var doc: ShipDoc = ShipTemplates.build(
+		_data,
+		_cfg,
+		"carbon",
+		{
+			ShipTemplates.OPT_PROTON_FAMILY: "box_hull",
+			ShipTemplates.OPT_ELECTRON_FAMILY: "sphere_pod",
+			ShipTemplates.OPT_HALL_FAMILY: "cylinder_spar"
+		}
+	)
+	# Counted on the RESOLVED shapes, not on doc.parts: the nucleus is lifted into a component
+	# (ADR 0024), so its protons live in the definition and never appear as plain parts.
+	var bases: Dictionary = {}
+	var shapes: Dictionary = ShipAttach.resolve_shapes(doc, _data, _cfg)
+	for pid: String in shapes:
+		if ShipSymmetry.is_twin_id(pid):
+			continue
+		var base: int = (shapes[pid] as ResolvedShape).base
+		bases[base] = int(bases.get(base, 0)) + 1
+	# A carbon: six protons, four tunnels, four electrons.
+	(
+		assert_int(int(bases.get(ResolvedShape.Base.BOX, 0)))
+		. append_failure_message("protons are not boxes: %s" % str(bases))
+		. is_equal(6)
+	)
+	(
+		assert_int(int(bases.get(ResolvedShape.Base.CYLINDER, 0)))
+		. append_failure_message("tunnels are not cylinders: %s" % str(bases))
+		. is_equal(4)
+	)
+	(
+		assert_int(int(bases.get(ResolvedShape.Base.SPHERE, 0)))
+		. append_failure_message("electrons are not spheres: %s" % str(bases))
+		. is_equal(4)
+	)
+
+
+## "the new shaper should cater to multi shape clusters, so a protons shapes can be shape1 and
+## shape2 ... and the system will try to keep everything semetrical and even as normal".
+##
+## THE BLEND IS THE SYMMETRY TEST. A cluster with two shapes in it must still balance, which is
+## only true if a body and its mirror take the SAME shape - alternating body by body would put a
+## cube opposite a sphere.
+func test_a_blended_cluster_is_still_symmetric() -> void:
+	var blended: ShipDoc = (
+		ShipTemplates
+		. build(
+			_data,
+			_cfg,
+			"carbon",
+			{
+				ShipTemplates.OPT_PROTON_FAMILY: "box_hull",
+				ShipTemplates.OPT_PROTON_FAMILY_B: "sphere_pod",
+				# Cylinders outside, so BOX and SPHERE below can only be nucleus bodies.
+				ShipTemplates.OPT_ELECTRON_FAMILY: "cylinder_spar"
+			}
+		)
+	)
+	# On the RESOLVED shapes: the nucleus is a component, so its protons are never plain parts.
+	var bases: Dictionary = {}
+	var shapes: Dictionary = ShipAttach.resolve_shapes(blended, _data, _cfg)
+	for pid: String in shapes:
+		if ShipSymmetry.is_twin_id(pid):
+			continue
+		var base: int = (shapes[pid] as ResolvedShape).base
+		bases[base] = int(bases.get(base, 0)) + 1
+	(
+		assert_int(int(bases.get(ResolvedShape.Base.BOX, 0)))
+		. append_failure_message("no boxes in the blend: %s" % str(bases))
+		. is_greater(0)
+	)
+	(
+		assert_int(int(bases.get(ResolvedShape.Base.SPHERE, 0)))
+		. append_failure_message("the blend put one shape everywhere: %s" % str(bases))
+		. is_greater(0)
+	)
+	(
+		assert_int(
+			int(bases.get(ResolvedShape.Base.BOX, 0)) + int(bases.get(ResolvedShape.Base.SPHERE, 0))
+		)
+		. append_failure_message("the blend leaked outside the nucleus: %s" % str(bases))
+		. is_equal(6)
+	)
+	# Balanced on some axis, exactly as an unblended class is (ADR 0044/0045).
+	var balance: Dictionary = ShipMetrics.balance(blended, _data, _cfg)
+	(
+		assert_float(float(balance.get("best", 0.0)))
+		. append_failure_message("a blended cluster came out lopsided: %s" % str(balance))
+		. is_greater(0.97)
+	)
+
+
+## "when cylinder nodes (not linkage tunnels) is selected in pre built options, it should have the
+## length and diameter equal and set to room size not tunnel bore, as an earlier test indicated
+## that it made tiny bore rooms" (dev note 2026-09-24). cylinder_spar is authored three to one.
+func test_a_cylinder_node_is_as_wide_as_it_is_long() -> void:
+	var span: float = 4.0
+	var doc: ShipDoc = ShipTemplates.build(
+		_data,
+		_cfg,
+		"carbon",
+		{
+			ShipTemplates.OPT_PROTON_FAMILY: "cylinder_spar",
+			ShipTemplates.OPT_ELECTRON_FAMILY: "cylinder_spar",
+			ShipTemplates.OPT_ROOM_SPAN: span
+		}
+	)
+	var shapes: Dictionary = ShipAttach.resolve_shapes(doc, _data, _cfg)
+	var rooms: int = 0
+	for pid: String in shapes:
+		var part: ShipPart = doc.parts.get(ShipSymmetry.source_of_twin(pid), null)
+		if part == null or part.role != ShipTemplates.ROLE_ROOM:
+			continue
+		rooms += 1
+		var box: Vector3 = ShapeMesh.build(shapes[pid]).aabb().size
+		for axis: int in 3:
+			(
+				assert_float(box[axis])
+				. append_failure_message("%s came out %s, not %.1f cubed" % [pid, str(box), span])
+				. is_equal_approx(span, span * 0.02)
+			)
+	assert_int(rooms).is_greater(0)

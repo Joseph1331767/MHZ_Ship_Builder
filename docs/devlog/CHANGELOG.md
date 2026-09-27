@@ -3590,3 +3590,43 @@ hash unchanged at `5536787c6c35d236`; data validator PASSED (0 warnings); resolv
 
 Reported, not fixed: `AGENTS.md` section 1 still describes the all-open studio hull that SPEC section
 7 retired under ADR 0008 (FOLLOWUPS F52). The rules file belongs to the author.
+
+
+## [2026-09-27] A shape per group, a blended cluster, and a cylinder node sized as a room
+
+ADR 0048, answering the last of the five SHIFT+F notes from 2026-09-24: "the player options for the
+prebuilt structures need expanding with options for outter/electron node shapes, tunnel shapes,
+proton shapes ... so a proton cluster can exist with cubes and spheres blended ... when cylinder
+nodes (not linkage tunnels) is selected in pre built options, it should have the length and diameter
+equal and set to room size not tunnel bore".
+
+`OPT_PROTON_FAMILY` and `OPT_ELECTRON_FAMILY` join `OPT_HALL_FAMILY`, both falling back to
+`OPT_ROOM_FAMILY` so nothing that named only that moves. Each cluster takes a second shape through
+`*_FAMILY_B`, and the picker grew PROTON SHAPE / + BLEND / ELECTRON SHAPE / + BLEND / TUNNEL SHAPE.
+
+**The blend alternates pair by pair, not body by body.** A node and its mirror always take the same
+shape, found through the same `_mirror_slot` the arm ordering uses, so a blended cluster balances
+exactly as an unblended one does - alternating body by body would put a cube opposite a sphere.
+
+**A node's span now squares its box.** `cylinder_spar` is authored three to one, so the old uniform
+rule gave a 4 m room a 1.33 m bore - the "tiny bore rooms" the note reports. Squared it is 4x4x4.
+A sphere or a box is unaffected, because for a cubic box the two rules agree.
+
+### What the change cost, and what caught it
+
+A non-uniformly scaled SDF is a conservative estimate, not a true distance: its deepest reading is
+bounded by the smallest scale factor whatever the tracer finds. The fuse solve compares the two, so
+a squared cylinder starved it - a deepest of 0.667 against a wanted of 0.680 - and the nucleus
+collapsed onto the beacon. `_solvable_depth` caps the ask only where the field cannot answer, keyed
+on whether `ResolvedShape.scale` is uniform. A first attempt capped unconditionally and moved
+box_hull, because a box's reach along the off-axis chord legitimately exceeds its half extent;
+`test_an_open_nucleus_explodes_into_holed_pieces` caught it.
+
+Torus stays deferred, as asked: "we need special rules for it that i havnt thought of yet."
+
+### Verified
+
+Looked at `reports/visual_shapes.png` (a blended carbon, and cylinder rooms as drums rather than
+spars) and `reports/visual_picker.png`. **gdUnit4 351/351** with a test per ask; selfcheck PASSED,
+hash unchanged at `5536787c6c35d236`; data validator PASSED (0 warnings); resolve, explode and visual
+(5 modes) checks PASSED; gdformat and gdlint clean.

@@ -2000,3 +2000,12 @@ justification for ADR 0047, which needed none - the author asked directly. `AGEN
 source of truth for the rules and belongs to the author, so this is reported rather than edited.
 
 The fix is one RETIRED marker in `AGENTS.md` section 1, per section 10a.
+
+
+### A lever on F51 that did not exist before (ADR 0048, 2026-09-27)
+
+A cluster can now carry TWO shapes (`OPT_PROTON_FAMILY_B`), and a second shape is a second density.
+The four classes symmetric on no axis fail because one arm sits on a cube corner; giving the bodies
+opposite it a denser shape is a way to cancel that moment without resizing anything, which is one of
+the author's own remedies in a form that is now cheap to try. Not attempted, and the check still
+reports the same four.

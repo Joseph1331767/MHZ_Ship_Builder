@@ -105,6 +105,27 @@ const OPT_TUNNEL_LENGTH: String = "tunnel_length_m"
 const OPT_TUNNEL_BORE: String = "tunnel_bore_m"
 const OPT_HATCH_FAMILY: String = "hatch_family"
 
+## THE THREE GROUPS A TEMPLATE BUILDS, each with its own shape (dev note 2026-09-24): "the player
+## options for the prebuilt structures need expanding with options for outter/electron node
+## shapes, tunnel shapes, proton shapes."
+##
+## A PROTON is a nucleus body, fused into its neighbours; an ELECTRON is an outer node on the far
+## end of a tunnel; the TUNNEL is the hallway between them, which already had `OPT_HALL_FAMILY`.
+## Both node options fall back to [constant OPT_ROOM_FAMILY], which is what they were until now,
+## so a caller that names only the one still gets the ship it always did.
+const OPT_PROTON_FAMILY: String = "proton_family"
+const OPT_ELECTRON_FAMILY: String = "electron_family"
+
+## A SECOND SHAPE FOR EITHER GROUP, blended through it: "the new shaper should cater to multi
+## shape clusters, so a protons shapes can be shape1 and shape2 ... so a proton cluster can exist
+## with cubes and spheres blended". Empty, or the same as the first, means one shape throughout.
+##
+## MIRROR PARTNERS ALWAYS MATCH, which is how "the system will try to keep everything semetrical
+## and even as normal" is honoured: the blend alternates PAIR BY PAIR, not body by body, so a
+## blended cluster is as symmetric as an unblended one and ADR 0044 still holds.
+const OPT_PROTON_FAMILY_B: String = "proton_family_b"
+const OPT_ELECTRON_FAMILY_B: String = "electron_family_b"
+
 ## What every template connection is LINKED with - a `ShipJoint.MODE_*`. OPEN by default: "by
 ## default in the prebuilds we dont want any walls in our prebuilds by default" (2026-09-26).
 ## The hatch is still AUTHORED on every joint whatever this says - its family and its params are
@@ -198,6 +219,12 @@ static func build(
 	var room_mfr: String = _opt_text(
 		options, OPT_ROOM_MANUFACTURER, _first_manufacturer(data, room_family)
 	)
+	# THE THREE GROUPS. Each node group falls back to the one room family, so nothing changes for
+	# a caller that names only that.
+	var proton_a: String = _opt_text(options, OPT_PROTON_FAMILY, room_family)
+	var proton_b: String = _opt_text(options, OPT_PROTON_FAMILY_B, "")
+	var electron_a: String = _opt_text(options, OPT_ELECTRON_FAMILY, room_family)
+	var electron_b: String = _opt_text(options, OPT_ELECTRON_FAMILY_B, "")
 	var hall_family: String = _opt_text(options, OPT_HALL_FAMILY, _first_tube(data, room_family))
 	var hall_mfr: String = _opt_text(
 		options, OPT_HALL_MANUFACTURER, _first_manufacturer(data, hall_family)
@@ -208,7 +235,7 @@ static func build(
 	var room_span: float = _opt_num(options, OPT_ROOM_SPAN, conf.room_span_m)
 	if not options.has(OPT_ROOM_SPAN):
 		room_span = _span_for_volume(
-			data, room_family, room_mfr, conf.template_volume_m3 / float(maxi(nodes.size(), 1))
+			data, proton_a, room_mfr, conf.template_volume_m3 / float(maxi(nodes.size(), 1))
 		)
 	var tunnel_len: float = _opt_num(options, OPT_TUNNEL_LENGTH, conf.tunnel_length_m)
 	# A TUNNEL HAS TO PASS ITS OWN SMALLEST HATCH (ADR 0040). The bore lever is the player's, but a
@@ -221,11 +248,24 @@ static func build(
 	var hatch: String = _opt_text(options, OPT_HATCH_FAMILY, _pick_hatch(data))
 	var link_mode: String = _opt_text(options, OPT_LINK_MODE, ShipJoint.MODE_OPEN)
 
-	var doc: ShipDoc = ShipDoc.create_new(room_family, room_mfr, data, 0.0)
+	# WHICH SHAPE EVERY NODE WEARS, before the document exists - the root is a node like any
+	# other, and with a blend on it may be the second shape rather than the first.
+	var family_of: Dictionary = _blend_families(
+		data, nodes, proton_a, proton_b, electron_a, electron_b
+	)
+	var kits: Dictionary = _kits_for(
+		data,
+		family_of,
+		room_span,
+		PackedStringArray([proton_a, proton_b, electron_a, electron_b, room_family])
+	)
+	var root_kit: Dictionary = kits[family_of[0]]
+
+	var doc: ShipDoc = ShipDoc.create_new(str(root_kit["family"]), str(root_kit["mfr"]), data, 0.0)
 	if doc == null or doc.root.is_empty():
 		return null
-	var room_scale: Vector3 = _uniform_span(data, room_family, room_mfr, room_span)
-	var room_shape: ResolvedShape = _resolved(data, room_family, room_mfr, room_scale)
+	var room_scale: Vector3 = root_kit["scale"]
+	var room_shape: ResolvedShape = root_kit["shape"]
 	var open_scale: Vector3 = _tube_scale(data, hall_family, hall_mfr, bore, tunnel_len)
 	var hall_shape: ResolvedShape = _resolved(data, hall_family, hall_mfr, open_scale)
 	# The room continues straight off the tunnel's cap; a probe standing square, exactly as
@@ -236,7 +276,12 @@ static func build(
 	var straight: Vector2 = ShipAttach.angles_from_direction(Vector3.UP)
 	room_probe.yaw = straight.x
 	room_probe.pitch = straight.y
-	var room_offset: float = ShipAttach.default_offset(hall_shape, room_shape, room_probe, conf)
+	# The tunnel's length allowance, measured on the FIRST electron shape - a tunnel is cut once
+	# per class, and a blend changes this by the difference between two seats rather than by a
+	# room's worth.
+	var room_offset: float = ShipAttach.default_offset(
+		hall_shape, kits[electron_a]["shape"], room_probe, conf
+	)
 
 	var part_of_node: PackedStringArray = PackedStringArray()
 	part_of_node.resize(nodes.size())
@@ -272,19 +317,24 @@ static func build(
 		# A NUCLEUS body is fused straight into its neighbour: no tunnel, no hatch, and sunk far
 		# enough in that the two read as one mass rather than as two modules touching.
 		if _text(node.get("link"), LINK_TUNNEL) == LINK_FUSE:
+			var kit: Dictionary = kits[family_of[i]]
 			var fused: ShipPart = ShipPart.new()
 			fused.parent = parent_id
 			fused.kind = ShipPart.KIND_PRIMITIVE
-			fused.family = room_family
-			fused.manufacturer = room_mfr
-			fused.params = ShapeGen.default_params(data, room_family, room_mfr)
+			fused.family = str(kit["family"])
+			fused.manufacturer = str(kit["mfr"])
+			fused.params = ShapeGen.default_params(data, fused.family, fused.manufacturer)
 			fused.yaw = angles.x
 			fused.pitch = angles.y
 			var seat: ShipPart = ShipPart.new()
 			seat.yaw = angles.x
 			seat.pitch = angles.y
+			# The seat is between the PARENT's shape and this body's own, which a blended cluster
+			# makes two different shapes rather than one twice.
 			fused.offset = (
-				ShipAttach.default_offset(room_shape, room_shape, seat, conf)
+				ShipAttach.default_offset(
+					kits[family_of[parent_index]]["shape"], kit["shape"], seat, conf
+				)
 				- room_span * FUSE_OVERLAP
 			)
 			# ANCHORED IN ITS SLOT (ADR 0034), standing on nothing: the four attach numbers above
@@ -295,7 +345,7 @@ static func build(
 			if anchor.length_squared() > 0.0:
 				fused.parent = ""
 				fused.absolute = _anchored_at(anchor, radius)
-			fused.scale = room_scale
+			fused.scale = kit["scale"]
 			fused.role = ROLE_ROOM
 			fused.display_name = _room_name(node, i)
 			fused.asymmetric = true
@@ -321,7 +371,10 @@ static func build(
 		tunnel.pitch = angles.y
 		hall_probe.yaw = angles.x
 		hall_probe.pitch = angles.y
-		var hall_offset: float = ShipAttach.default_offset(room_shape, hall_shape, hall_probe, conf)
+		# Seated on the PARENT body, whose shape a blended cluster may have changed.
+		var hall_offset: float = ShipAttach.default_offset(
+			kits[family_of[parent_index]]["shape"], hall_shape, hall_probe, conf
+		)
 		tunnel.offset = hall_offset
 		tunnel.scale = _tube_scale(
 			data, hall_family, hall_mfr, bore, tunnel_len - hall_offset - room_offset
@@ -333,19 +386,20 @@ static func build(
 		tunnel.asymmetric = true
 		var tunnel_id: String = doc.add_part(tunnel)
 
+		var pod_kit: Dictionary = kits[family_of[i]]
 		var room: ShipPart = ShipPart.new()
 		room.parent = tunnel_id
 		room.kind = ShipPart.KIND_PRIMITIVE
-		room.family = room_family
-		room.manufacturer = room_mfr
-		room.params = ShapeGen.default_params(data, room_family, room_mfr)
+		room.family = str(pod_kit["family"])
+		room.manufacturer = str(pod_kit["mfr"])
+		room.params = ShapeGen.default_params(data, room.family, room.manufacturer)
 		# Straight off the tunnel's far cap. The tunnel's own +Y already points away from the
 		# core, so this is "keep going", not a second direction to get right.
 		var out_angles: Vector2 = ShipAttach.angles_from_direction(Vector3.UP)
 		room.yaw = out_angles.x
 		room.pitch = out_angles.y
-		room.offset = room_offset
-		room.scale = room_scale
+		room.offset = ShipAttach.default_offset(hall_shape, pod_kit["shape"], room_probe, conf)
+		room.scale = pod_kit["scale"]
 		room.role = ROLE_ROOM
 		room.display_name = _room_name(node, i)
 		room.asymmetric = true
@@ -412,7 +466,15 @@ static func _nucleus_radius(
 	var reach: float = _reach_along(room_shape, toward, cfg)
 	if reach <= 0.0:
 		return 0.0
-	var wanted: float = FUSE_OVERLAP * reach
+	# NEVER ASK THE FIELD FOR MORE DEPTH THAN IT HAS. A non-uniformly scaled SDF is a conservative
+	# estimate and not a true distance: its deepest reading is bounded by the SMALLEST scale
+	# factor, while the tracer above follows the real surface. Squaring a three-to-one cylinder to
+	# its span (dev note 2026-09-24) makes the two disagree by just enough to starve this solve -
+	# measured, a deepest of 0.667 against a wanted of 0.680 - and the whole clump collapses onto
+	# the beacon. Taking the smaller of the two keeps the search on a depth the field can answer
+	# for, and changes nothing wherever they agree: on a sphere both read 2.0, and on a box the
+	# tracer reads 2.0 against the rounded envelope's 2.04, so the tracer still wins.
+	var wanted: float = FUSE_OVERLAP * _solvable_depth(room_shape, reach)
 	var near: float = 0.0
 	var far: float = reach
 	for _step: int in NUCLEUS_SOLVE_STEPS:
@@ -422,6 +484,25 @@ static func _nucleus_radius(
 		else:
 			far = mid
 	return (near + far) / span
+
+
+## The depth the fuse solve may ask [param room_shape] for, given a tracer reading of [param reach].
+##
+## A UNIFORMLY SCALED FIELD IS A TRUE DISTANCE and the tracer is the right answer: the reach along
+## the chord can exceed the half extent - on a box the diagonal does - and that is real hull, not
+## an artefact. A NON-UNIFORM one is only a conservative estimate: its deepest reading anywhere is
+## bounded by the SMALLEST scale factor, whatever the tracer finds. Squaring a three-to-one
+## cylinder to its span (dev note 2026-09-24) makes the two disagree by just enough to starve the
+## solve - measured, a deepest of 0.667 against a wanted of 0.680 - and the whole clump collapses
+## onto the beacon.
+##
+## So the tracer is trusted wherever the field can be, and capped where it cannot. Every family
+## that was uniformly scaled before this existed takes the first branch and does not move.
+static func _solvable_depth(room_shape: ResolvedShape, reach: float) -> float:
+	var s: Vector3 = room_shape.scale
+	if is_equal_approx(s.x, s.y) and is_equal_approx(s.y, s.z):
+		return reach
+	return minf(reach, -room_shape.sdf(Vector3.ZERO))
 
 
 ## How far the surface of [param room_shape] is from its centre along [param dir], read off the
@@ -899,8 +980,10 @@ static func _span_for_volume(
 	data: ShipData, family: String, manufacturer: String, target: float
 ) -> float:
 	var reference: float = 1.0
+	# MEASURED THE WAY A NODE IS ACTUALLY SCALED, or the budget is a budget for a shape nothing
+	# builds - a cylinder squared to its span holds twice what a uniformly scaled one does.
 	var shape: ResolvedShape = _resolved(
-		data, family, manufacturer, _uniform_span(data, family, manufacturer, reference)
+		data, family, manufacturer, _node_span(data, family, manufacturer, reference)
 	)
 	var volume: float = ShapeMesh.build(shape).volume()
 	if volume <= 0.0 or target <= 0.0:
@@ -942,6 +1025,137 @@ static func _room_name(node: Dictionary, index: int) -> String:
 
 
 ## Uniform scale putting the widest axis of a family's resolved bounds at `span` metres.
+## The scale a NODE wears - a room or a proton, never a tunnel. [param span] is the size of the
+## room, and the author asked for that to mean the same thing whatever shape is in the slot:
+##
+## > "when cylinder nodes (not linkage tunnels) is selected in pre built options, it should have
+## > the length and diameter equal and set to room size not tunnel bore, as an earlier test
+## > indicated that it made tiny bore rooms."
+##
+## [method _uniform_span] makes the WIDEST axis the span, so a cylinder whose unscaled box is
+## twice as long as it is wide comes out at HALF the bore that was asked for - the tiny bore the
+## note reports. Squaring the box to `span` on every axis gives length == diameter == span, and
+## for a shape whose box is already cubic - a sphere, a box - the two rules agree exactly, so
+## nothing that was right before moves.
+static func _node_span(
+	data: ShipData, family_id: String, manufacturer_id: String, span: float
+) -> Vector3:
+	var box: Vector3 = _unscaled_size(data, family_id, manufacturer_id)
+	if span <= 0.0:
+		return Vector3.ONE
+	return Vector3(
+		span / box.x if box.x > 0.0 else 1.0,
+		span / box.y if box.y > 0.0 else 1.0,
+		span / box.z if box.z > 0.0 else 1.0
+	)
+
+
+## WHICH SHAPE EACH NODE WEARS, as `{node index: family id}`. The nucleus bodies take the proton
+## pair and everything on a tunnel takes the electron pair; with no second family named, a group
+## is one shape throughout and this is a constant map.
+##
+## THE BLEND ALTERNATES PAIR BY PAIR. A node and its mirror always come out the same shape, so a
+## blended cluster is exactly as symmetric as an unblended one - "the system will try to keep
+## everything semetrical and even as normal" - and ADR 0044's balance still holds. Alternating
+## body by body would put a cube opposite a sphere and move the centre of mass off the plane.
+static func _blend_families(
+	data: ShipData,
+	nodes: Array[Dictionary],
+	proton_a: String,
+	proton_b: String,
+	electron_a: String,
+	electron_b: String
+) -> Dictionary:
+	var protons: PackedInt32Array = PackedInt32Array()
+	var electrons: PackedInt32Array = PackedInt32Array()
+	for i: int in nodes.size():
+		# Node 0 is the root and always a nucleus body; the rest go by their link.
+		if i == 0 or _text(nodes[i].get("link"), LINK_TUNNEL) == LINK_FUSE:
+			protons.append(i)
+		else:
+			electrons.append(i)
+	var out: Dictionary = {}
+	_blend_group(data, nodes, protons, proton_a, proton_b, out)
+	_blend_group(data, nodes, electrons, electron_a, electron_b, out)
+	return out
+
+
+## One group blended into [param out]. A second family that is empty, unknown to the pack, or the
+## same as the first leaves the group on one shape.
+static func _blend_group(
+	data: ShipData,
+	nodes: Array[Dictionary],
+	group: PackedInt32Array,
+	first: String,
+	second: String,
+	out: Dictionary
+) -> void:
+	var both: bool = (
+		not second.is_empty() and second != first and data != null and data.family_ids().has(second)
+	)
+	if not both:
+		for index: int in group:
+			out[index] = first
+		return
+	var turn: int = 0
+	for index: int in group:
+		if out.has(index):
+			continue
+		out[index] = first if turn % 2 == 0 else second
+		var partner: int = _mirror_node(nodes, group, index)
+		if partner >= 0 and partner != index:
+			out[partner] = out[index]
+		turn += 1
+
+
+## The mirror partner of node [param index] within [param group], the node itself when it stands
+## on the mirror plane, or -1. Pairs on the node's own BERTH - its anchor where it has one (a
+## nucleus body is anchored in its slot, ADR 0034) and its branch direction otherwise - through
+## the same [method _mirror_slot] the arm ordering uses, so one rule decides both.
+static func _mirror_node(nodes: Array[Dictionary], group: PackedInt32Array, index: int) -> int:
+	var berths: Array[Vector3] = []
+	var at: int = -1
+	for i: int in group.size():
+		if group[i] == index:
+			at = i
+		berths.append(_berth_of(nodes[group[i]]))
+	if at < 0:
+		return -1
+	var found: int = _mirror_slot(berths, at)
+	return group[found] if found >= 0 else -1
+
+
+## Where a node sits, for mirroring: its anchor when it has one, its branch direction otherwise.
+static func _berth_of(node: Dictionary) -> Vector3:
+	var anchor: Vector3 = node.get("anchor", Vector3.ZERO)
+	return anchor if anchor.length_squared() > 0.0 else node.get("dir", Vector3.UP)
+
+
+## Every family the blend named, resolved once: `{family id: {family, mfr, scale, shape}}`. Built
+## from the blend AND from the four options, so a class with no electrons still resolves the
+## electron family the tunnel is measured against.
+static func _kits_for(
+	data: ShipData, family_of: Dictionary, span: float, named: PackedStringArray
+) -> Dictionary:
+	var out: Dictionary = {}
+	var wanted: PackedStringArray = PackedStringArray()
+	for index: Variant in family_of:
+		wanted.append(str(family_of[index]))
+	wanted.append_array(named)
+	for family: String in wanted:
+		if family.is_empty() or out.has(family):
+			continue
+		var mfr: String = _first_manufacturer(data, family)
+		var scale: Vector3 = _node_span(data, family, mfr, span)
+		out[family] = {
+			"family": family,
+			"mfr": mfr,
+			"scale": scale,
+			"shape": _resolved(data, family, mfr, scale)
+		}
+	return out
+
+
 static func _uniform_span(
 	data: ShipData, family_id: String, manufacturer_id: String, span: float
 ) -> Vector3:
