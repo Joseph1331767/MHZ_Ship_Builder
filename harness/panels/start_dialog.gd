@@ -35,6 +35,15 @@ signal template_chosen(template_id: String, options: Dictionary)
 ## Raised only when the dialog was cancellable, i.e. there was already a ship to go back to.
 signal cancelled
 
+## No ship at all: the console opens empty and the FIRST PART the player picks founds it.
+##
+## The author, asking for the third time: "im still forced to pick a part at start, there should be
+## an option for blank, as i keep suggesting." The full version of that ask - an invisible root
+## node the first part attaches to - is a change to what a `ShipDoc` IS and wants an ADR; this is
+## the half that needs neither, because a null document is already a state the builder handles
+## (`ship_builder.gd:828`, the no-families console).
+signal blank_chosen
+
 const PANEL_WIDTH: float = 440.0
 ## Room for about eight template rows before the list scrolls. Sixteen elements plus six molecules
 ## is a real list, and a chooser that shows two of them at a time reads as an error.
@@ -138,6 +147,16 @@ func _build() -> void:
 	title.add_theme_font_size_override("font_size", ShipTheme.font_title())
 	box.add_child(title)
 	box.add_child(HSeparator.new())
+
+	# BLANK FIRST, and outside the two modes, because it is not a third way to choose a hull - it
+	# is the choice not to.
+	var blank: Button = Button.new()
+	blank.name = "StartBlank"
+	blank.text = "START BLANK"
+	blank.tooltip_text = "OPEN AN EMPTY SHIPYARD - THE FIRST PART YOU PICK BECOMES THE SHIP"
+	blank.focus_mode = Control.FOCUS_NONE
+	blank.pressed.connect(_on_blank_pressed)
+	box.add_child(blank)
 
 	var mode_row: HBoxContainer = HBoxContainer.new()
 	box.add_child(mode_row)
@@ -485,6 +504,11 @@ func _on_cell_pressed(family_id: String) -> void:
 
 func _on_manufacturer_selected(_index: int) -> void:
 	_refresh_detail()
+
+
+func _on_blank_pressed() -> void:
+	close()
+	blank_chosen.emit()
 
 
 func _on_mode_pressed(template_mode: bool) -> void:

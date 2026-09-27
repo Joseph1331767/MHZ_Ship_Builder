@@ -536,7 +536,16 @@ func redo() -> void:
 func begin_placement(
 	family_id: String, manufacturer_id: String, kind: String = ShipPart.KIND_PRIMITIVE
 ) -> void:
-	if _placement == null or _doc == null or family_id == "":
+	if _placement == null or family_id == "":
+		return
+	# THE FIRST PART FOUNDS THE SHIP. With no document there is nothing to attach to and nothing
+	# to raise a ghost against, so the pick becomes the founding instead of failing silently -
+	# which is the whole of START BLANK.
+	if _doc == null:
+		if kind != ShipPart.KIND_PRIMITIVE:
+			set_status("START WITH A SHAPE - A COMPONENT NEEDS A SHIP TO GO ON")
+			return
+		found_document(family_id, manufacturer_id)
 		return
 	var parent: String = _selection[0] if not _selection.is_empty() else _doc.root
 	if not _doc.parts.has(parent):
@@ -1507,11 +1516,25 @@ func _build_start_dialog() -> void:
 	_start_dialog.setup(self)
 	_start_dialog.chosen.connect(_on_start_chosen)
 	_start_dialog.template_chosen.connect(_on_start_template_chosen)
+	_start_dialog.blank_chosen.connect(_on_start_blank)
 	_start_dialog.cancelled.connect(_on_start_cancelled)
 
 
 func _on_start_chosen(family_id: String, manufacturer_id: String) -> void:
 	found_document(family_id, manufacturer_id)
+
+
+## AN EMPTY SHIPYARD. No document at all - which the builder already handles, because that is
+## what it shows when the pack has no families - and the first part the player picks founds the
+## ship on it (see [method begin_placement]).
+func _on_start_blank() -> void:
+	cancel_placement()
+	_doc = null
+	_selection = PackedStringArray()
+	_history.clear()
+	_refresh_view(true)
+	_emit_state()
+	set_status("EMPTY SHIPYARD - PICK A PART TO START YOUR SHIP")
 
 
 func _on_start_template_chosen(template_id: String, options: Dictionary) -> void:
