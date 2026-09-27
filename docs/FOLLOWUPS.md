@@ -1981,3 +1981,22 @@ can be grown to cancel it, which keeps the class's shape and its chemistry conce
 class**. Neither is chosen yet, and nothing is blocked while it waits: the builder now reports the
 number and marks the centre (ADR 0045) rather than enforcing anything, and balancing by adding
 ballast is a later mechanic the author has already sketched as its own minigame.
+
+
+## F52 - AGENTS.md section 1 still describes the retired all-open studio hull
+
+`AGENTS.md` section 1 says the Phase 1 bake "produces the all-open 'studio' hull with **no walls** -
+joint geometry is authored in Phase 1 but not built. That is by design (SPEC section 7) and must
+never be read as a bug."
+
+`SHIP_BUILDER_SPEC.md` section 7 retired exactly that sentence four weeks ago:
+
+> RETIRED(ADR 0008, 2026-09-02): "geometry in Phase 2" and "the Phase 1 bake produces the all-open
+> studio hull with no walls" -> the seam geometry is built.
+
+So the shared rules file cites a spec section that disowns it. Nothing depends on the stale wording
+and no code reads it, but it is the kind of thing an agent leans on: it was nearly used here as
+justification for ADR 0047, which needed none - the author asked directly. `AGENTS.md` is the single
+source of truth for the rules and belongs to the author, so this is reported rather than edited.
+
+The fix is one RETIRED marker in `AGENTS.md` section 1, per section 10a.

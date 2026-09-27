@@ -8,7 +8,6 @@
 # checks that the walls reach the mesh.
 class_name TestSeams
 extends GdUnitTestSuite
-
 ## How thick a hull this test asserts against, and it is NOT the shipped default.
 ##
 ## A seam plate is a slab of the hull thickness, so how far it can lift the field depends on it: at
@@ -27,6 +26,16 @@ const CHILD_SCALE: Vector3 = Vector3(3.0, 1.0, 3.0)
 
 var _data: ShipData
 var _cfg: ShipConfig
+
+
+## TEMPLATE LINKS ARE OPEN BY DEFAULT since 2026-09-26 ("by default in the prebuilds we dont want
+## any walls in our prebuilds by default"). This suite is about what a ship with LINKS does - its
+## walls, its doors, the rooms they bound or the meshes they cut - so it asks for the hatches the
+## templates used to place, instead of resting on a default that no longer says that.
+func _linked(extra: Dictionary = {}) -> Dictionary:
+	var out: Dictionary = {ShipTemplates.OPT_LINK_MODE: ShipJoint.MODE_HATCHED}
+	out.merge(extra)
+	return out
 
 
 func before() -> void:
@@ -426,7 +435,7 @@ func test_explode_leaves_no_two_modules_overlapping() -> void:
 	# make ordinary, since a nucleus body and an extremity take their directions from two different
 	# arrangements that are free to point the same way.
 	for name: String in ["lithium", "carbon", "argon"]:
-		var doc: ShipDoc = ShipTemplates.build(_data, _cfg, name, {})
+		var doc: ShipDoc = ShipTemplates.build(_data, _cfg, name, _linked())
 		var sdf: ShipSdf = ShipSdf.build(doc, _data, _cfg)
 		var boxes: Dictionary = {}
 		var order: PackedStringArray = PackedStringArray()

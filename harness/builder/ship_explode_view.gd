@@ -767,6 +767,12 @@ func refresh_materials() -> void:
 		_apply_materials(module)
 
 
+## Whether the DOOR layer is drawn. A leaf is a whole node rather than a named surface, so it is
+## hidden outright instead of dressed transparent.
+func _doors_shown() -> bool:
+	return _scene == null or not _scene.hidden_layers.has(ShipLayersControl.LAYER_DOOR)
+
+
 ## What a dropped wall wears outside INTERIOR: fully transparent, both sides, unshaded. One
 ## instance for every piece, built once. The INTERIOR set has its own in
 ## [method ShipSceneBuilder.inside_materials], because there the wall is one entry of a set the
@@ -820,31 +826,33 @@ func _apply_materials(module: Module) -> void:
 		for wire: MeshInstance3D in module.wires:
 			wire.material_override = mats["wire"]
 			wire.visible = mats["wire"] != null and wire.mesh != null
-		_apply_door_materials(module, _door_material(mats["cut"]), null, true)
+		_apply_door_materials(module, _door_material(mats["cut_solid"]), null, _doors_shown())
 		return
 	var pair: Array = _scene.materials_for(_mode, module.selected)
-	# THE WALLS LAYER REACHES EVERY MODE, not only INTERIOR (ADR 0046). A `material_override`
-	# beats any per-surface override, so a piece is dressed per surface while there is a wall to
-	# drop, and keeps the single override it has always had otherwise.
-	var drop: Material = _hidden_wall() if _scene.walls_hidden else null
+	# THE LAYERS REACH EVERY MODE, not only INTERIOR (ADR 0046). A `material_override` beats any
+	# per-surface override, so a piece is dressed per surface while there is a layer to drop, and
+	# keeps the single override it has always had otherwise.
+	var dropped: PackedStringArray = _scene.hidden_layers
+	var drop: Material = _hidden_wall() if not dropped.is_empty() else null
 	for solid: MeshInstance3D in module.solids:
 		var mesh: Mesh = solid.mesh
 		var per_surface: bool = drop != null and mesh != null
 		solid.material_override = null if per_surface else pair[0]
 		if mesh != null:
 			for i: int in mesh.get_surface_count():
-				var is_wall: bool = (
-					per_surface and mesh.surface_get_name(i) == ShipCsgBake.SURFACE_WALL
-				)
+				var off: bool = per_surface and dropped.has(mesh.surface_get_name(i))
 				solid.set_surface_override_material(
-					i, (drop if is_wall else pair[0]) if per_surface else null
+					i, (drop if off else pair[0]) if per_surface else null
 				)
 		solid.visible = ShipSceneBuilder.mode_shows_solid(_mode)
 	for wire: MeshInstance3D in module.wires:
 		wire.material_override = pair[1]
 		wire.visible = pair[1] != null and wire.mesh != null
 	_apply_door_materials(
-		module, _door_material(pair[0]), pair[1], ShipSceneBuilder.mode_shows_solid(_mode)
+		module,
+		_door_material(pair[0]),
+		pair[1],
+		ShipSceneBuilder.mode_shows_solid(_mode) and _doors_shown()
 	)
 
 
@@ -981,7 +989,7 @@ func _apply_door_materials(
 		node.visible = show_solid and solid_mat != null
 	for node: MeshInstance3D in module.door_wires:
 		node.material_override = wire_mat
-		node.visible = wire_mat != null and node.mesh != null
+		node.visible = wire_mat != null and node.mesh != null and _doors_shown()
 
 
 ## [param base] - a module's material - darkened for a door: the same shader with its ramp

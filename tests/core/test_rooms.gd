@@ -9,11 +9,20 @@
 # hatch test the tree panel runs - ShipJoints.solid_pair_state at the hull thickness - passes.
 class_name TestRooms
 extends GdUnitTestSuite
-
 const COMPACT: Array[String] = ["box_hull", "sphere_pod", "cylinder_spar"]
 
 var _data: ShipData
 var _cfg: ShipConfig
+
+
+## TEMPLATE LINKS ARE OPEN BY DEFAULT since 2026-09-26 ("by default in the prebuilds we dont want
+## any walls in our prebuilds by default"). This suite is about what a ship with LINKS does - its
+## walls, its doors, the rooms they bound or the meshes they cut - so it asks for the hatches the
+## templates used to place, instead of resting on a default that no longer says that.
+func _linked(extra: Dictionary = {}) -> Dictionary:
+	var out: Dictionary = {ShipTemplates.OPT_LINK_MODE: ShipJoint.MODE_HATCHED}
+	out.merge(extra)
+	return out
 
 
 func before() -> void:
@@ -418,7 +427,7 @@ func test_a_pod_is_built_on_the_proton_whose_slot_it_shares() -> void:
 	# A pod's tunnel continues the line its proton is already on, rather than setting off from the
 	# root straight through it. Read off the document: no tunnel on a carbon class stands on the
 	# root, because every one of its four slots is occupied by a proton.
-	var doc: ShipDoc = ShipTemplates.build(_data, _cfg, "carbon", {})
+	var doc: ShipDoc = ShipTemplates.build(_data, _cfg, "carbon", _linked())
 	var tunnels: int = 0
 	for pid: String in doc.part_order():
 		var part: ShipPart = doc.parts[pid]
@@ -440,7 +449,7 @@ func test_a_pod_is_built_on_the_proton_whose_slot_it_shares() -> void:
 func test_the_nucleus_is_the_root_component_and_one_room() -> void:
 	for family: String in ["sphere_pod", "box_hull"]:
 		var doc: ShipDoc = ShipTemplates.build(
-			_data, _cfg, "carbon", {ShipTemplates.OPT_ROOM_FAMILY: family}
+			_data, _cfg, "carbon", _linked({ShipTemplates.OPT_ROOM_FAMILY: family})
 		)
 		var root: ShipPart = doc.parts[doc.root]
 		assert_str(root.kind).append_failure_message(family).is_equal(
@@ -490,5 +499,5 @@ func test_the_nucleus_is_the_root_component_and_one_room() -> void:
 			)
 			. is_equal(6)
 		)
-	var lone: ShipDoc = ShipTemplates.build(_data, _cfg, "hydrogen", {})
+	var lone: ShipDoc = ShipTemplates.build(_data, _cfg, "hydrogen", _linked())
 	assert_str((lone.parts[lone.root] as ShipPart).kind).is_equal(ShipPart.KIND_PRIMITIVE)

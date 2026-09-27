@@ -14,18 +14,26 @@ var _manufacturer_id: String
 func before() -> void:
 	_data = ShipData.new()
 	var ok: bool = _data.load_all()
-	assert_bool(ok).append_failure_message(
-		"ShipData.load_all() failed, load_errors=%s" % [str(_data.load_errors)]
-	).is_true()
+	(
+		assert_bool(ok)
+		. append_failure_message(
+			"ShipData.load_all() failed, load_errors=%s" % [str(_data.load_errors)]
+		)
+		. is_true()
+	)
 	var families: PackedStringArray = _data.family_ids()
-	assert_array(families).append_failure_message(
-		"no families loaded from res://data"
-	).is_not_empty()
+	(
+		assert_array(families)
+		. append_failure_message("no families loaded from res://data")
+		. is_not_empty()
+	)
 	_family_id = families[0]
 	var mfrs: PackedStringArray = _data.manufacturers_for(_family_id)
-	assert_array(mfrs).append_failure_message(
-		"no manufacturers for family '%s'" % _family_id
-	).is_not_empty()
+	(
+		assert_array(mfrs)
+		. append_failure_message("no manufacturers for family '%s'" % _family_id)
+		. is_not_empty()
+	)
 	_manufacturer_id = mfrs[0]
 
 
@@ -73,9 +81,13 @@ func test_reflect_flips_winding_determinant() -> void:
 	var planes: Array[String] = ["x", "y", "z"]
 	for plane: String in planes:
 		var reflected: Transform3D = ShipMirror.reflect(t, plane)
-		assert_float(reflected.basis.determinant()).append_failure_message(
-			"reflecting across plane '%s' should flip winding (negative determinant)" % plane
-		).is_less(0.0)
+		(
+			assert_float(reflected.basis.determinant())
+			. append_failure_message(
+				"reflecting across plane '%s' should flip winding (negative determinant)" % plane
+			)
+			. is_less(0.0)
+		)
 
 
 func test_mirror_subtree_creates_linked_derivatives() -> void:
@@ -86,9 +98,13 @@ func test_mirror_subtree_creates_linked_derivatives() -> void:
 	var mirror_id: String = created[0]
 	assert_bool(doc.parts.has(mirror_id)).is_true()
 	var mirror_part: ShipPart = doc.parts[mirror_id] as ShipPart
-	assert_bool(mirror_part.is_mirror()).append_failure_message(
-		"part created by mirror_subtree() does not report is_mirror() == true"
-	).is_true()
+	(
+		assert_bool(mirror_part.is_mirror())
+		. append_failure_message(
+			"part created by mirror_subtree() does not report is_mirror() == true"
+		)
+		. is_true()
+	)
 	assert_array(ShipMirror.derivative_ids(doc)).contains(mirror_id)
 
 
@@ -99,18 +115,24 @@ func test_break_link_materializes_independent_parts_with_fresh_ids() -> void:
 	var mirror_id: String = created[0]
 
 	var broken: PackedStringArray = ShipMirror.break_link(doc, mirror_id)
-	assert_array(broken).append_failure_message(
-		"break_link() produced no new parts"
-	).is_not_empty()
-	assert_array(broken).append_failure_message(
-		"break_link() must materialize fresh ids, not reuse the derivative's own id"
-	).not_contains(mirror_id)
+	assert_array(broken).append_failure_message("break_link() produced no new parts").is_not_empty()
+	(
+		assert_array(broken)
+		. append_failure_message(
+			"break_link() must materialize fresh ids, not reuse the derivative's own id"
+		)
+		. not_contains(mirror_id)
+	)
 	for new_id: String in broken:
 		assert_bool(doc.parts.has(new_id)).is_true()
 		var new_part: ShipPart = doc.parts[new_id] as ShipPart
-		assert_bool(new_part.is_mirror()).append_failure_message(
-			"part '%s' produced by break_link() is still reported as a mirror" % new_id
-		).is_false()
+		(
+			assert_bool(new_part.is_mirror())
+			. append_failure_message(
+				"part '%s' produced by break_link() is still reported as a mirror" % new_id
+			)
+			. is_false()
+		)
 
 
 func test_mirror_of_mirror_is_rejected() -> void:
@@ -119,7 +141,13 @@ func test_mirror_of_mirror_is_rejected() -> void:
 	var first: PackedStringArray = ShipMirror.mirror_subtree(doc, child.id, "x")
 	var mirror_id: String = first[0]
 	var second: PackedStringArray = ShipMirror.mirror_subtree(doc, mirror_id, "y")
-	assert_array(second).append_failure_message(
-		"mirror_subtree() must refuse to mirror an existing mirror derivative, got: %s" %
-		[str(second)]
-	).is_empty()
+	(
+		assert_array(second)
+		. append_failure_message(
+			(
+				"mirror_subtree() must refuse to mirror an existing mirror derivative, got: %s"
+				% [str(second)]
+			)
+		)
+		. is_empty()
+	)

@@ -59,9 +59,16 @@ func test_sphere_matches_reference_distance_everywhere_sampled() -> void:
 	for p: Vector3 in points:
 		var expected: float = _ref_sphere(p, r)
 		var actual: float = SdfPrims.sphere(p, r)
-		assert_float(absf(actual)).append_failure_message(
-			"sphere(%s) = %f must not exceed true surface distance %f" % [p, actual, absf(expected)]
-		).is_less_equal(absf(expected) + TOL)
+		(
+			assert_float(absf(actual))
+			. append_failure_message(
+				(
+					"sphere(%s) = %f must not exceed true surface distance %f"
+					% [p, actual, absf(expected)]
+				)
+			)
+			. is_less_equal(absf(expected) + TOL)
+		)
 		assert_float(actual).is_equal_approx(expected, TOL)
 
 
@@ -84,9 +91,16 @@ func test_box_matches_reference_distance_everywhere_sampled() -> void:
 	for p: Vector3 in points:
 		var expected: float = _ref_box(p, half)
 		var actual: float = SdfPrims.box(p, half)
-		assert_float(absf(actual)).append_failure_message(
-			"box(%s) = %f must not exceed true surface distance %f" % [p, actual, absf(expected)]
-		).is_less_equal(absf(expected) + TOL)
+		(
+			assert_float(absf(actual))
+			. append_failure_message(
+				(
+					"box(%s) = %f must not exceed true surface distance %f"
+					% [p, actual, absf(expected)]
+				)
+			)
+			. is_less_equal(absf(expected) + TOL)
+		)
 		assert_float(actual).is_equal_approx(expected, TOL)
 
 
@@ -109,11 +123,16 @@ func test_cylinder_matches_reference_distance_everywhere_sampled() -> void:
 	for p: Vector3 in points:
 		var expected: float = _ref_cylinder(p, r, half_h)
 		var actual: float = SdfPrims.cylinder(p, r, half_h)
-		assert_float(absf(actual)).append_failure_message(
-			"cylinder(%s) = %f must not exceed true surface distance %f" % [
-				p, actual, absf(expected)
-			]
-		).is_less_equal(absf(expected) + TOL)
+		(
+			assert_float(absf(actual))
+			. append_failure_message(
+				(
+					"cylinder(%s) = %f must not exceed true surface distance %f"
+					% [p, actual, absf(expected)]
+				)
+			)
+			. is_less_equal(absf(expected) + TOL)
+		)
 		assert_float(actual).is_equal_approx(expected, TOL)
 
 
@@ -135,11 +154,16 @@ func test_capsule_matches_reference_distance_everywhere_sampled() -> void:
 	for p: Vector3 in points:
 		var expected: float = _ref_capsule(p, r, half_h)
 		var actual: float = SdfPrims.capsule(p, r, half_h)
-		assert_float(absf(actual)).append_failure_message(
-			"capsule(%s) = %f must not exceed true surface distance %f" % [
-				p, actual, absf(expected)
-			]
-		).is_less_equal(absf(expected) + TOL)
+		(
+			assert_float(absf(actual))
+			. append_failure_message(
+				(
+					"capsule(%s) = %f must not exceed true surface distance %f"
+					% [p, actual, absf(expected)]
+				)
+			)
+			. is_less_equal(absf(expected) + TOL)
+		)
 		assert_float(actual).is_equal_approx(expected, TOL)
 
 
@@ -149,12 +173,8 @@ func test_torus_known_points() -> void:
 	assert_float(SdfPrims.torus(Vector3(3.0, 0.0, 0.0), major_r, minor_r)).is_equal_approx(
 		-1.0, TOL
 	)
-	assert_float(SdfPrims.torus(Vector3(6.0, 0.0, 0.0), major_r, minor_r)).is_equal_approx(
-		2.0, TOL
-	)
-	assert_float(SdfPrims.torus(Vector3(3.0, 3.0, 0.0), major_r, minor_r)).is_equal_approx(
-		2.0, TOL
-	)
+	assert_float(SdfPrims.torus(Vector3(6.0, 0.0, 0.0), major_r, minor_r)).is_equal_approx(2.0, TOL)
+	assert_float(SdfPrims.torus(Vector3(3.0, 3.0, 0.0), major_r, minor_r)).is_equal_approx(2.0, TOL)
 	assert_float(SdfPrims.torus(Vector3.ZERO, major_r, minor_r)).is_equal_approx(2.0, TOL)
 
 
@@ -168,9 +188,16 @@ func test_torus_matches_reference_distance_everywhere_sampled() -> void:
 	for p: Vector3 in points:
 		var expected: float = _ref_torus(p, major_r, minor_r)
 		var actual: float = SdfPrims.torus(p, major_r, minor_r)
-		assert_float(absf(actual)).append_failure_message(
-			"torus(%s) = %f must not exceed true surface distance %f" % [p, actual, absf(expected)]
-		).is_less_equal(absf(expected) + TOL)
+		(
+			assert_float(absf(actual))
+			. append_failure_message(
+				(
+					"torus(%s) = %f must not exceed true surface distance %f"
+					% [p, actual, absf(expected)]
+				)
+			)
+			. is_less_equal(absf(expected) + TOL)
+		)
 		assert_float(actual).is_equal_approx(expected, TOL)
 
 
@@ -231,11 +258,19 @@ func test_capped_cone_with_equal_radii_is_exactly_the_cylinder() -> void:
 	for p: Vector3 in _probe_points():
 		var general: float = SdfPrims.capped_cone(p, r, r, half_h)
 		var special: float = SdfPrims.cylinder(p, r, half_h)
-		assert_float(general).append_failure_message(
-			"capped_cone(%s, %f, %f, %f) = %f but cylinder() there is %f -- ADR 0005 claims a "
-			% [p, r, r, half_h, general, special] +
-			"cylinder is just a capped cone with equal ends"
-		).is_equal_approx(special, TOL)
+		(
+			assert_float(general)
+			. append_failure_message(
+				(
+					(
+						"capped_cone(%s, %f, %f, %f) = %f but cylinder() there is %f -- ADR 0005 claims a "
+						% [p, r, r, half_h, general, special]
+					)
+					+ "cylinder is just a capped cone with equal ends"
+				)
+			)
+			. is_equal_approx(special, TOL)
+		)
 
 
 func test_capped_cone_with_a_zero_end_is_exactly_the_cone() -> void:
@@ -244,10 +279,16 @@ func test_capped_cone_with_a_zero_end_is_exactly_the_cone() -> void:
 	for p: Vector3 in _probe_points():
 		var general: float = SdfPrims.capped_cone(p, r, 0.0, half_h)
 		var special: float = SdfPrims.cone(p, r, half_h)
-		assert_float(general).append_failure_message(
-			"capped_cone(%s, %f, 0, %f) = %f but cone() there is %f"
-			% [p, r, half_h, general, special]
-		).is_equal_approx(special, TOL)
+		(
+			assert_float(general)
+			. append_failure_message(
+				(
+					"capped_cone(%s, %f, 0, %f) = %f but cone() there is %f"
+					% [p, r, half_h, general, special]
+				)
+			)
+			. is_equal_approx(special, TOL)
+		)
 
 
 func test_rounded_cone_at_full_rounding_is_exactly_the_capsule() -> void:
@@ -259,10 +300,16 @@ func test_rounded_cone_at_full_rounding_is_exactly_the_capsule() -> void:
 	for p: Vector3 in _probe_points():
 		var general: float = SdfPrims.rounded_cone(p, r, r, half_h, r)
 		var special: float = SdfPrims.capsule(p, r, half_h - r)
-		assert_float(general).append_failure_message(
-			"rounded_cone(%s, %f, %f, %f, %f) = %f but the capsule of the same extent is %f"
-			% [p, r, r, half_h, r, general, special]
-		).is_equal_approx(special, TOL)
+		(
+			assert_float(general)
+			. append_failure_message(
+				(
+					"rounded_cone(%s, %f, %f, %f, %f) = %f but the capsule of the same extent is %f"
+					% [p, r, r, half_h, r, general, special]
+				)
+			)
+			. is_equal_approx(special, TOL)
+		)
 
 
 func test_rounded_cone_with_no_rounding_is_the_bare_capped_cone() -> void:
@@ -281,12 +328,20 @@ func test_rounded_cone_keeps_its_total_extent_when_the_ends_are_rounded() -> voi
 	for e: float in [0.0, 0.25, 0.6, 1.0]:
 		var top: float = SdfPrims.rounded_cone(Vector3(0.0, half_h, 0.0), r, r, half_h, e)
 		var side: float = SdfPrims.rounded_cone(Vector3(r, 0.0, 0.0), r, r, half_h, e)
-		assert_float(top).append_failure_message(
-			"end_round %f moved the +Y extreme off y = half_h (sdf there = %f)" % [e, top]
-		).is_equal_approx(0.0, TOL)
-		assert_float(side).append_failure_message(
-			"end_round %f moved the widest flank off r (sdf there = %f)" % [e, side]
-		).is_equal_approx(0.0, TOL)
+		(
+			assert_float(top)
+			. append_failure_message(
+				"end_round %f moved the +Y extreme off y = half_h (sdf there = %f)" % [e, top]
+			)
+			. is_equal_approx(0.0, TOL)
+		)
+		(
+			assert_float(side)
+			. append_failure_message(
+				"end_round %f moved the widest flank off r (sdf there = %f)" % [e, side]
+			)
+			. is_equal_approx(0.0, TOL)
+		)
 
 
 func test_rounded_cone_saturates_instead_of_inverting_on_an_over_large_round() -> void:

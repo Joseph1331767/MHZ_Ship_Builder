@@ -12,18 +12,26 @@ var _manufacturer_id: String
 func before() -> void:
 	_data = ShipData.new()
 	var ok: bool = _data.load_all()
-	assert_bool(ok).append_failure_message(
-		"ShipData.load_all() failed, load_errors=%s" % [str(_data.load_errors)]
-	).is_true()
+	(
+		assert_bool(ok)
+		. append_failure_message(
+			"ShipData.load_all() failed, load_errors=%s" % [str(_data.load_errors)]
+		)
+		. is_true()
+	)
 	var families: PackedStringArray = _data.family_ids()
-	assert_array(families).append_failure_message(
-		"no families loaded from res://data"
-	).is_not_empty()
+	(
+		assert_array(families)
+		. append_failure_message("no families loaded from res://data")
+		. is_not_empty()
+	)
 	_family_id = families[0]
 	var mfrs: PackedStringArray = _data.manufacturers_for(_family_id)
-	assert_array(mfrs).append_failure_message(
-		"no manufacturers for family '%s'" % _family_id
-	).is_not_empty()
+	(
+		assert_array(mfrs)
+		. append_failure_message("no manufacturers for family '%s'" % _family_id)
+		. is_not_empty()
+	)
 	_manufacturer_id = mfrs[0]
 
 
@@ -91,12 +99,18 @@ func test_new_part_id_never_reused_after_delete() -> void:
 	var i: int = 0
 	while i < 5:
 		var new_id: String = doc.new_part_id()
-		assert_str(new_id).append_failure_message(
-			"new_part_id() produced '%s', which was already used and removed" % new_id
-		).is_not_equal(removed_id)
-		assert_bool(seen.has(new_id)).append_failure_message(
-			"new_part_id() reused a previously seen id: %s" % new_id
-		).is_false()
+		(
+			assert_str(new_id)
+			. append_failure_message(
+				"new_part_id() produced '%s', which was already used and removed" % new_id
+			)
+			. is_not_equal(removed_id)
+		)
+		(
+			assert_bool(seen.has(new_id))
+			. append_failure_message("new_part_id() reused a previously seen id: %s" % new_id)
+			. is_false()
+		)
 		seen[new_id] = true
 		i += 1
 
@@ -121,9 +135,11 @@ func test_remove_part_drops_referencing_joints() -> void:
 	var surviving_joint: ShipJoint = _add_joint(doc, doc.root, child_b.id)
 	@warning_ignore("return_value_discarded")
 	doc.remove_part(child_a.id)
-	assert_bool(doc.joints.has(doomed_joint.id)).append_failure_message(
-		"joint referencing a removed part was not dropped"
-	).is_false()
+	(
+		assert_bool(doc.joints.has(doomed_joint.id))
+		. append_failure_message("joint referencing a removed part was not dropped")
+		. is_false()
+	)
 	assert_bool(doc.joints.has(surviving_joint.id)).is_true()
 
 
@@ -159,10 +175,16 @@ func test_part_order_starts_at_root_and_respects_parent_before_child() -> void:
 	for part_id: String in doc.parts.keys():
 		var part: ShipPart = doc.parts[part_id] as ShipPart
 		if part.parent != "":
-			assert_int(index_of[part_id] as int).append_failure_message(
-				"part '%s' appears before its parent '%s' in part_order()" %
-				[part_id, part.parent]
-			).is_greater(index_of[part.parent] as int)
+			(
+				assert_int(index_of[part_id] as int)
+				. append_failure_message(
+					(
+						"part '%s' appears before its parent '%s' in part_order()"
+						% [part_id, part.parent]
+					)
+				)
+				. is_greater(index_of[part.parent] as int)
+			)
 
 
 func test_part_order_is_stable_across_a_dict_rebuild() -> void:

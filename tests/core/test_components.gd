@@ -3,11 +3,20 @@
 # instance from further definition edits, and check_cycles catches self-containment.
 class_name TestComponents
 extends GdUnitTestSuite
-
 var _data: ShipData
 var _cfg: ShipConfig = ShipConfig.defaults()
 var _family_id: String
 var _manufacturer_id: String
+
+
+## TEMPLATE LINKS ARE OPEN BY DEFAULT since 2026-09-26 ("by default in the prebuilds we dont want
+## any walls in our prebuilds by default"). This suite is about what a ship with LINKS does - its
+## walls, its doors, the rooms they bound or the meshes they cut - so it asks for the hatches the
+## templates used to place, instead of resting on a default that no longer says that.
+func _linked(extra: Dictionary = {}) -> Dictionary:
+	var out: Dictionary = {ShipTemplates.OPT_LINK_MODE: ShipJoint.MODE_HATCHED}
+	out.merge(extra)
+	return out
 
 
 func before() -> void:
@@ -204,7 +213,7 @@ func test_expand_flattens_component_instances() -> void:
 func _carbon_doc() -> ShipDoc:
 	var data: ShipData = ShipData.new()
 	assert_bool(data.load_all()).is_true()
-	return ShipTemplates.build(data, ShipConfig.defaults(), "carbon", {})
+	return ShipTemplates.build(data, ShipConfig.defaults(), "carbon", _linked())
 
 
 ## IMPORT COMPONENTS (ADR 0024/0026): every definition of another ship comes across under a
@@ -215,9 +224,9 @@ func test_import_from_brings_every_definition_the_arms_and_the_ship_itself() -> 
 	var data: ShipData = ShipData.new()
 	assert_bool(data.load_all()).is_true()
 	var cfg: ShipConfig = ShipConfig.defaults()
-	var other: ShipDoc = ShipTemplates.build(data, cfg, "carbon", {})
+	var other: ShipDoc = ShipTemplates.build(data, cfg, "carbon", _linked())
 	var other_parts: int = other.parts.size()
-	var doc: ShipDoc = ShipTemplates.build(data, cfg, "hydrogen", {})
+	var doc: ShipDoc = ShipTemplates.build(data, cfg, "hydrogen", _linked())
 	var before: int = doc.components.size()
 	var added: PackedStringArray = ShipComponents.import_from(doc, other, "CARBON")
 	# The nucleus, one arm, the ship.
@@ -355,7 +364,7 @@ func test_part_at_edits_an_inner_part_through_the_cache() -> void:
 ## of a carbon nucleus pair with what they hang from and read OPEN - the template's joints -
 ## and erasing one puts the wall back; a tunnel on an inner proton keeps its own hatch.
 func test_a_components_inner_parts_pair_and_read_their_definitions_joints() -> void:
-	var doc: ShipDoc = ShipTemplates.build(_data, _cfg, "carbon", {})
+	var doc: ShipDoc = ShipTemplates.build(_data, _cfg, "carbon", _linked())
 	var definition: Dictionary = doc.components[(doc.parts[doc.root] as ShipPart).family]
 	var ids: PackedStringArray = PackedStringArray([doc.root])
 	for inner_id: String in definition["parts"]:
@@ -391,7 +400,7 @@ func test_a_components_inner_parts_pair_and_read_their_definitions_joints() -> v
 ## is HATCHED; two modules are a WALL; an instance answers with its definition root's role, so an
 ## imported arm (a tunnel with its pod) placed on a proton hatches too.
 func test_a_tunnel_meeting_a_module_is_hatched_by_default() -> void:
-	var doc: ShipDoc = ShipTemplates.build(_data, _cfg, "carbon", {})
+	var doc: ShipDoc = ShipTemplates.build(_data, _cfg, "carbon", _linked())
 	var tunnel: String = ""
 	var pod: String = ""
 	for pid: String in doc.part_order():
@@ -406,7 +415,7 @@ func test_a_tunnel_meeting_a_module_is_hatched_by_default() -> void:
 	assert_str(ShipSeams.default_link_for(doc, pod, tunnel)).is_equal(ShipSeams.MODE_HATCHED)
 	assert_str(ShipSeams.default_link_for(doc, pod, doc.root)).is_equal(ShipSeams.MODE_WALL)
 	# An instance of an arm: its root is the tunnel, so it hatches onto a room.
-	var other: ShipDoc = ShipTemplates.build(_data, _cfg, "carbon", {})
+	var other: ShipDoc = ShipTemplates.build(_data, _cfg, "carbon", _linked())
 	var added: PackedStringArray = ShipComponents.import_from(doc, other, "CARBON")
 	var arm_id: String = added[added.size() - 2]
 	var arm: String = ShipComponents.instantiate(doc, arm_id, doc.root)
@@ -429,3 +438,30 @@ func test_definition_order_walks_an_anchored_members_subtree() -> void:
 		inner[part.id] = part
 	var order: PackedStringArray = ShipComponents.definition_order(inner, "cp_0001")
 	assert_array(Array(order)).contains_exactly(["cp_0001", "cp_0009", "cp_0002"])
+
+
+## "by default in the prebuilds we dont want any walls in our prebuilds by default" (2026-09-26).
+## The hatch stays AUTHORED on every link whatever the mode, which is what makes adding a wall
+## later one edit rather than a round of choices.
+func test_a_template_links_open_and_still_authors_its_hatches() -> void:
+	var doc: ShipDoc = ShipTemplates.build(_data, _cfg, "carbon", {})
+	assert_int(doc.joints.size()).is_greater(0)
+	for jid: String in doc.joints:
+		var joint: ShipJoint = doc.joints[jid]
+		assert_str(joint.mode).append_failure_message("a prebuild link stands a wall").is_equal(
+			ShipJoint.MODE_OPEN
+		)
+		(
+			assert_str(joint.hatch_family)
+			. append_failure_message("the hatch was not authored, so adding a wall costs a choice")
+			. is_not_empty()
+		)
+		assert_bool(joint.hatch_params.is_empty()).is_false()
+
+
+## And the picker's lever brings them back, one option, nothing else changed.
+func test_the_link_mode_option_brings_the_hatches_back() -> void:
+	var doc: ShipDoc = ShipTemplates.build(_data, _cfg, "carbon", _linked())
+	assert_int(doc.joints.size()).is_greater(0)
+	for jid: String in doc.joints:
+		assert_str((doc.joints[jid] as ShipJoint).mode).is_equal(ShipJoint.MODE_HATCHED)

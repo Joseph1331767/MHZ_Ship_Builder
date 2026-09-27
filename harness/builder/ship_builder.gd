@@ -134,6 +134,7 @@ var _status_label: Label = null
 var _post_rect: ColorRect = null
 var _mode_option: OptionButton = null
 var _view_toggles: ShipViewToggles = null
+var _layers: ShipLayersControl = null
 var _undo_button: Button = null
 var _redo_button: Button = null
 ## EXPLODE / ASSEMBLE (ADR 0008). The exploded view shows bakes, not the document, so any edit
@@ -207,7 +208,7 @@ func _ready() -> void:
 	_build_tutorial()
 	_build_post_process()
 	_view.setup(_ship_theme, self)
-	_view_toggles.use(_view)
+	_layers.use(_view)
 	_explode_opts = ShipExplodeControl.new(
 		_view.get_parent() as Control, _view, _config, _ship_theme
 	)
@@ -1104,6 +1105,8 @@ func _build_layout() -> void:
 	body.add_child(view_frame)
 	_view = ShipView3D.new()
 	_view.name = "ShipView3D"
+	# THE LAYERS EXPLORER, top left of the view - what the builder draws, never what it holds.
+	_layers = ShipLayersControl.new(view_frame, _ship_theme)
 	_view.part_picked.connect(_on_part_picked)
 	_view.part_double_clicked.connect(_on_part_double_clicked)
 	_view.pick_cleared.connect(_on_pick_cleared)

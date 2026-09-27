@@ -14,18 +14,26 @@ var _default_params: Dictionary
 func before() -> void:
 	_data = ShipData.new()
 	var ok: bool = _data.load_all()
-	assert_bool(ok).append_failure_message(
-		"ShipData.load_all() failed, load_errors=%s" % [str(_data.load_errors)]
-	).is_true()
+	(
+		assert_bool(ok)
+		. append_failure_message(
+			"ShipData.load_all() failed, load_errors=%s" % [str(_data.load_errors)]
+		)
+		. is_true()
+	)
 	var families: PackedStringArray = _data.family_ids()
-	assert_array(families).append_failure_message(
-		"no families loaded from res://data"
-	).is_not_empty()
+	(
+		assert_array(families)
+		. append_failure_message("no families loaded from res://data")
+		. is_not_empty()
+	)
 	_family_id = families[0]
 	var mfrs: PackedStringArray = _data.manufacturers_for(_family_id)
-	assert_array(mfrs).append_failure_message(
-		"no manufacturers for family '%s'" % _family_id
-	).is_not_empty()
+	(
+		assert_array(mfrs)
+		. append_failure_message("no manufacturers for family '%s'" % _family_id)
+		. is_not_empty()
+	)
 	_manufacturer_id = mfrs[0]
 	_default_params = ShapeGen.default_params(_data, _family_id, _manufacturer_id)
 
@@ -35,8 +43,13 @@ func _flush_attach() -> Dictionary:
 
 
 func _part_dict(
-	parent: String, family: String, manufacturer: String, params: Dictionary,
-	attach: Dictionary, scale: Array, part_name: String
+	parent: String,
+	family: String,
+	manufacturer: String,
+	params: Dictionary,
+	attach: Dictionary,
+	scale: Array,
+	part_name: String
 ) -> Dictionary:
 	return {
 		"parent": parent,
@@ -55,8 +68,7 @@ func _part_dict(
 
 func _base_doc_dict() -> Dictionary:
 	var root_dict: Dictionary = _part_dict(
-		"", _family_id, _manufacturer_id, _default_params, _flush_attach(),
-		[1.0, 1.0, 1.0], "root"
+		"", _family_id, _manufacturer_id, _default_params, _flush_attach(), [1.0, 1.0, 1.0], "root"
 	)
 	return {
 		"format": "mhz_ship",
@@ -79,9 +91,13 @@ func _has_code(results: Array[Dictionary], code: String) -> bool:
 
 
 func _assert_code_fires(results: Array[Dictionary], code: String) -> void:
-	assert_bool(_has_code(results, code)).append_failure_message(
-		"expected validate() to report code '%s', got: %s" % [code, str(results)]
-	).is_true()
+	(
+		assert_bool(_has_code(results, code))
+		. append_failure_message(
+			"expected validate() to report code '%s', got: %s" % [code, str(results)]
+		)
+		. is_true()
+	)
 
 
 func test_valid_minimal_doc_reports_no_errors() -> void:
@@ -92,9 +108,11 @@ func test_valid_minimal_doc_reports_no_errors() -> void:
 	for entry: Dictionary in results:
 		if String(entry.get("severity", "")) == "error":
 			error_count += 1
-	assert_int(error_count).append_failure_message(
-		"minimal valid doc reported errors: %s" % str(results)
-	).is_equal(0)
+	(
+		assert_int(error_count)
+		. append_failure_message("minimal valid doc reported errors: %s" % str(results))
+		. is_equal(0)
+	)
 
 
 func test_no_root_fires() -> void:
@@ -109,8 +127,13 @@ func test_orphan_part_fires() -> void:
 	var d: Dictionary = _base_doc_dict()
 	var parts: Dictionary = d["parts"]
 	parts["p_0002"] = _part_dict(
-		"totally_missing_parent_id", _family_id, _manufacturer_id, _default_params,
-		_flush_attach(), [1.0, 1.0, 1.0], "orphan"
+		"totally_missing_parent_id",
+		_family_id,
+		_manufacturer_id,
+		_default_params,
+		_flush_attach(),
+		[1.0, 1.0, 1.0],
+		"orphan"
 	)
 	var doc: ShipDoc = ShipDoc.from_dict(d)
 	var cfg: ShipConfig = ShipConfig.defaults()
@@ -121,12 +144,22 @@ func test_cycle_fires() -> void:
 	var d: Dictionary = _base_doc_dict()
 	var parts: Dictionary = d["parts"]
 	parts["p_0002"] = _part_dict(
-		"p_0003", _family_id, _manufacturer_id, _default_params,
-		_flush_attach(), [1.0, 1.0, 1.0], "cycle_a"
+		"p_0003",
+		_family_id,
+		_manufacturer_id,
+		_default_params,
+		_flush_attach(),
+		[1.0, 1.0, 1.0],
+		"cycle_a"
 	)
 	parts["p_0003"] = _part_dict(
-		"p_0002", _family_id, _manufacturer_id, _default_params,
-		_flush_attach(), [1.0, 1.0, 1.0], "cycle_b"
+		"p_0002",
+		_family_id,
+		_manufacturer_id,
+		_default_params,
+		_flush_attach(),
+		[1.0, 1.0, 1.0],
+		"cycle_b"
 	)
 	var doc: ShipDoc = ShipDoc.from_dict(d)
 	var cfg: ShipConfig = ShipConfig.defaults()
@@ -164,9 +197,13 @@ func test_param_out_of_range_fires() -> void:
 		elif typeof(v) == TYPE_INT:
 			bad_params[key] = 1000000000
 			numeric_keys += 1
-	assert_int(numeric_keys).append_failure_message(
-		"family '%s' has no numeric params to push out of range" % _family_id
-	).is_greater(0)
+	(
+		assert_int(numeric_keys)
+		. append_failure_message(
+			"family '%s' has no numeric params to push out of range" % _family_id
+		)
+		. is_greater(0)
+	)
 	var d: Dictionary = _base_doc_dict()
 	var parts: Dictionary = d["parts"]
 	var root_dict: Dictionary = parts["p_0001"]
@@ -191,8 +228,13 @@ func test_mirror_source_missing_fires() -> void:
 	var d: Dictionary = _base_doc_dict()
 	var parts: Dictionary = d["parts"]
 	var mirror_dict: Dictionary = _part_dict(
-		"p_0001", _family_id, _manufacturer_id, _default_params,
-		_flush_attach(), [1.0, 1.0, 1.0], "broken_mirror"
+		"p_0001",
+		_family_id,
+		_manufacturer_id,
+		_default_params,
+		_flush_attach(),
+		[1.0, 1.0, 1.0],
+		"broken_mirror"
 	)
 	mirror_dict["mirror"] = {"source": "totally_missing_source_id", "plane": "x"}
 	parts["p_0002"] = mirror_dict
@@ -205,14 +247,24 @@ func test_mirror_of_mirror_fires() -> void:
 	var d: Dictionary = _base_doc_dict()
 	var parts: Dictionary = d["parts"]
 	var mirror_b: Dictionary = _part_dict(
-		"p_0001", _family_id, _manufacturer_id, _default_params,
-		_flush_attach(), [1.0, 1.0, 1.0], "mirror_b"
+		"p_0001",
+		_family_id,
+		_manufacturer_id,
+		_default_params,
+		_flush_attach(),
+		[1.0, 1.0, 1.0],
+		"mirror_b"
 	)
 	mirror_b["mirror"] = {"source": "p_0001", "plane": "x"}
 	parts["p_0002"] = mirror_b
 	var mirror_c: Dictionary = _part_dict(
-		"p_0001", _family_id, _manufacturer_id, _default_params,
-		_flush_attach(), [1.0, 1.0, 1.0], "mirror_of_mirror"
+		"p_0001",
+		_family_id,
+		_manufacturer_id,
+		_default_params,
+		_flush_attach(),
+		[1.0, 1.0, 1.0],
+		"mirror_of_mirror"
 	)
 	mirror_c["mirror"] = {"source": "p_0002", "plane": "x"}
 	parts["p_0003"] = mirror_c
@@ -224,7 +276,8 @@ func test_mirror_of_mirror_fires() -> void:
 func test_joint_part_missing_fires() -> void:
 	var d: Dictionary = _base_doc_dict()
 	d["joints"] = {
-		"j_0001": {
+		"j_0001":
+		{
 			"a": "p_0001",
 			"b": "totally_missing_joint_partner",
 			"mode": "open",
@@ -241,11 +294,17 @@ func test_joint_not_overlapping_fires() -> void:
 	var parts: Dictionary = d["parts"]
 	var far_attach: Dictionary = {"yaw": 0.0, "pitch": 0.0, "roll": 0.0, "offset": 1000.0}
 	parts["p_0002"] = _part_dict(
-		"p_0001", _family_id, _manufacturer_id, _default_params,
-		far_attach, [1.0, 1.0, 1.0], "far_away"
+		"p_0001",
+		_family_id,
+		_manufacturer_id,
+		_default_params,
+		far_attach,
+		[1.0, 1.0, 1.0],
+		"far_away"
 	)
 	d["joints"] = {
-		"j_0001": {
+		"j_0001":
+		{
 			"a": "p_0001",
 			"b": "p_0002",
 			"mode": "open",
@@ -280,8 +339,13 @@ func test_component_missing_fires() -> void:
 	var d: Dictionary = _base_doc_dict()
 	var parts: Dictionary = d["parts"]
 	var instance_dict: Dictionary = _part_dict(
-		"p_0001", "totally_missing_component_id", "", {},
-		_flush_attach(), [1.0, 1.0, 1.0], "dangling_instance"
+		"p_0001",
+		"totally_missing_component_id",
+		"",
+		{},
+		_flush_attach(),
+		[1.0, 1.0, 1.0],
+		"dangling_instance"
 	)
 	instance_dict["kind"] = "component_instance"
 	parts["p_0002"] = instance_dict

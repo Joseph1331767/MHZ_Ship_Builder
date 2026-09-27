@@ -14,18 +14,26 @@ var _manufacturer_id: String
 func before() -> void:
 	_data = ShipData.new()
 	var ok: bool = _data.load_all()
-	assert_bool(ok).append_failure_message(
-		"ShipData.load_all() failed, load_errors=%s" % [str(_data.load_errors)]
-	).is_true()
+	(
+		assert_bool(ok)
+		. append_failure_message(
+			"ShipData.load_all() failed, load_errors=%s" % [str(_data.load_errors)]
+		)
+		. is_true()
+	)
 	var families: PackedStringArray = _data.family_ids()
-	assert_array(families).append_failure_message(
-		"no families loaded from res://data"
-	).is_not_empty()
+	(
+		assert_array(families)
+		. append_failure_message("no families loaded from res://data")
+		. is_not_empty()
+	)
 	_family_id = families[0]
 	var mfrs: PackedStringArray = _data.manufacturers_for(_family_id)
-	assert_array(mfrs).append_failure_message(
-		"no manufacturers for family '%s'" % _family_id
-	).is_not_empty()
+	(
+		assert_array(mfrs)
+		. append_failure_message("no manufacturers for family '%s'" % _family_id)
+		. is_not_empty()
+	)
 	_manufacturer_id = mfrs[0]
 
 
@@ -81,9 +89,13 @@ func test_ok_reason_on_a_legal_check() -> void:
 	_add_child(doc, doc.root)
 	var cfg: ShipConfig = _lenient_cfg()
 	var result: Dictionary = ShipGate.check_save(doc, _data, cfg)
-	assert_bool(bool(result["ok"])).append_failure_message(
-		"a 3-part doc with lenient budgets should pass check_save(), got: %s" % [result]
-	).is_true()
+	(
+		assert_bool(bool(result["ok"]))
+		. append_failure_message(
+			"a 3-part doc with lenient budgets should pass check_save(), got: %s" % [result]
+		)
+		. is_true()
+	)
 	assert_int(int(result["reason"])).is_equal(ShipGate.Reason.OK)
 	assert_str(String(result["message"])).is_equal("")
 
@@ -92,20 +104,34 @@ func test_complexity_reason_fires_and_names_complexity() -> void:
 	var doc: ShipDoc = _new_doc()
 	var cfg: ShipConfig = _lenient_cfg()
 	var base: float = ShipComplexity.base_cost(_data, _family_id)
-	assert_float(base).append_failure_message(
-		"family '%s' has zero base complexity -- a tiny cap below it would not be a real test"
-		% _family_id
-	).is_greater(0.0)
+	(
+		assert_float(base)
+		. append_failure_message(
+			(
+				"family '%s' has zero base complexity -- a tiny cap below it would not be a real test"
+				% _family_id
+			)
+		)
+		. is_greater(0.0)
+	)
 	cfg.max_complexity = 0.5 * base
 
 	var add_result: Dictionary = ShipGate.check_add(doc, _data, cfg, _family_id, true)
-	assert_bool(bool(add_result["ok"])).append_failure_message(
-		"adding a part over a tiny complexity cap must be refused, got: %s" % [add_result]
-	).is_false()
+	(
+		assert_bool(bool(add_result["ok"]))
+		. append_failure_message(
+			"adding a part over a tiny complexity cap must be refused, got: %s" % [add_result]
+		)
+		. is_false()
+	)
 	assert_int(int(add_result["reason"])).is_equal(ShipGate.Reason.COMPLEXITY)
-	assert_str(String(add_result["message"])).append_failure_message(
-		"a COMPLEXITY refusal message must name COMPLEXITY, got: '%s'" % [add_result["message"]]
-	).contains("COMPLEXITY")
+	(
+		assert_str(String(add_result["message"]))
+		. append_failure_message(
+			"a COMPLEXITY refusal message must name COMPLEXITY, got: '%s'" % [add_result["message"]]
+		)
+		. contains("COMPLEXITY")
+	)
 
 	# The palette's exploit-preserving hint differs by whether the caller is asking about a
 	# symmetric (mirrored) placement or not -- both hints must still name COMPLEXITY.
@@ -126,9 +152,13 @@ func test_complexity_reason_fires_from_check_doc_when_already_over() -> void:
 	cfg.max_complexity = used * 0.5
 
 	var result: Dictionary = ShipGate.check_doc(doc, _data, cfg)
-	assert_bool(bool(result["ok"])).append_failure_message(
-		"a doc already over its complexity cap must fail check_doc(), got: %s" % [result]
-	).is_false()
+	(
+		assert_bool(bool(result["ok"]))
+		. append_failure_message(
+			"a doc already over its complexity cap must fail check_doc(), got: %s" % [result]
+		)
+		. is_false()
+	)
 	assert_int(int(result["reason"])).is_equal(ShipGate.Reason.COMPLEXITY)
 	assert_str(String(result["message"])).contains("COMPLEXITY")
 
@@ -142,17 +172,25 @@ func test_min_parts_reason_refuses_below_three_and_passes_at_exactly_three() -> 
 	var one_part: Dictionary = ShipGate.check_save(doc, _data, cfg)
 	assert_bool(bool(one_part["ok"])).is_false()
 	assert_int(int(one_part["reason"])).is_equal(ShipGate.Reason.MIN_PARTS)
-	assert_str(String(one_part["message"])).append_failure_message(
-		"a MIN_PARTS refusal must name the part count, got: '%s'" % [one_part["message"]]
-	).contains("3")
+	(
+		assert_str(String(one_part["message"]))
+		. append_failure_message(
+			"a MIN_PARTS refusal must name the part count, got: '%s'" % [one_part["message"]]
+		)
+		. contains("3")
+	)
 
 	# 2 parts.
 	@warning_ignore("return_value_discarded")
 	_add_child(doc, doc.root)
 	var two_parts: Dictionary = ShipGate.check_save(doc, _data, cfg)
-	assert_bool(bool(two_parts["ok"])).append_failure_message(
-		"a 2-part doc must still be refused (min is 3), got: %s" % [two_parts]
-	).is_false()
+	(
+		assert_bool(bool(two_parts["ok"]))
+		. append_failure_message(
+			"a 2-part doc must still be refused (min is 3), got: %s" % [two_parts]
+		)
+		. is_false()
+	)
 	assert_int(int(two_parts["reason"])).is_equal(ShipGate.Reason.MIN_PARTS)
 
 	# Exactly 3 parts: passes.
@@ -160,10 +198,16 @@ func test_min_parts_reason_refuses_below_three_and_passes_at_exactly_three() -> 
 	_add_child(doc, doc.root)
 	assert_int(doc.parts.size()).is_equal(3)
 	var three_parts: Dictionary = ShipGate.check_save(doc, _data, cfg)
-	assert_bool(bool(three_parts["ok"])).append_failure_message(
-		"a doc with exactly the minimum part count must pass check_save(), got: %s"
-		% [three_parts]
-	).is_true()
+	(
+		assert_bool(bool(three_parts["ok"]))
+		. append_failure_message(
+			(
+				"a doc with exactly the minimum part count must pass check_save(), got: %s"
+				% [three_parts]
+			)
+		)
+		. is_true()
+	)
 	assert_int(int(three_parts["reason"])).is_equal(ShipGate.Reason.OK)
 
 
@@ -177,17 +221,25 @@ func test_budget_bbox_reason_fires_and_names_the_worst_axis() -> void:
 	m.bbox = AABB(Vector3(-0.5, -2.5, -0.5), Vector3(1.0, 5.0, 1.0))
 
 	var result: Dictionary = ShipGate.check_metrics(m, cfg)
-	assert_bool(bool(result["ok"])).append_failure_message(
-		"a bbox over its per-axis cap must be refused, got: %s" % [result]
-	).is_false()
+	(
+		assert_bool(bool(result["ok"]))
+		. append_failure_message("a bbox over its per-axis cap must be refused, got: %s" % [result])
+		. is_false()
+	)
 	assert_int(int(result["reason"])).is_equal(ShipGate.Reason.BUDGET_BBOX)
 	var message: String = String(result["message"])
-	assert_str(message).append_failure_message(
-		"a BUDGET_BBOX refusal must name BBOX, got: '%s'" % [message]
-	).contains("BBOX")
-	assert_str(message).append_failure_message(
-		"a BUDGET_BBOX refusal must name the worst axis (Y here), got: '%s'" % [message]
-	).contains("Y")
+	(
+		assert_str(message)
+		. append_failure_message("a BUDGET_BBOX refusal must name BBOX, got: '%s'" % [message])
+		. contains("BBOX")
+	)
+	(
+		assert_str(message)
+		. append_failure_message(
+			"a BUDGET_BBOX refusal must name the worst axis (Y here), got: '%s'" % [message]
+		)
+		. contains("Y")
+	)
 
 
 func test_budget_volume_reason_fires_and_names_volume() -> void:
@@ -199,9 +251,13 @@ func test_budget_volume_reason_fires_and_names_volume() -> void:
 	var result: Dictionary = ShipGate.check_metrics(m, cfg)
 	assert_bool(bool(result["ok"])).is_false()
 	assert_int(int(result["reason"])).is_equal(ShipGate.Reason.BUDGET_VOLUME)
-	assert_str(String(result["message"])).append_failure_message(
-		"a BUDGET_VOLUME refusal must name VOLUME, got: '%s'" % [result["message"]]
-	).contains("VOLUME")
+	(
+		assert_str(String(result["message"]))
+		. append_failure_message(
+			"a BUDGET_VOLUME refusal must name VOLUME, got: '%s'" % [result["message"]]
+		)
+		. contains("VOLUME")
+	)
 
 
 func test_budget_weight_reason_fires_and_names_weight() -> void:
@@ -213,9 +269,13 @@ func test_budget_weight_reason_fires_and_names_weight() -> void:
 	var result: Dictionary = ShipGate.check_metrics(m, cfg)
 	assert_bool(bool(result["ok"])).is_false()
 	assert_int(int(result["reason"])).is_equal(ShipGate.Reason.BUDGET_WEIGHT)
-	assert_str(String(result["message"])).append_failure_message(
-		"a BUDGET_WEIGHT refusal must name WEIGHT, got: '%s'" % [result["message"]]
-	).contains("WEIGHT")
+	(
+		assert_str(String(result["message"]))
+		. append_failure_message(
+			"a BUDGET_WEIGHT refusal must name WEIGHT, got: '%s'" % [result["message"]]
+		)
+		. contains("WEIGHT")
+	)
 
 
 func test_budget_cost_reason_fires_and_names_cost() -> void:
@@ -227,9 +287,13 @@ func test_budget_cost_reason_fires_and_names_cost() -> void:
 	var result: Dictionary = ShipGate.check_metrics(m, cfg)
 	assert_bool(bool(result["ok"])).is_false()
 	assert_int(int(result["reason"])).is_equal(ShipGate.Reason.BUDGET_COST)
-	assert_str(String(result["message"])).append_failure_message(
-		"a BUDGET_COST refusal must name COST, got: '%s'" % [result["message"]]
-	).contains("COST")
+	(
+		assert_str(String(result["message"]))
+		. append_failure_message(
+			"a BUDGET_COST refusal must name COST, got: '%s'" % [result["message"]]
+		)
+		. contains("COST")
+	)
 
 
 func test_every_reason_value_is_reachable() -> void:
@@ -246,13 +310,24 @@ func test_every_reason_value_is_reachable() -> void:
 		ShipGate.Reason.MIN_PARTS,
 	]
 	var all_values: Array = ShipGate.Reason.values()
-	assert_int(covered.size()).append_failure_message(
-		(
-			"ShipGate.Reason has %d members but this suite's 'covered' list only names %d -- " +
-			"a new Reason was added without a test driving it"
-		) % [all_values.size(), covered.size()]
-	).is_equal(all_values.size())
+	(
+		assert_int(covered.size())
+		. append_failure_message(
+			(
+				(
+					"ShipGate.Reason has %d members but this suite's 'covered' list only names %d -- "
+					+ "a new Reason was added without a test driving it"
+				)
+				% [all_values.size(), covered.size()]
+			)
+		)
+		. is_equal(all_values.size())
+	)
 	for value: int in all_values:
-		assert_bool(covered.has(value)).append_failure_message(
-			"Reason value %d is not covered by any test in this suite" % value
-		).is_true()
+		(
+			assert_bool(covered.has(value))
+			. append_failure_message(
+				"Reason value %d is not covered by any test in this suite" % value
+			)
+			. is_true()
+		)

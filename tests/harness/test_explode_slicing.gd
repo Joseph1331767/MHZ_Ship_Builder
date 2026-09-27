@@ -4,11 +4,20 @@
 # sphere where the rooms do not matter, a carbon where they do.
 class_name TestExplodeSlicing
 extends GdUnitTestSuite
-
 const SETTINGS_TEST_PATH: String = "user://test_explode_settings.json"
 
 var _data: ShipData
 var _cfg: ShipConfig
+
+
+## TEMPLATE LINKS ARE OPEN BY DEFAULT since 2026-09-26 ("by default in the prebuilds we dont want
+## any walls in our prebuilds by default"). This suite is about what a ship with LINKS does - its
+## walls, its doors, the rooms they bound or the meshes they cut - so it asks for the hatches the
+## templates used to place, instead of resting on a default that no longer says that.
+func _linked(extra: Dictionary = {}) -> Dictionary:
+	var out: Dictionary = {ShipTemplates.OPT_LINK_MODE: ShipJoint.MODE_HATCHED}
+	out.merge(extra)
+	return out
 
 
 func before() -> void:
@@ -27,7 +36,9 @@ func _lone_sphere() -> ShipDoc:
 
 
 func _carbon() -> ShipDoc:
-	return ShipTemplates.build(_data, _cfg, "carbon", {ShipTemplates.OPT_ROOM_FAMILY: "sphere_pod"})
+	return ShipTemplates.build(
+		_data, _cfg, "carbon", _linked({ShipTemplates.OPT_ROOM_FAMILY: "sphere_pod"})
+	)
 
 
 func _cut(doc: ShipDoc) -> Dictionary:

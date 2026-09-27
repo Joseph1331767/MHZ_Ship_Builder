@@ -105,3 +105,16 @@ eventually what is PRINTED, the modes are about what SHAPE the seam takes.
 It works in every render type, not only INTERIOR: a `material_override` beats a per-surface one, so
 `ShipExplodeView` dresses a piece per surface while there is a wall to drop. Measured, the same
 toggle moves 6,897 px in INTERIOR and 24,729 px in X-RAY.
+
+
+### Prebuilds carry no walls, and the layers are an explorer (ADR 0047, 2026-09-26)
+
+Template links are OPEN by default (`ShipTemplates.OPT_LINK_MODE`), so a prebuild bakes with no wall
+face on it; the hatch stays authored on every link, and the picker's LINKS row brings the walls back
+as HATCHED or SEALED. `ShipLayersControl` is the explorer - WALLS, CUTS and DOORS, one checkbox each,
+built to take more.
+
+**And the thing that looked like walls was not.** On a hatched carbon the wall surface is 12.5 m2
+against 552.3 m2 of CUT - dropping WALLS changes 131 px, dropping CUTS changes 105,233. The flat
+faces between exploded chunks are the room split (ADR 0036) and the printing dice (ADR 0032/0041),
+and they sit flush because SLICE GAP and CHUNK GAP default to 0.00 m.

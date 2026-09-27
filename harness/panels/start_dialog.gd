@@ -64,6 +64,7 @@ var _template_list: ItemList = null
 var _template_ids: PackedStringArray = PackedStringArray()
 var _template_detail: Label = null
 var _room_picker: OptionButton = null
+var _link_picker: OptionButton = null
 var _hall_picker: OptionButton = null
 var _room_span: NumericField = null
 var _tunnel_length: NumericField = null
@@ -231,6 +232,7 @@ func _build_template_box(box: VBoxContainer) -> void:
 	_room_span = _size_row("ROOM SIZE", 0.5, 40.0, cfg.room_span_m)
 	_tunnel_length = _size_row("TUNNEL LEN", 0.0, 40.0, cfg.tunnel_length_m)
 	_tunnel_bore = _size_row("TUNNEL BORE", 0.2, 10.0, cfg.tunnel_bore_m)
+	_link_picker = _link_row()
 
 
 ## One labelled family picker. Lists every family, not only root-capable ones: a tunnel is never
@@ -247,6 +249,22 @@ func _shape_row(label_text: String) -> OptionButton:
 	picker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	picker.item_selected.connect(_on_template_option_changed)
 	row.add_child(picker)
+	return picker
+
+
+## HOW EVERY CONNECTION IS LINKED. Open by default and listed first, because "by default in the
+## prebuilds we dont want any walls in our prebuilds by default" (2026-09-26) - and the hatch is
+## authored on every joint whichever of these is picked, so the other two cost nothing to choose
+## later, one link at a time, in the seam menu.
+func _link_row() -> OptionButton:
+	var picker: OptionButton = _shape_row("LINKS")
+	picker.add_item("OPEN - ONE ROOM, NO WALLS")
+	picker.set_item_metadata(0, ShipJoint.MODE_OPEN)
+	picker.add_item("HATCHED - A WALL WITH A DOOR")
+	picker.set_item_metadata(1, ShipJoint.MODE_HATCHED)
+	picker.add_item("SEALED - A SOLID WALL")
+	picker.set_item_metadata(2, ShipJoint.MODE_SEALED)
+	picker.select(0)
 	return picker
 
 
@@ -293,7 +311,10 @@ func _refresh_templates() -> void:
 	_template_ids = ShipTemplates.ids(data) if data != null else PackedStringArray()
 	for tid: String in _template_ids:
 		_template_list.add_item(
-			"%s   (%d PARTS)" % [ShipTemplates.label_of(data, tid), ShipTemplates.part_count(data, tid)]
+			(
+				"%s   (%d PARTS)"
+				% [ShipTemplates.label_of(data, tid), ShipTemplates.part_count(data, tid)]
+			)
 		)
 	if _template_list.item_count > 0:
 		_template_list.select(0)
@@ -356,10 +377,10 @@ func _template_options() -> Dictionary:
 		ShipTemplates.OPT_ROOM_FAMILY: _picker_id(_room_picker),
 		ShipTemplates.OPT_HALL_FAMILY: _picker_id(_hall_picker),
 		ShipTemplates.OPT_ROOM_SPAN: _room_span.get_value() if _room_span != null else 0.0,
-		ShipTemplates.OPT_TUNNEL_LENGTH: (
-			_tunnel_length.get_value() if _tunnel_length != null else 0.0
-		),
+		ShipTemplates.OPT_TUNNEL_LENGTH:
+		_tunnel_length.get_value() if _tunnel_length != null else 0.0,
 		ShipTemplates.OPT_TUNNEL_BORE: _tunnel_bore.get_value() if _tunnel_bore != null else 0.0,
+		ShipTemplates.OPT_LINK_MODE: _picker_id(_link_picker),
 	}
 
 

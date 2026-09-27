@@ -25,9 +25,13 @@ var _data: ShipData
 func before() -> void:
 	_data = ShipData.new()
 	var ok: bool = _data.load_all()
-	assert_bool(ok).append_failure_message(
-		"ShipData.load_all() failed, load_errors=%s" % [str(_data.load_errors)]
-	).is_true()
+	(
+		assert_bool(ok)
+		. append_failure_message(
+			"ShipData.load_all() failed, load_errors=%s" % [str(_data.load_errors)]
+		)
+		. is_true()
+	)
 
 
 func _zeroed(d: Dictionary) -> Dictionary:
@@ -104,17 +108,27 @@ func _by_id(targets: Array[Dictionary], id: String) -> Dictionary:
 
 func test_for_shape_is_deterministic_same_shape_same_order() -> void:
 	var shape: ResolvedShape = _find_shape(ResolvedShape.Base.BOX)
-	assert_object(shape).append_failure_message(
-		"no family in res://data resolves to a BOX base primitive -- cannot test determinism"
-	).is_not_null()
+	(
+		assert_object(shape)
+		. append_failure_message(
+			"no family in res://data resolves to a BOX base primitive -- cannot test determinism"
+		)
+		. is_not_null()
+	)
 	var first: Array[Dictionary] = SnapTargets.for_shape(shape)
 	var second: Array[Dictionary] = SnapTargets.for_shape(shape)
 	# var_to_str() serialises the whole nested Array[Dictionary] (ids, Vector3s, kinds) in order,
 	# so an equal string is both "same content" and "same order" in one assertion.
-	assert_str(var_to_str(second)).append_failure_message(
-		"SnapTargets.for_shape() returned a different array (or order) for the same shape " +
-		"on a second call -- determinism is the whole contract (section 1)"
-	).is_equal(var_to_str(first))
+	(
+		assert_str(var_to_str(second))
+		. append_failure_message(
+			(
+				"SnapTargets.for_shape() returned a different array (or order) for the same shape "
+				+ "on a second call -- determinism is the whole contract (section 1)"
+			)
+		)
+		. is_equal(var_to_str(first))
+	)
 
 
 func test_ids_are_unique_within_every_base_shape() -> void:
@@ -128,26 +142,42 @@ func test_ids_are_unique_within_every_base_shape() -> void:
 	]
 	for base: int in bases:
 		var shape: ResolvedShape = _find_shape(base)
-		assert_object(shape).append_failure_message(
-			"no family in res://data resolves to base enum %d -- cannot test id uniqueness for it"
-			% base
-		).is_not_null()
+		(
+			assert_object(shape)
+			. append_failure_message(
+				(
+					"no family in res://data resolves to base enum %d -- cannot test id uniqueness for it"
+					% base
+				)
+			)
+			. is_not_null()
+		)
 		var seen: Dictionary = {}
 		for target: Dictionary in SnapTargets.for_shape(shape):
 			var id: String = String(target.get("id", ""))
-			assert_bool(seen.has(id)).append_failure_message(
-				"duplicate snap id '%s' within one shape's for_shape() array (base enum %d)"
-				% [id, base]
-			).is_false()
+			(
+				assert_bool(seen.has(id))
+				. append_failure_message(
+					(
+						"duplicate snap id '%s' within one shape's for_shape() array (base enum %d)"
+						% [id, base]
+					)
+				)
+				. is_false()
+			)
 			seen[id] = true
 
 
 func test_unit_box_face_plus_x_is_exact_position_and_normal() -> void:
 	var shape: ResolvedShape = _unit_box()
 	var target: Dictionary = _by_id(SnapTargets.for_shape(shape), "face_+x")
-	assert_dict(target).append_failure_message(
-		"SnapTargets.for_shape() produced no 'face_+x' target for a unit BOX"
-	).is_not_empty()
+	(
+		assert_dict(target)
+		. append_failure_message(
+			"SnapTargets.for_shape() produced no 'face_+x' target for a unit BOX"
+		)
+		. is_not_empty()
+	)
 
 	var pos: Vector3 = target.get("local_pos", Vector3.ZERO)
 	var normal: Vector3 = target.get("normal", Vector3.ZERO)
@@ -155,15 +185,23 @@ func test_unit_box_face_plus_x_is_exact_position_and_normal() -> void:
 	# there is exactly 0.0, well under SURFACE_EPS (1e-9), so _project_to_surface() returns it
 	# untouched before taking a single Newton step. There is no projection error to tolerate, so
 	# the position tolerance is float-noise-tight rather than geometry-tolerant.
-	assert_vector(pos).append_failure_message(
-		"face_+x of a half-extent-1 box should sit at exactly (1, 0, 0), got %s" % pos
-	).is_equal_approx(Vector3(1.0, 0.0, 0.0), TOL_TIGHT)
+	(
+		assert_vector(pos)
+		. append_failure_message(
+			"face_+x of a half-extent-1 box should sit at exactly (1, 0, 0), got %s" % pos
+		)
+		. is_equal_approx(Vector3(1.0, 0.0, 0.0), TOL_TIGHT)
+	)
 	# The normal comes from a 6-sample central-difference gradient (GRADIENT_EPS = 1e-4), which is
 	# exact in direction here (a flat axis-aligned face has zero cross-axis curvature) but carries
 	# float rounding from the finite-difference division, hence the looser 1e-5 band.
-	assert_vector(normal).append_failure_message(
-		"outward normal at face_+x of a box should be exactly (1, 0, 0), got %s" % normal
-	).is_equal_approx(Vector3(1.0, 0.0, 0.0), TOL_NORMAL)
+	(
+		assert_vector(normal)
+		. append_failure_message(
+			"outward normal at face_+x of a box should be exactly (1, 0, 0), got %s" % normal
+		)
+		. is_equal_approx(Vector3(1.0, 0.0, 0.0), TOL_NORMAL)
+	)
 
 
 func test_every_snap_target_lies_on_the_resolved_surface() -> void:
@@ -193,22 +231,35 @@ func test_every_snap_target_lies_on_the_resolved_surface() -> void:
 			# constant was raised from 6 to 24 because 6 left torus_ring's rim targets 1.8 mm out —
 			# the damping that keeps a sphere-trace from overshooting also slows a projection.
 			# Tripping this now means the projection genuinely failed, not that the bar is tight.
-			assert_float(d).append_failure_message(
-				(
-					"family '%s' manufacturer '%s': snap target '%s' sits %f m off the " +
-					"resolved surface (local_pos=%s)"
-				) % [family_id, mfr_id, String(target.get("id", "")), d, pos]
-			).is_less(1e-3)
-	assert_bool(checked_any).append_failure_message(
-		"no family/manufacturer pair in res://data produced any snap target to check"
-	).is_true()
+			(
+				assert_float(d)
+				. append_failure_message(
+					(
+						(
+							"family '%s' manufacturer '%s': snap target '%s' sits %f m off the "
+							+ "resolved surface (local_pos=%s)"
+						)
+						% [family_id, mfr_id, String(target.get("id", "")), d, pos]
+					)
+				)
+				. is_less(1e-3)
+			)
+	(
+		assert_bool(checked_any)
+		. append_failure_message(
+			"no family/manufacturer pair in res://data produced any snap target to check"
+		)
+		. is_true()
+	)
 
 
 func test_cylinder_has_exactly_eight_rim_points() -> void:
 	var shape: ResolvedShape = _find_shape(ResolvedShape.Base.CYLINDER)
-	assert_object(shape).append_failure_message(
-		"no family in res://data resolves to a CYLINDER base primitive"
-	).is_not_null()
+	(
+		assert_object(shape)
+		. append_failure_message("no family in res://data resolves to a CYLINDER base primitive")
+		. is_not_null()
+	)
 	var rim_count: int = 0
 	for target: Dictionary in SnapTargets.for_shape(shape):
 		if String(target.get("id", "")).begins_with("rim_"):
@@ -216,9 +267,13 @@ func test_cylinder_has_exactly_eight_rim_points() -> void:
 	# RIM_SEGMENTS is FIXED at 8 by API_CONTRACT_SPORE section 1 because the count generates the
 	# ids -- asserting against the literal 8 (not just the constant) catches an accidental change
 	# to the constant itself, which would be a silent contract break.
-	assert_int(rim_count).append_failure_message(
-		"cylinder rim ring should have exactly 8 points, got %d" % rim_count
-	).is_equal(8)
+	(
+		assert_int(rim_count)
+		. append_failure_message(
+			"cylinder rim ring should have exactly 8 points, got %d" % rim_count
+		)
+		. is_equal(8)
+	)
 	assert_int(SnapTargets.RIM_SEGMENTS).is_equal(8)
 
 
@@ -233,17 +288,27 @@ func test_every_shape_carries_a_center_target_first() -> void:
 	]
 	for base: int in bases:
 		var shape: ResolvedShape = _find_shape(base)
-		assert_object(shape).append_failure_message(
-			"no family in res://data resolves to base enum %d" % base
-		).is_not_null()
+		(
+			assert_object(shape)
+			. append_failure_message("no family in res://data resolves to base enum %d" % base)
+			. is_not_null()
+		)
 		var targets: Array[Dictionary] = SnapTargets.for_shape(shape)
-		assert_array(targets).append_failure_message(
-			"for_shape() returned no targets at all for base enum %d" % base
-		).is_not_empty()
+		(
+			assert_array(targets)
+			. append_failure_message(
+				"for_shape() returned no targets at all for base enum %d" % base
+			)
+			. is_not_empty()
+		)
 		var first: Dictionary = targets[0]
-		assert_str(String(first.get("id", ""))).append_failure_message(
-			"the 'center' target must be element 0 of for_shape() (base enum %d)" % base
-		).is_equal("center")
+		(
+			assert_str(String(first.get("id", "")))
+			. append_failure_message(
+				"the 'center' target must be element 0 of for_shape() (base enum %d)" % base
+			)
+			. is_equal("center")
+		)
 		assert_str(String(first.get("kind", ""))).is_equal("center")
 		var pos: Vector3 = first.get("local_pos", Vector3.ONE)
 		assert_vector(pos).is_equal_approx(Vector3.ZERO, TOL_TIGHT)
@@ -253,17 +318,25 @@ func test_nearest_returns_empty_beyond_tolerance_and_finds_close_target() -> voi
 	var shape: ResolvedShape = _unit_box()
 	var far_point: Vector3 = Vector3(50.0, 50.0, 50.0)
 	var miss: Dictionary = SnapTargets.nearest(shape, far_point, 0.5)
-	assert_dict(miss).append_failure_message(
-		"nearest() should return {} for a point far outside tolerance, got %s" % miss
-	).is_empty()
+	(
+		assert_dict(miss)
+		. append_failure_message(
+			"nearest() should return {} for a point far outside tolerance, got %s" % miss
+		)
+		. is_empty()
+	)
 
 	# Scale is ONE here, so the scaled and unscaled frames coincide and a point just off the
 	# analytic face_+x target should be picked up well inside a generous 0.5 m tolerance.
 	var near_point: Vector3 = Vector3(1.05, 0.0, 0.0)
 	var hit: Dictionary = SnapTargets.nearest(shape, near_point, 0.5)
-	assert_dict(hit).append_failure_message(
-		"nearest() should find 'face_+x' for a point 0.05 m off it within a 0.5 m tolerance"
-	).is_not_empty()
+	(
+		assert_dict(hit)
+		. append_failure_message(
+			"nearest() should find 'face_+x' for a point 0.05 m off it within a 0.5 m tolerance"
+		)
+		. is_not_empty()
+	)
 	assert_str(String(hit.get("id", ""))).is_equal("face_+x")
 
 
@@ -277,16 +350,24 @@ func test_apply_scale_scales_position_and_keeps_normal_unit_length() -> void:
 	var pos: Vector3 = scaled.get("local_pos", Vector3.ZERO)
 	var normal: Vector3 = scaled.get("normal", Vector3.ZERO)
 	# Position scales componentwise: (1, 0, 0) * (2, 3, 4) = (2, 0, 0).
-	assert_vector(pos).append_failure_message(
-		"apply_scale() should scale local_pos componentwise, got %s" % pos
-	).is_equal_approx(Vector3(2.0, 0.0, 0.0), TOL_TIGHT)
+	(
+		assert_vector(pos)
+		. append_failure_message("apply_scale() should scale local_pos componentwise, got %s" % pos)
+		. is_equal_approx(Vector3(2.0, 0.0, 0.0), TOL_TIGHT)
+	)
 	# The normal is axis-aligned with the only nonzero scale component it touches (x), so dividing
 	# by scale and renormalising leaves its direction unchanged; the property under test is that it
 	# is still unit length after the divide-then-renormalise.
-	assert_float(normal.length()).append_failure_message(
-		"apply_scale() must leave the normal unit-length, got length=%f (normal=%s)"
-		% [normal.length(), normal]
-	).is_equal_approx(1.0, 1e-6)
+	(
+		assert_float(normal.length())
+		. append_failure_message(
+			(
+				"apply_scale() must leave the normal unit-length, got length=%f (normal=%s)"
+				% [normal.length(), normal]
+			)
+		)
+		. is_equal_approx(1.0, 1e-6)
+	)
 	assert_vector(normal).is_equal_approx(Vector3(1.0, 0.0, 0.0), TOL_NORMAL)
 
 	# A non-axis-aligned normal (a box corner) exercises the general divide-then-renormalise path
@@ -295,7 +376,13 @@ func test_apply_scale_scales_position_and_keeps_normal_unit_length() -> void:
 	assert_dict(corner).is_not_empty()
 	var corner_scaled: Dictionary = SnapTargets.apply_scale(corner, scale)
 	var corner_normal: Vector3 = corner_scaled.get("normal", Vector3.ZERO)
-	assert_float(corner_normal.length()).append_failure_message(
-		"apply_scale() must leave a non-axis-aligned normal unit-length too, got length=%f"
-		% corner_normal.length()
-	).is_equal_approx(1.0, 1e-6)
+	(
+		assert_float(corner_normal.length())
+		. append_failure_message(
+			(
+				"apply_scale() must leave a non-axis-aligned normal unit-length too, got length=%f"
+				% corner_normal.length()
+			)
+		)
+		. is_equal_approx(1.0, 1e-6)
+	)

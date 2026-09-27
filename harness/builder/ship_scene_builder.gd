@@ -163,11 +163,16 @@ class PartVisual:
 	var has_seam: bool = false
 
 
-## THE WALLS LAYER, off by default in the INTERIOR mode (ADR 0046). A PROPERTY rather than a
-## setter because this class stands at gdlint's thirty-public-method cap; the setter is private,
-## so assigning it still rebuilds the materials and the budget is untouched.
-var walls_hidden: bool = true:
-	set = _set_walls_hidden
+## THE LAYERS THAT ARE NOT DRAWN - `ShipCsgBake.SURFACE_*` names, plus
+## `ShipLayersControl.LAYER_DOOR` (ADR 0046, extended 2026-09-26). WALLS start dropped, because
+## the mode that gains most from the switch is INTERIOR and its whole purpose is looking into
+## rooms.
+##
+## A PROPERTY rather than a setter, because this class stands at gdlint's thirty-public-method
+## cap - gdlint counts `func`, not `var`. Assign the WHOLE array and the setter rebuilds the
+## materials; mutating it in place does nothing, which is why nothing here hands the array out.
+var hidden_layers: PackedStringArray = PackedStringArray([ShipCsgBake.SURFACE_WALL]):
+	set = _set_hidden_layers
 
 var _theme: ShipTheme = null
 var _mesh_gen: ShipMeshGen = ShipMeshGen.new()
@@ -940,7 +945,7 @@ func materials_for(mode: int, selected: bool) -> Array:
 ## wall thickness at every opening) both sides; nothing is translucent and there is no wire, so
 ## the near wall is simply not there and the far cavity wall faces the camera from any angle.
 func inside_materials(selected: bool) -> Dictionary:
-	var key: String = "inside|%d|%d" % [int(selected), int(walls_hidden)]
+	var key: String = "inside|%d|%s" % [int(selected), "/".join(hidden_layers)]
 	if _solid_materials.has(key):
 		return _solid_materials[key]
 	# The faceted shader is cull_disabled by design (mirrored twins, F7); here each surface is
@@ -967,20 +972,16 @@ func inside_materials(selected: bool) -> Dictionary:
 		"exterior": _faceted_material(DisplayMode.SHADED_WIRE, selected, false, "front"),
 		"interior": _faceted_material(DisplayMode.SHADED_WIRE, selected, false, "back"),
 		"cut": _faceted_material(DisplayMode.SHADED_WIRE, selected, false),
-		# Shown, a wall wears the CUT material: both sides drawn, because a wall is the one
-		# surface the camera can legitimately meet from either room.
-		"wall":
-		(
-			_hidden_material()
-			if walls_hidden
-			else _faceted_material(DisplayMode.SHADED_WIRE, selected, false)
-		),
+		# A wall wears the CUT material: both sides drawn, because a wall is the one surface the
+		# camera can legitimately meet from either room.
+		"wall": _faceted_material(DisplayMode.SHADED_WIRE, selected, false),
+		# What a DOOR leaf is shaded from. Never dropped with the cut layer - a leaf is its own
+		# thing and has its own switch - so it is kept aside before the layers come off.
+		"cut_solid": _faceted_material(DisplayMode.SHADED_WIRE, selected, false),
 		"wire": null,
 	}
-	for name: String in ["exterior", "interior", "cut", "wall"]:
+	for name: String in ["exterior", "interior", "cut", "wall", "cut_solid"]:
 		var m: ShaderMaterial = out[name] as ShaderMaterial
-		if m == null:  # the wall while the layer is off - a plain hidden StandardMaterial3D
-			continue
 		m.set_shader_parameter("cut_plane", _cut_plane)
 		m.set_shader_parameter("depth_strength", INTERIOR_DEPTH_STRENGTH)
 	# The cavity wall is a bowl, and a bowl lit flat reads as a ball (measured: "filled solid").
@@ -988,6 +989,12 @@ func inside_materials(selected: bool) -> Dictionary:
 	# does; the far outer wall's inner side keeps a higher floor so the wall thickness reads.
 	(out["interior"] as ShaderMaterial).set_shader_parameter("ambient", INTERIOR_CAVITY_AMBIENT)
 	(out["exterior"] as ShaderMaterial).set_shader_parameter("ambient", INTERIOR_AMBIENT)
+	# THE LAYERS COME OFF LAST, once every material is shaded - a dropped one is swapped for a
+	# fully transparent material rather than left out, because a surface with no override would
+	# simply fall back to the mesh's own and draw anyway.
+	for layer: String in hidden_layers:
+		if out.has(layer):
+			out[layer] = _hidden_material()
 	_solid_materials[key] = out
 	return out
 
@@ -1119,10 +1126,10 @@ func scene_aabb() -> AABB:
 
 ## Rebuild every cached material against the current palette. Called after a palette flip
 ## (ShipTheme.palette_changed) so an alerting budget recolours the 3D view too.
-func _set_walls_hidden(on: bool) -> void:
-	if on == walls_hidden:
+func _set_hidden_layers(layers: PackedStringArray) -> void:
+	if layers == hidden_layers:
 		return
-	walls_hidden = on
+	hidden_layers = layers
 	refresh_materials()
 
 

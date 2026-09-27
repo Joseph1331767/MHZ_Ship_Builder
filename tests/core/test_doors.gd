@@ -6,12 +6,21 @@
 # harness suite's claim (test_csg_bake.gd).
 class_name TestDoors
 extends GdUnitTestSuite
-
 const TOL: float = 1.0e-3
 const HATCH_R: float = 0.35
 
 var _data: ShipData
 var _cfg: ShipConfig
+
+
+## TEMPLATE LINKS ARE OPEN BY DEFAULT since 2026-09-26 ("by default in the prebuilds we dont want
+## any walls in our prebuilds by default"). This suite is about what a ship with LINKS does - its
+## walls, its doors, the rooms they bound or the meshes they cut - so it asks for the hatches the
+## templates used to place, instead of resting on a default that no longer says that.
+func _linked(extra: Dictionary = {}) -> Dictionary:
+	var out: Dictionary = {ShipTemplates.OPT_LINK_MODE: ShipJoint.MODE_HATCHED}
+	out.merge(extra)
+	return out
 
 
 func before() -> void:
@@ -25,7 +34,9 @@ func before() -> void:
 
 
 func _carbon() -> ShipDoc:
-	return ShipTemplates.build(_data, _cfg, "carbon", {ShipTemplates.OPT_ROOM_FAMILY: "sphere_pod"})
+	return ShipTemplates.build(
+		_data, _cfg, "carbon", _linked({ShipTemplates.OPT_ROOM_FAMILY: "sphere_pod"})
+	)
 
 
 static func _signed_area(outline: PackedVector2Array) -> float:
@@ -349,7 +360,7 @@ func test_a_prebuilt_ships_hatches_pass_a_suited_person() -> void:
 	for element: String in ["lithium", "carbon", "neon"]:
 		for family: String in ["box_hull", "sphere_pod", "cylinder_spar"]:
 			var doc: ShipDoc = ShipTemplates.build(
-				_data, _cfg, element, {ShipTemplates.OPT_ROOM_FAMILY: family}
+				_data, _cfg, element, _linked({ShipTemplates.OPT_ROOM_FAMILY: family})
 			)
 			assert_object(doc).is_not_null()
 			var plan: Dictionary = ShipMeshBake.plan(doc, _data, _cfg)

@@ -85,7 +85,18 @@ func _begin() -> bool:
 	var tutorial: Object = _builder.get("_tutorial")
 	if tutorial != null and bool(tutorial.call("is_open")):
 		tutorial.call("close")
-	_builder.call("found_from_template", "carbon", {ShipTemplates.OPT_ROOM_FAMILY: "sphere_pod"})
+	# LINKS HATCHED, and said out loud. A prebuild links OPEN since 2026-09-26 ("by default in the
+	# prebuilds we dont want any walls in our prebuilds by default"), and this tool checks the
+	# WALLS, the doors and the bores - so it asks for the links that make them, instead of resting
+	# on a default that no longer says that.
+	_builder.call(
+		"found_from_template",
+		"carbon",
+		{
+			ShipTemplates.OPT_ROOM_FAMILY: "sphere_pod",
+			ShipTemplates.OPT_LINK_MODE: ShipJoint.MODE_HATCHED
+		}
+	)
 	_stage = 1
 	_frames = 0
 	return false

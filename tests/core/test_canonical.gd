@@ -121,10 +121,18 @@ func test_rand_range_from_stays_in_half_open_bounds() -> void:
 	var seed_index: int = 0
 	while seed_index < 25:
 		var v: float = ShipCanonical.rand_range_from(seed_index, -3.0, 8.0)
-		assert_float(v).append_failure_message(
-			"seed %d produced %f, expected in [-3.0, 8.0)" % [seed_index, v]
-		).is_greater_equal(-3.0)
-		assert_float(v).append_failure_message(
-			"seed %d produced %f, expected in [-3.0, 8.0)" % [seed_index, v]
-		).is_less(8.0)
+		(
+			assert_float(v)
+			. append_failure_message(
+				"seed %d produced %f, expected in [-3.0, 8.0)" % [seed_index, v]
+			)
+			. is_greater_equal(-3.0)
+		)
+		(
+			assert_float(v)
+			. append_failure_message(
+				"seed %d produced %f, expected in [-3.0, 8.0)" % [seed_index, v]
+			)
+			. is_less(8.0)
+		)
 		seed_index += 1

@@ -3542,3 +3542,51 @@ Looked at `reports/visual_walls_compare.png` (INTERIOR and X-RAY, layer on and o
 as it should, so moving to per-surface materials cost none of them. **gdUnit4 344/344**; selfcheck
 PASSED, hash unchanged at `5536787c6c35d236`; data validator PASSED (0 warnings); resolve, explode
 and visual (5 modes) checks PASSED; gdformat and gdlint clean.
+
+
+## [2026-09-26] A prebuild has no walls, and the layers are an explorer
+
+ADR 0047, from the author: "by default in the prebuilds we dont want any walls in our prebuilds by
+default", and "i thought a layers explorer that lets the player hide hatches, walls, [expandable
+later] type of stuff".
+
+### What was actually there, because the report and the geometry did not agree
+
+A carbon out of the picker carried 15 nucleus links, all OPEN, and 8 arm links, all HATCHED - so
+there were no walls between the protons at all, and the flat faces between the exploded chunks are
+CUT faces: the room split (ADR 0036) and the printing dice (ADR 0032/0041). On a hatched carbon the
+wall surface is 12.5 m2 against 552.3 m2 of cut; dropping WALLS changes 131 px and dropping CUTS
+changes 105,233. They sit flush because SLICE GAP and CHUNK GAP default to 0.00 m, which is "the
+walls dont even seperate in the explosion".
+
+### What changed anyway, because the ask stands on its own
+
+`ShipTemplates.OPT_LINK_MODE` defaults to `MODE_OPEN`: a prebuild bakes with no wall face anywhere.
+The hatch is STILL AUTHORED on every link whatever the mode - family and params written in - so
+turning one into a wall with a door is a single edit and nothing has to be chosen again. The picker
+gets a LINKS row: OPEN / HATCHED / SEALED.
+
+`ShipLayersControl` is the explorer, a panel top left of the 3D view: WALLS, CUTS, DOORS. A layer is
+one row of `LAYERS` - key, label, help - because "expandable later" is the requirement.
+`ShipSceneBuilder.walls_hidden` became `hidden_layers`, assigned whole; doors are nodes rather than a
+named surface so they are hidden rather than dressed, and a door leaf keeps its own `cut_solid`
+shading base so dropping CUTS does not take the doors with it. WALLS left the top bar one day after
+arriving there: three more check buttons in a bar holding eleven is not an explorer.
+
+### 41 tests and two tools failed, and every one was right to
+
+They were written against the old hatched default and assert things about walls, doors, rooms and
+the meshes they cut. Each says so now - one `_linked()` helper per suite, two lines each in
+`ship_resolve_check.gd` and `ship_explode_check.gd` - rather than an assertion being weakened. An
+all-open prebuild is ONE room of fourteen rather than a nucleus of six plus arms, which is what no
+walls means.
+
+### Verified
+
+Looked at `reports/visual_layers.png`: a prebuild exploded with whole pods and no plates, then the
+same class linked hatched with each layer dropped in turn. **gdUnit4 348/348**; selfcheck PASSED,
+hash unchanged at `5536787c6c35d236`; data validator PASSED (0 warnings); resolve, explode and visual
+(5 modes) checks PASSED; gdformat and gdlint clean.
+
+Reported, not fixed: `AGENTS.md` section 1 still describes the all-open studio hull that SPEC section
+7 retired under ADR 0008 (FOLLOWUPS F52). The rules file belongs to the author.

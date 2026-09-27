@@ -5,9 +5,18 @@
 # is the way the two come apart. FOLLOWUPS F19 recorded the limitation this lifts.
 class_name TestSiblingSeams
 extends GdUnitTestSuite
-
 var _data: ShipData
 var _cfg: ShipConfig
+
+
+## TEMPLATE LINKS ARE OPEN BY DEFAULT since 2026-09-26 ("by default in the prebuilds we dont want
+## any walls in our prebuilds by default"). This suite is about what a ship with LINKS does - its
+## walls, its doors, the rooms they bound or the meshes they cut - so it asks for the hatches the
+## templates used to place, instead of resting on a default that no longer says that.
+func _linked(extra: Dictionary = {}) -> Dictionary:
+	var out: Dictionary = {ShipTemplates.OPT_LINK_MODE: ShipJoint.MODE_HATCHED}
+	out.merge(extra)
+	return out
 
 
 func before() -> void:
@@ -124,7 +133,7 @@ func test_a_seam_that_lands_on_the_origin_is_still_a_seam() -> void:
 ## is a priority order, and a clump of equal bodies came out as that many different pieces.
 func test_equal_members_of_a_room_divide_on_the_plane_between_them() -> void:
 	var doc: ShipDoc = ShipTemplates.build(
-		_data, _cfg, "carbon", {ShipTemplates.OPT_ROOM_FAMILY: "box_hull"}
+		_data, _cfg, "carbon", _linked({ShipTemplates.OPT_ROOM_FAMILY: "box_hull"})
 	)
 	var plan: Dictionary = ShipMeshBake.plan(doc, _data, _cfg)
 	var xforms: Dictionary = ShipAttach.resolve_all(doc, _data, _cfg)

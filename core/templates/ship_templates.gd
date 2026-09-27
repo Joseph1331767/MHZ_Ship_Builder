@@ -105,6 +105,15 @@ const OPT_TUNNEL_LENGTH: String = "tunnel_length_m"
 const OPT_TUNNEL_BORE: String = "tunnel_bore_m"
 const OPT_HATCH_FAMILY: String = "hatch_family"
 
+## What every template connection is LINKED with - a `ShipJoint.MODE_*`. OPEN by default: "by
+## default in the prebuilds we dont want any walls in our prebuilds by default" (2026-09-26).
+## The hatch is still AUTHORED on every joint whatever this says - its family and its params are
+## written in - so turning one link to `hatched` is a single edit and nothing has to be picked
+## again. RETIRED(2026-09-26): MODE_HATCHED, from the original brief "a hatch between each
+## hallway/tunnel and room and room to room connection", which is now what this option selects
+## rather than what it forces.
+const OPT_LINK_MODE: String = "link_mode"
+
 ## Guards a pathological pack: a molecule that names itself as its own parent, or a cycle, would
 ## otherwise walk forever.
 const MAX_NODES: int = 64
@@ -210,6 +219,7 @@ static func build(
 		ShipDoors.bore_for_hatch(conf.hatch_min_m, conf.hull_thickness_m)
 	)
 	var hatch: String = _opt_text(options, OPT_HATCH_FAMILY, _pick_hatch(data))
+	var link_mode: String = _opt_text(options, OPT_LINK_MODE, ShipJoint.MODE_OPEN)
 
 	var doc: ShipDoc = ShipDoc.create_new(room_family, room_mfr, data, 0.0)
 	if doc == null or doc.root.is_empty():
@@ -342,8 +352,8 @@ static func build(
 		var room_id: String = doc.add_part(room)
 		part_of_node[i] = room_id
 
-		_hatch(doc, parent_id, tunnel_id, hatch, data)
-		_hatch(doc, tunnel_id, room_id, hatch, data)
+		_hatch(doc, parent_id, tunnel_id, hatch, data, link_mode)
+		_hatch(doc, tunnel_id, room_id, hatch, data, link_mode)
 	if nucleus_ids.size() > 1 and doc.root == nucleus_ids[0]:
 		part_of_node = _lift_nucleus(doc, data, conf, nucleus_ids, part_of_node, _symbol_of(nodes))
 	_centre_on_the_beacon(doc, data, conf)
@@ -987,11 +997,21 @@ static func _resolved(
 # --- joints ------------------------------------------------------------------------------
 
 
-## A hatched joint between two parts. "a hatch between each hallway/tunnel and room and room to
-## room connection" — so this is not discovered, it is authored, and every template connection
-## gets one.
+## The joint between two parts of a template. "a hatch between each hallway/tunnel and room and
+## room to room connection" — so this is not discovered, it is authored, and every template
+## connection gets one.
+##
+## THE HATCH IS ALWAYS WRITTEN IN; [param mode] only decides whether it is BUILT. A link left
+## OPEN - which is the default since 2026-09-26 - still carries its family and its params, so the
+## player who wants a wall there has one edit to make and nothing to choose. That is the whole of
+## "for user ease, when they are adding walls to their proton chunk".
 static func _hatch(
-	doc: ShipDoc, a: String, b: String, hatch_family: String, data: ShipData
+	doc: ShipDoc,
+	a: String,
+	b: String,
+	hatch_family: String,
+	data: ShipData,
+	mode: String = ShipJoint.MODE_OPEN
 ) -> void:
 	if a.is_empty() or b.is_empty():
 		return
@@ -1003,7 +1023,7 @@ static func _hatch(
 	else:
 		joint.a = b
 		joint.b = a
-	joint.mode = ShipJoint.MODE_HATCHED
+	joint.mode = mode
 	joint.hatch_family = hatch_family
 	joint.hatch_params = _hatch_defaults(data, hatch_family)
 	doc.joints[joint.id] = joint

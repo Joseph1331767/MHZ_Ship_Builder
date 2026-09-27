@@ -4,9 +4,18 @@
 # invisible but still there where things can grow away from that" (2026-09-21).
 class_name TestBeacon
 extends GdUnitTestSuite
-
 var _data: ShipData
 var _cfg: ShipConfig
+
+
+## TEMPLATE LINKS ARE OPEN BY DEFAULT since 2026-09-26 ("by default in the prebuilds we dont want
+## any walls in our prebuilds by default"). This suite is about what a ship with LINKS does - its
+## walls, its doors, the rooms they bound or the meshes they cut - so it asks for the hatches the
+## templates used to place, instead of resting on a default that no longer says that.
+func _linked(extra: Dictionary = {}) -> Dictionary:
+	var out: Dictionary = {ShipTemplates.OPT_LINK_MODE: ShipJoint.MODE_HATCHED}
+	out.merge(extra)
+	return out
 
 
 func before() -> void:
@@ -40,7 +49,7 @@ func _core_centre(doc: ShipDoc) -> Vector3:
 func test_every_class_is_built_around_the_beacon() -> void:
 	for element: String in ["carbon", "helium", "neon", "hydrogen"]:
 		var doc: ShipDoc = ShipTemplates.build(
-			_data, _cfg, element, {ShipTemplates.OPT_ROOM_FAMILY: "sphere_pod"}
+			_data, _cfg, element, _linked({ShipTemplates.OPT_ROOM_FAMILY: "sphere_pod"})
 		)
 		assert_object(doc).append_failure_message(element).is_not_null()
 		(
@@ -101,7 +110,7 @@ func test_a_floating_part_keeps_where_it_was_put() -> void:
 ## ship dissolved again: the anchor travels with whatever becomes the root.
 func test_the_anchor_travels_with_the_root() -> void:
 	var doc: ShipDoc = ShipTemplates.build(
-		_data, _cfg, "carbon", {ShipTemplates.OPT_ROOM_FAMILY: "sphere_pod"}
+		_data, _cfg, "carbon", _linked({ShipTemplates.OPT_ROOM_FAMILY: "sphere_pod"})
 	)
 	var before: Vector3 = _core_centre(doc)
 	assert_float(before.length()).is_less(0.01)
@@ -127,7 +136,7 @@ func test_the_anchor_travels_with_the_root() -> void:
 func test_the_nucleus_stands_in_its_arrangements_slots() -> void:
 	for family: String in ["box_hull", "sphere_pod", "cylinder_spar"]:
 		var doc: ShipDoc = ShipTemplates.build(
-			_data, _cfg, "carbon", {ShipTemplates.OPT_ROOM_FAMILY: family}
+			_data, _cfg, "carbon", _linked({ShipTemplates.OPT_ROOM_FAMILY: family})
 		)
 		var xforms: Dictionary = ShipAttach.resolve_all(doc, _data, _cfg)
 		var places: Array[Vector3] = []
@@ -163,7 +172,7 @@ func test_the_nucleus_is_one_room_on_every_family() -> void:
 	for family: String in ["box_hull", "sphere_pod", "cylinder_spar"]:
 		for element: String in ["helium", "carbon", "neon"]:
 			var doc: ShipDoc = ShipTemplates.build(
-				_data, _cfg, element, {ShipTemplates.OPT_ROOM_FAMILY: family}
+				_data, _cfg, element, _linked({ShipTemplates.OPT_ROOM_FAMILY: family})
 			)
 			var biggest: int = 0
 			for members: PackedStringArray in ShipMeshBake.plan(doc, _data, _cfg)["rooms"]:

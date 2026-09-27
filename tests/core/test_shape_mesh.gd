@@ -8,7 +8,6 @@
 # every vertex it produces back into the field and demand a zero.
 class_name TestShapeMesh
 extends GdUnitTestSuite
-
 ## How far a baked vertex may sit from the surface it was baked from. Tight: this is analytic
 ## geometry on both sides, so anything beyond float noise means a warp was inverted wrongly.
 const ON_SURFACE_M: float = 1.0e-5
@@ -28,6 +27,16 @@ var _cfg: ShipConfig
 ## shells. A shell changes every volume in the ship, so a test asking "did this style cut
 ## differently" would otherwise be reading the wall and the cut added together - and hollowing a
 ## carbon class six times over took 35 seconds on its own. The shell has its own tests below.
+## TEMPLATE LINKS ARE OPEN BY DEFAULT since 2026-09-26 ("by default in the prebuilds we dont want
+## any walls in our prebuilds by default"). This suite is about what a ship with LINKS does - its
+## walls, its doors, the rooms they bound or the meshes they cut - so it asks for the hatches the
+## templates used to place, instead of resting on a default that no longer says that.
+func _linked(extra: Dictionary = {}) -> Dictionary:
+	var out: Dictionary = {ShipTemplates.OPT_LINK_MODE: ShipJoint.MODE_HATCHED}
+	out.merge(extra)
+	return out
+
+
 func _seam_cfg() -> ShipConfig:
 	var out: ShipConfig = ShipConfig.from_dict(_cfg.snapshot())
 	out.hull_thickness_m = 0.0
@@ -177,7 +186,7 @@ func test_a_template_ship_bakes_every_part() -> void:
 	# "every part closed" - that is the engine bake's promise now, held in
 	# tests/harness/test_csg_bake.gd on both families, and the pure path is the fallback for a
 	# caller with no scene tree.
-	var doc: ShipDoc = ShipTemplates.build(_data, _cfg, TEMPLATE, {})
+	var doc: ShipDoc = ShipTemplates.build(_data, _cfg, TEMPLATE, _linked())
 	assert_object(doc).is_not_null()
 	var report: Dictionary = ShipMeshBake.bake(doc, _data, _seam_cfg())
 	var order: PackedStringArray = report["order"]
@@ -194,7 +203,7 @@ func test_a_template_ship_bakes_every_part() -> void:
 func test_the_bake_agrees_with_the_ship_field() -> void:
 	# End to end: the placement transform is applied to the mesh here and inverted inside the
 	# field, so this checks the whole chain rather than the tessellator alone.
-	var doc: ShipDoc = ShipTemplates.build(_data, _cfg, TEMPLATE, {})
+	var doc: ShipDoc = ShipTemplates.build(_data, _cfg, TEMPLATE, _linked())
 	var report: Dictionary = ShipMeshBake.bake(doc, _data, _seam_cfg())
 	var sdf: ShipSdf = ShipSdf.build(doc, _data, _cfg)
 	var index_of: Dictionary = {}
@@ -228,7 +237,7 @@ func test_the_bake_agrees_with_the_ship_field() -> void:
 
 func test_the_bake_is_deterministic() -> void:
 	# Determinism is a gate (AGENTS 8b), and this walks a Dictionary to find its part order.
-	var doc: ShipDoc = ShipTemplates.build(_data, _cfg, TEMPLATE, {})
+	var doc: ShipDoc = ShipTemplates.build(_data, _cfg, TEMPLATE, _linked())
 	var first: Dictionary = ShipMeshBake.bake(doc, _data, _seam_cfg())
 	var second: Dictionary = ShipMeshBake.bake(doc, _data, _seam_cfg())
 	assert_array(Array(first["order"] as PackedStringArray)).is_equal(
@@ -302,7 +311,7 @@ func test_the_indent_axis_of_a_style_decides_which_part_is_cut() -> void:
 	# flat and native surfaces differ. Closure is now the engine suite's claim
 	# (tests/harness/test_csg_bake.gd), and every walled seam takes the native linkage surface for
 	# now - FOLLOWUPS F32 - so flat and native do not yet differ.
-	var base: ShipDoc = ShipTemplates.build(_data, _cfg, TEMPLATE, {})
+	var base: ShipDoc = ShipTemplates.build(_data, _cfg, TEMPLATE, _linked())
 	var tunnel: String = _a_tunnel(base)
 	var pod: String = ""
 	for pid: String in base.part_order():
@@ -330,7 +339,7 @@ func test_the_seam_style_is_read_not_baked_in() -> void:
 	# The detour is through the OTHER indent axis: under "big indents small" the pod is left alone
 	# by the tunnel's seam, so its volume moves. RETIRED(ADR 0020): a detour through SMALL_NATIVE,
 	# which no longer differs from the flat default - FOLLOWUPS F32.
-	var base: ShipDoc = ShipTemplates.build(_data, _cfg, TEMPLATE, {})
+	var base: ShipDoc = ShipTemplates.build(_data, _cfg, TEMPLATE, _linked())
 	var before: float = _host_volume(base, ShipJoint.SEAM_FLAT)
 	var detour: float = _host_volume(base, ShipJoint.SEAM_BIG_NATIVE)
 	var after: float = _host_volume(base, ShipJoint.SEAM_FLAT)
@@ -358,7 +367,7 @@ func test_every_seam_style_bakes_every_part() -> void:
 	# truncated. RETIRED(ADR 0020): "bakes closed solids" - closure is the engine bake's claim
 	# (tests/harness/test_csg_bake.gd); the pure clipping is exact on planes and approximate on
 	# curves, and this ship has curves.
-	var base: ShipDoc = ShipTemplates.build(_data, _cfg, TEMPLATE, {})
+	var base: ShipDoc = ShipTemplates.build(_data, _cfg, TEMPLATE, _linked())
 	for style: String in ShipJoint.VALID_SEAM_STYLES:
 		var doc: ShipDoc = base.duplicate_doc()
 		for jid: String in doc.joints:
@@ -414,7 +423,7 @@ func test_in_and_out_bump_put_the_plane_in_different_places() -> void:
 
 
 func _bake_with_style(style: String) -> Dictionary:
-	var doc: ShipDoc = ShipTemplates.build(_data, _cfg, TEMPLATE, {})
+	var doc: ShipDoc = ShipTemplates.build(_data, _cfg, TEMPLATE, _linked())
 	for jid: String in doc.joints:
 		(doc.joints[jid] as ShipJoint).seam_style = style
 	return ShipMeshBake.bake(doc, _data, _seam_cfg())
@@ -436,7 +445,7 @@ func test_a_flange_leaves_the_host_alone_where_a_slice_cuts_it() -> void:
 func test_the_child_is_cut_flush_at_the_host_surface() -> void:
 	# The whole point of the rework. A tube seated into a box should come out ENDING at the box's
 	# face - not short of it, and not through it.
-	var doc: ShipDoc = ShipTemplates.build(_data, _cfg, TEMPLATE, {})
+	var doc: ShipDoc = ShipTemplates.build(_data, _cfg, TEMPLATE, _linked())
 	for jid: String in doc.joints:
 		(doc.joints[jid] as ShipJoint).seam_style = ShipJoint.SEAM_SMALL_FLAT_INSERT
 	var report: Dictionary = ShipMeshBake.bake(doc, _data, _seam_cfg())
@@ -498,7 +507,7 @@ func test_the_two_axes_round_trip_through_a_style_id() -> void:
 
 
 func _host_volume_for(template: String, style: String) -> float:
-	var doc: ShipDoc = ShipTemplates.build(_data, _cfg, template, {})
+	var doc: ShipDoc = ShipTemplates.build(_data, _cfg, template, _linked())
 	for jid: String in doc.joints:
 		(doc.joints[jid] as ShipJoint).seam_style = style
 	var solids: Dictionary = ShipMeshBake.bake(doc, _data, _seam_cfg())["solids"]
@@ -532,7 +541,7 @@ func test_every_module_is_hollowed_to_the_wall_thickness() -> void:
 	# A box module is the case where the answer is exact and checkable: its interior is the same
 	# box with the wall taken off every face, so the gap between the outer and inner surfaces IS
 	# the wall. Measured off the mesh rather than assumed from the config.
-	var doc: ShipDoc = ShipTemplates.build(_data, _cfg, "hydrogen", {})
+	var doc: ShipDoc = ShipTemplates.build(_data, _cfg, "hydrogen", _linked())
 	var report: Dictionary = ShipMeshBake.bake(doc, _data, _cfg)
 	var hull: PolyMesh = (report["solids"] as Dictionary)[doc.root]
 	(
@@ -567,7 +576,7 @@ func test_every_module_is_hollowed_to_the_wall_thickness() -> void:
 func test_a_hollow_module_encloses_less_than_a_solid_one() -> void:
 	# The cavity is real volume, not a surface trick: the same ship with no wall weighs the whole
 	# budget, and with one it weighs only what the walls are made of.
-	var doc: ShipDoc = ShipTemplates.build(_data, _cfg, "hydrogen", {})
+	var doc: ShipDoc = ShipTemplates.build(_data, _cfg, "hydrogen", _linked())
 	var solid: float = ShipMeshBake.bake(doc, _data, _seam_cfg())["parts_volume_m3"]
 	var shell: float = float(ShipMeshBake.bake(doc, _data, _cfg)["parts_volume_m3"])
 	assert_float(shell).append_failure_message("hollowing removed nothing").is_less(solid * 0.5)
@@ -590,7 +599,7 @@ func test_the_interior_is_built_for_every_seam_cut_part() -> void:
 	# Every part of a seam-cut ship is hollowed - the interior is planned and carried out for each.
 	# RETIRED(ADR 0020): "does not open onto a seam face", asserted as closure of the pure bake's
 	# meshes; that is the engine bake's claim now (tests/harness/test_csg_bake.gd).
-	var doc: ShipDoc = ShipTemplates.build(_data, _cfg, TEMPLATE, {})
+	var doc: ShipDoc = ShipTemplates.build(_data, _cfg, TEMPLATE, _linked())
 	var report: Dictionary = ShipMeshBake.bake(doc, _data, _cfg)
 	var placed: int = ShipAttach.resolve_all(doc, _data, _cfg).size()
 	(
@@ -605,7 +614,7 @@ func test_the_pure_bake_plans_an_open_seam_as_a_pair_of_cuts() -> void:
 	# indented part to lose the indenter's body on both surfaces, and the indenter to lose the
 	# indented part's room on both. What the cuts LOOK like is the engine bake's test
 	# (tests/harness/test_csg_bake.gd); this one holds the plan to its meaning.
-	var doc: ShipDoc = ShipTemplates.build(_data, _cfg, "helium", {})
+	var doc: ShipDoc = ShipTemplates.build(_data, _cfg, "helium", _linked())
 	# The joint mechanics between PLAIN parts: the nucleus component is dissolved first (ADR 0024).
 	ShipComponents.dissolve(doc, doc.root)
 	# The definition's open links come back with it (ADR 0025); this test wants plain walls.
@@ -644,7 +653,7 @@ func test_a_bounded_opening_is_planned_as_a_door_the_pure_bake_does_not_bore() -
 	# (ShipDoors) and the ENGINE bores it; this pure executor still keeps its wall, and the
 	# report says so (`bored` empty) rather than let a seam the player asked to open look done.
 	# PENDING is now a seam nothing could be bored for.
-	var doc: ShipDoc = ShipTemplates.build(_data, _cfg, "helium", {})
+	var doc: ShipDoc = ShipTemplates.build(_data, _cfg, "helium", _linked())
 	# A bounded opening between PLAIN parts on an otherwise walled ship: the nucleus component
 	# is dissolved first (ADR 0024), so the doorway is the only joint on the nucleus seam. (A
 	# tunnel's seam already carries a hatch, which would win the collapse.)
@@ -678,7 +687,7 @@ func test_a_lone_sphere_is_two_nested_surfaces_exactly() -> void:
 	# inner turned inside out - no boolean - and on the family the author builds with it is exact.
 	# RETIRED(ADR 0020): the same claim for seam-cut spheres, which belongs to the engine bake.
 	var one: ShipDoc = ShipTemplates.build(
-		_data, _cfg, "hydrogen", {ShipTemplates.OPT_ROOM_FAMILY: "sphere_pod"}
+		_data, _cfg, "hydrogen", _linked({ShipTemplates.OPT_ROOM_FAMILY: "sphere_pod"})
 	)
 	var shapes: Dictionary = ShipAttach.resolve_shapes(one, _data, _cfg)
 	var outer: float = ShapeMesh.build(shapes[one.root]).volume()
@@ -694,7 +703,7 @@ func test_a_class_with_many_open_seams_still_bakes_quickly_and_closed() -> void:
 	# The bore this replaced put a thin passage against a finished SHELL and split until the budget
 	# ran out: a carbon class whose six protons were one room took 52 SECONDS and opened nothing.
 	# Not cutting the interior at an open seam is exact AND cheaper than cutting it.
-	var doc: ShipDoc = ShipTemplates.build(_data, _cfg, TEMPLATE, {})
+	var doc: ShipDoc = ShipTemplates.build(_data, _cfg, TEMPLATE, _linked())
 	# Open seams by JOINT between plain protons: the nucleus component is dissolved first (ADR 0024).
 	ShipComponents.dissolve(doc, doc.root)
 	# The definition's open links come back with it (ADR 0025); this test wants plain walls.

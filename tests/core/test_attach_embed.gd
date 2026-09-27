@@ -6,12 +6,21 @@
 # configured hull thickness, not read off the offset.
 class_name TestAttachEmbed
 extends GdUnitTestSuite
-
 const COMPACT: Array[String] = ["box_hull", "sphere_pod", "cylinder_spar"]
 const DIRECTIONS: Array = [[0.0, 0.0], [0.0, 90.0], [45.0, 35.0]]
 
 var _data: ShipData
 var _cfg: ShipConfig
+
+
+## TEMPLATE LINKS ARE OPEN BY DEFAULT since 2026-09-26 ("by default in the prebuilds we dont want
+## any walls in our prebuilds by default"). This suite is about what a ship with LINKS does - its
+## walls, its doors, the rooms they bound or the meshes they cut - so it asks for the hatches the
+## templates used to place, instead of resting on a default that no longer says that.
+func _linked(extra: Dictionary = {}) -> Dictionary:
+	var out: Dictionary = {ShipTemplates.OPT_LINK_MODE: ShipJoint.MODE_HATCHED}
+	out.merge(extra)
+	return out
 
 
 func before() -> void:
@@ -187,7 +196,7 @@ func test_room_on_a_template_tube_reaches_the_target() -> void:
 
 func test_every_template_joint_merges() -> void:
 	for tid: String in ShipTemplates.ids(_data):
-		var doc: ShipDoc = ShipTemplates.build(_data, _cfg, tid, {})
+		var doc: ShipDoc = ShipTemplates.build(_data, _cfg, tid, _linked())
 		assert_object(doc).append_failure_message("template %s did not build" % tid).is_not_null()
 		if doc == null:
 			continue

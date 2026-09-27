@@ -87,7 +87,17 @@ func _begin() -> bool:
 	if tutorial != null and bool(tutorial.call("is_open")):
 		tutorial.call("close")
 	_control().use(ShipExplodeSettings.defaults(_builder.call("get_config")))
-	_builder.call("found_from_template", "carbon", {ShipTemplates.OPT_ROOM_FAMILY: "sphere_pod"})
+	# LINKS HATCHED, and said out loud. A prebuild links OPEN since 2026-09-26, which makes the
+	# whole ship ONE room; this tool probes a SEP_PARTS cell of a module that carries an offset,
+	# and wants the several rooms a linked carbon has.
+	_builder.call(
+		"found_from_template",
+		"carbon",
+		{
+			ShipTemplates.OPT_ROOM_FAMILY: "sphere_pod",
+			ShipTemplates.OPT_LINK_MODE: ShipJoint.MODE_HATCHED
+		}
+	)
 	_advance(1)
 	return false
 

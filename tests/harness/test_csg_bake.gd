@@ -5,9 +5,18 @@
 # Node, so it can host the CSG nodes and await the frame they compute on.
 class_name TestCsgBake
 extends GdUnitTestSuite
-
 var _data: ShipData
 var _cfg: ShipConfig
+
+
+## TEMPLATE LINKS ARE OPEN BY DEFAULT since 2026-09-26 ("by default in the prebuilds we dont want
+## any walls in our prebuilds by default"). This suite is about what a ship with LINKS does - its
+## walls, its doors, the rooms they bound or the meshes they cut - so it asks for the hatches the
+## templates used to place, instead of resting on a default that no longer says that.
+func _linked(extra: Dictionary = {}) -> Dictionary:
+	var out: Dictionary = {ShipTemplates.OPT_LINK_MODE: ShipJoint.MODE_HATCHED}
+	out.merge(extra)
+	return out
 
 
 func before() -> void:
@@ -24,7 +33,7 @@ func before() -> void:
 ## or walled (the component dissolved back into six plain protons with no joints between them).
 func _carbon(family: String, open_nucleus: bool) -> ShipDoc:
 	var doc: ShipDoc = ShipTemplates.build(
-		_data, _cfg, "carbon", {ShipTemplates.OPT_ROOM_FAMILY: family}
+		_data, _cfg, "carbon", _linked({ShipTemplates.OPT_ROOM_FAMILY: family})
 	)
 	if not open_nucleus:
 		assert_int(ShipComponents.dissolve(doc, doc.root).size()).is_equal(6)
@@ -459,7 +468,7 @@ func test_an_imported_class_is_built_at_the_host_ships_dimensions() -> void:
 ## still add up to the room they came from.
 func test_a_clump_of_equal_bodies_comes_out_as_pieces_of_one_size() -> void:
 	var doc: ShipDoc = ShipTemplates.build(
-		_data, _cfg, "carbon", {ShipTemplates.OPT_ROOM_FAMILY: "box_hull"}
+		_data, _cfg, "carbon", _linked({ShipTemplates.OPT_ROOM_FAMILY: "box_hull"})
 	)
 	var report: Dictionary = await ShipCsgBake.bake(self, doc, _data, _cfg)
 	var solids: Dictionary = report["solids"]
@@ -497,7 +506,7 @@ func test_a_clump_of_equal_bodies_comes_out_as_pieces_of_one_size() -> void:
 ## by exactly two faces, which "closed" alone does not promise.
 func test_a_cube_nucleus_divides_at_its_seams() -> void:
 	var doc: ShipDoc = ShipTemplates.build(
-		_data, _cfg, "carbon", {ShipTemplates.OPT_ROOM_FAMILY: "box_hull"}
+		_data, _cfg, "carbon", _linked({ShipTemplates.OPT_ROOM_FAMILY: "box_hull"})
 	)
 	var report: Dictionary = await ShipCsgBake.bake(self, doc, _data, _cfg)
 	(
@@ -608,7 +617,7 @@ func test_a_piece_cut_in_half_is_half_of_it() -> void:
 ## edges on three. A non-manifold solid is what the engine mis-cuts (ADR 0037).
 func test_the_merge_never_breaks_a_piece_the_gate_passed() -> void:
 	var doc: ShipDoc = ShipTemplates.build(
-		_data, _cfg, "neon", {ShipTemplates.OPT_ROOM_FAMILY: "box_hull"}
+		_data, _cfg, "neon", _linked({ShipTemplates.OPT_ROOM_FAMILY: "box_hull"})
 	)
 	var report: Dictionary = await ShipCsgBake.bake(self, doc, _data, _cfg)
 	var members: PackedStringArray = PackedStringArray()
@@ -653,3 +662,19 @@ func test_the_wall_layer_is_named_and_tracks_the_seams() -> void:
 		. append_failure_message("every seam sealed, so every one of them stands a wall")
 		. is_greater(100.0)
 	)
+
+
+## THE WHOLE POINT OF THE NEW DEFAULT, measured on the baked meshes rather than on the document:
+## a carbon out of the picker has no wall face anywhere on it. The author, 2026-09-26: "by default
+## in the prebuilds we dont want any walls in our prebuilds by default."
+func test_a_prebuild_bakes_with_no_wall_anywhere() -> void:
+	for family: String in ["sphere_pod", "box_hull"]:
+		var doc: ShipDoc = ShipTemplates.build(
+			_data, _cfg, "carbon", {ShipTemplates.OPT_ROOM_FAMILY: family}
+		)
+		var report: Dictionary = await ShipCsgBake.bake(self, doc, _data, _cfg)
+		(
+			assert_float(_surface_area(report, ShipCsgBake.SURFACE_WALL))
+			. append_failure_message("%s: a prebuild came out with walls on it" % family)
+			. is_equal_approx(0.0, 0.0001)
+		)

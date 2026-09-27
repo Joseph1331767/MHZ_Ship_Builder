@@ -12,21 +12,35 @@ var _manufacturer_id: String
 func before() -> void:
 	_data = ShipData.new()
 	var ok: bool = _data.load_all()
-	assert_bool(ok).append_failure_message(
-		"ShipData.load_all() failed, load_errors=%s" % [str(_data.load_errors)]
-	).is_true()
-	assert_array(_data.load_errors).append_failure_message(
-		"res://data packs reported load_errors: %s" % [str(_data.load_errors)]
-	).is_empty()
+	(
+		assert_bool(ok)
+		. append_failure_message(
+			"ShipData.load_all() failed, load_errors=%s" % [str(_data.load_errors)]
+		)
+		. is_true()
+	)
+	(
+		assert_array(_data.load_errors)
+		. append_failure_message(
+			"res://data packs reported load_errors: %s" % [str(_data.load_errors)]
+		)
+		. is_empty()
+	)
 	var families: PackedStringArray = _data.family_ids()
-	assert_array(families).append_failure_message(
-		"no families loaded from res://data -- doc_hash tests need at least one"
-	).is_not_empty()
+	(
+		assert_array(families)
+		. append_failure_message(
+			"no families loaded from res://data -- doc_hash tests need at least one"
+		)
+		. is_not_empty()
+	)
 	_family_id = families[0]
 	var mfrs: PackedStringArray = _data.manufacturers_for(_family_id)
-	assert_array(mfrs).append_failure_message(
-		"no manufacturers for family '%s'" % _family_id
-	).is_not_empty()
+	(
+		assert_array(mfrs)
+		. append_failure_message("no manufacturers for family '%s'" % _family_id)
+		. is_not_empty()
+	)
 	_manufacturer_id = mfrs[0]
 
 
@@ -117,11 +131,19 @@ func test_shape_seed_frozen_reference_value() -> void:
 	var ruleset: String = "1.0.0"
 	var params: Dictionary = {"ribs": 4, "segments": 8}
 	var seed: int = ShipHash.shape_seed(family_id, manufacturer_id, params, ruleset)
-	assert_int(seed).append_failure_message(
-		"shape_seed('%s','%s',%s,'%s') = %d, expected frozen -184016924223680967. " % [
-			family_id, manufacturer_id, str(params), ruleset, seed
-		] + "See the comment above this assertion before treating this as a real bug."
-	).is_equal(-184016924223680967)
+	(
+		assert_int(seed)
+		. append_failure_message(
+			(
+				(
+					"shape_seed('%s','%s',%s,'%s') = %d, expected frozen -184016924223680967. "
+					% [family_id, manufacturer_id, str(params), ruleset, seed]
+				)
+				+ "See the comment above this assertion before treating this as a real bug."
+			)
+		)
+		. is_equal(-184016924223680967)
+	)
 
 
 func test_doc_hash_deterministic_for_identically_built_docs() -> void:
