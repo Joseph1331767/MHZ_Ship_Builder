@@ -70,6 +70,11 @@ const SHOWN_FROM: Dictionary = {
 	# The whole layers explorer, not its rows: it is a diagnostic for someone asking why a face is
 	# there, which is not a question a child has.
 	"LayersPanel": Level.ADVANCED,
+	# THE TEN-LINE KEY LEGEND, drawn across the bottom of the 3D view. Kept in DEV and nowhere
+	# else: [ShipHintBar] now says the same things in one sentence a child can read, in the place
+	# they are already looking, and the two occupy the same strip of screen. Not deleted - "keep
+	# the current view as dev working view" is explicit (ux.md R29).
+	"KeyHints": Level.DEV,
 }
 
 ## Left and right column widths per rung, in DESIGN pixels. BASIC gives the right column nothing,

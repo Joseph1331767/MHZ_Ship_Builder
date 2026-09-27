@@ -3829,3 +3829,60 @@ metre is.
 Looked at `reports/visual_inspector.png`. **gdUnit4 455/455**; selfcheck PASSED with the hash
 unchanged; data validator PASSED (0 warnings); resolve, explode and visual (5 modes) checks PASSED;
 gdformat and gdlint clean.
+
+
+## [2026-09-27] The directive, in front of them
+
+The author on the 52 px bar this was designed as: "well because its for kids, perhaps experiment
+with a pop up non-intrusive hint/directive/next options pane, that doesnt ever overlap anything
+important on screen but puts the directive infront of their face.. maybe even the bottom bar as you
+stated but much larger and noticable then 52 px idk you experiment with that."
+
+So `ShipHintBar` renders the same resolved text two ways and the layout is a constant, because the
+only way to answer "much larger and noticable" is to look at both. **CARD** is shipped: a panel
+floating at the bottom-centre OF THE 3D VIEW - over the ship's empty lower third, never over a side
+panel, and nothing gives up any height for it. **BAND** is the docked full-width alternative at
+104 px, one constant away.
+
+The card reads, on a freshly resolved ship:
+
+```
+THIS IS THE FINISHED SHIP - PRESS EDIT TO CHANGE IT
+or press E to pull it apart
+[EDIT] BUILD  [E] PULL APART  [F] FIT                              EDIT IT
+BAKED - 0 PIECES
+PIVOT FLOAT - AIM NORM - SNAP 5deg - MIRROR OFF - LOCK -
+```
+
+An instruction in the largest type in the application, a dim alternative under it, the next options
+as key caps, and the highest-priority blocker on the right. That is the half of the brief
+`set_status()` never had: of its 60 distinct strings, five instruct and one of those is a refusal.
+
+**It is sized from the VIEW, not the console**, so it follows the 3D view's width at every rung - in
+BASIC that is some 400 px wider than in DEV - and it is a sibling of the view rather than a child of
+it, because `gui_disable_input = true` on the inner SubViewport would eat its input.
+
+### The legend it replaces
+
+`ShipView3D`'s ten-line `KeyHints` label is anchored BOTTOM_WIDE - the same strip - and the card
+printed straight over it. The legend is now tiered to **DEV only** (ux.md R29), and where it
+survives the card lifts clear of it by asking the live node for its height rather than assuming.
+Not deleted: "keep the current view as 'dev working view'" is explicit.
+
+### Honest about what is not done
+
+The card's FACTS line reads `0 PIECES` on a fourteen-piece bake, and the strip says `SNAP 5deg`
+while the lattice is 0.5. The resolver defaults every field the caller does not supply and
+`_hint_state()` supplies nine. Each missing one is a single dictionary entry - and
+`ship_builder.gd` is at **1999 of 2000 lines**, so there is room for one. Recorded as F57, with the
+observation that the line budget now gates R4, R5 and R12 as well: the next extraction wants
+choosing deliberately rather than shaving for.
+
+The chips are LABELS, not buttons. The verbs are dispatched by key today, and a button that looks
+pressable and is not would teach the wrong thing.
+
+### Verified
+
+Looked at `reports/visual_hint_card.png` - BASIC and DEV, the card alone and the card above the
+legend. **gdUnit4 455/455**; selfcheck PASSED with the hash unchanged; resolve, explode and visual
+(5 modes) checks PASSED; gdformat and gdlint clean.

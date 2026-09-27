@@ -2074,3 +2074,25 @@ Nothing was broken by the omission, but the inspector threw the key away for as 
 (`inspector.gd:814`, `var step: float = 1.0 if is_int else SNAP_OFF_STEP`), quantizing every float
 parameter to 0.001 whatever the pack said - so `round`, authored at 0.01, read `0.020`. Fixed
 2026-09-27; the contract line is reported rather than edited.
+
+
+## F57 - The hint card's FACTS and STRIP are not fed yet
+
+`ShipHintBar` renders whatever `ShipHintText.resolve()` returns, and the resolver defaults every
+field the caller does not supply. `ShipBuilder._hint_state()` supplies nine: mode, part count,
+selection, baked, exploded, stale, component, status, placing.
+
+So the card currently prints `BAKED - 0 PIECES` on a fourteen-piece bake, and `SNAP 5deg` in the
+toggle strip while the live lattice is 0.5. The sentence - the part a child reads - is right; the
+schema line under it is a default.
+
+WHY IT IS NOT FIXED IN THE SAME COMMIT: `ship_builder.gd` is at **1999 of 2000 lines**. Each
+missing field is one dictionary entry, and there is room for one. The fields wanted are
+`STATE_PIECES`, `STATE_SEAMS` (both on `_bake_session.last`), `STATE_SNAP_DEG`,
+`STATE_PIVOT_HELD`, `STATE_AIM_NORMAL` (all on the view or the placement), `STATE_COMPLEXITY` and
+`STATE_BUDGET` (on the metrics).
+
+THE REAL BLOCKER IS THE LINE BUDGET, and it now gates most of the remaining roadmap: R4, R5 and
+R12 all name `ship_builder.gd` and all need a handful of lines. The next extraction should be
+chosen and taken deliberately rather than shaved for, the way the modal was in step 0 - the
+file/save/open flow and the isolation flow are both candidates.

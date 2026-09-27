@@ -134,6 +134,9 @@ var _post_rect: ColorRect = null
 var _mode_option: OptionButton = null
 var _view_toggles: ShipViewToggles = null
 var _ui_mode: ShipUiMode = null
+var _hint_bar: ShipHintBar = null
+## The raw line the 78 `set_status()` callers write, handed on to the hint as STATE_STATUS.
+var _status_text: String = ""
 var _layers: ShipLayersControl = null
 var _undo_button: Button = null
 var _redo_button: Button = null
@@ -627,8 +630,10 @@ func set_budget_alert(budget_key: String) -> void:
 
 
 func set_status(text: String) -> void:
+	_status_text = text
 	if _status_label != null:
 		_status_label.text = text
+	_refresh_hint()
 
 
 ## In-scene message box. There is no native dialog anywhere in this app.
@@ -768,7 +773,39 @@ func _commit(changed_ids: PackedStringArray, check_budget: bool) -> bool:
 			_view.set_selection(_selection)
 		_update_alert()
 	_emit_state()
+	_refresh_hint()
 	return true
+
+
+## WHAT THE BUILDER IS DOING, as the plain dictionary [ShipHintText] reads. Only the fields the
+## resolver can act on today - the rest default. This is the whole of the guidance channel's
+## input, and it is deliberately a snapshot rather than a stream: the resolver is pure, so the
+## same builder state always says the same sentence.
+func _hint_state() -> Dictionary:
+	return {
+		ShipHintText.STATE_MODE: _ui_mode.level if _ui_mode != null else 0,
+		ShipHintText.STATE_PART_COUNT: _doc.parts.size() if _doc != null else 0,
+		ShipHintText.STATE_SELECTION: _selection.size(),
+		ShipHintText.STATE_BAKED: _baked,
+		ShipHintText.STATE_EXPLODED: _exploded,
+		ShipHintText.STATE_STALE: _bake_session.stale if _bake_session != null else false,
+		ShipHintText.STATE_COMPONENT: _isolated,
+		ShipHintText.STATE_STATUS: _status_text,
+		# A STRING, not a flag: the resolver NAMES the part on the cursor.
+		ShipHintText.STATE_PLACING: _placing_name(),
+	}
+
+
+## The family on the cursor, or "" when nothing is being placed.
+func _placing_name() -> String:
+	if _placement == null or not _placement.active:
+		return ""
+	return str(_placement.get("_family_id")).replace("_", " ").to_upper()
+
+
+func _refresh_hint() -> void:
+	if _hint_bar != null:
+		_hint_bar.show_hint(ShipHintText.resolve(_hint_state()))
 
 
 ## Swap the whole document in. Never budget-checked: loading and undo are exempt.
@@ -1152,6 +1189,10 @@ func _build_layout() -> void:
 	_view.pick_cleared.connect(_on_pick_cleared)
 	_view.seam_menu_requested.connect(_on_seam_menu_requested)
 	view_frame.add_child(_view)
+	# THE DIRECTIVE, bottom centre of the VIEW, so it follows the view's width at every rung and
+	# never floats over a side panel. A sibling of the view, like the layers explorer.
+	if ShipHintBar.LAYOUT == ShipHintBar.Layout.CARD:
+		_hint_bar = ShipHintBar.new(view_frame, _ship_theme)
 	# THE LAYERS EXPLORER, top left of the view - what the builder draws, never what it holds.
 	# AFTER the view, or it is invisible: the SubViewport is opaque and siblings draw in tree
 	# order, so built first it was covered by the 3D view for its whole life. ShipExplodeControl
@@ -1194,6 +1235,9 @@ func _build_layout() -> void:
 	_bake_hud = ShipBakeHud.new(_update_button, _progress, _ship_theme)
 	_bake_hud.style_bar()
 	status_frame.add_child(status_row)
+	if ShipHintBar.LAYOUT == ShipHintBar.Layout.BAND:
+		status_frame.custom_minimum_size = Vector2(0.0, ShipTheme.pxf(ShipHintBar.BAND_HEIGHT))
+		_hint_bar = ShipHintBar.new(status_frame, _ship_theme)
 
 	part_palette_slot = _slots.get("PartPaletteSlot", null)
 	tree_slot = _slots.get("TreeSlot", null)
