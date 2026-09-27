@@ -333,6 +333,13 @@ func _refresh_display() -> void:
 	_apply_palette()
 
 
+## A SHIP'S SIZE, at the precision the ship is actually built to. The linear lattice is 0.1 m, so
+## "X 42.718 / 250.000 M" spent two digits on nothing; a part's SIZE and the ship's BBOX have to
+## agree about how precise a metre is or the two readouts argue with each other.
+func _metres(value: float) -> String:
+	return "%.1f" % value
+
+
 func _readout_for(index: int, cfg: ShipConfig) -> String:
 	var unit: String = str(BUDGET_UNITS[index])
 	if index == ShipBudgets.Budget.BBOX:
@@ -341,8 +348,8 @@ func _readout_for(index: int, cfg: ShipConfig) -> String:
 			"%s %s / %s %s"
 			% [
 				str(AXIS_NAMES[axis]),
-				NumericField.format_number(_metrics.bbox.size.abs()[axis]),
-				NumericField.format_number(cfg.max_bbox_m[axis]),
+				_metres(_metrics.bbox.size.abs()[axis]),
+				_metres(cfg.max_bbox_m[axis]),
 				unit,
 			]
 		)

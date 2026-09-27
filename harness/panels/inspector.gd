@@ -94,7 +94,9 @@ const SNAP_OFF_STEP: float = 0.001
 const MIRROR_PLANES: Array = ["x", "y", "z", ""]
 
 const SNAP_CHOICES: Array = [0.1, 0.5, 1.0, 5.0, 15.0, 0.0]
-const SNAP_LABELS: Array = ["0.100", "0.500", "1.000", "5.000", "15.000", "OFF"]
+## THE PICKER USED TO COMMIT THE CRIME IT CONFIGURES - it offered "0.500" in three decimals for
+## a lattice whose finest setting is one. Degrees, written the way a person says them.
+const SNAP_LABELS: Array = ["0.1°", "0.5°", "1°", "5°", "15°", "OFF"]
 const SNAP_DEFAULT_INDEX: int = 1
 
 ## THE HATCH SECTION (ADR 0029): the shapes a hole may take and the doors a hatch may wear, in
@@ -810,7 +812,12 @@ func _create_param_field(key: String, spec: Dictionary) -> void:
 	var is_int: bool = bool(spec.get("is_int", false))
 	# rib_count and friends: is_int makes the step 1 and rounds every path into the field,
 	# so the doc never receives 4.31 ribs.
-	var step: float = 1.0 if is_int else SNAP_OFF_STEP
+	# THE PACK ALREADY AUTHORED THE STEP and this threw it away, quantizing every float parameter
+	# to 0.001 whatever `data/shapes/families.json` said - so `round`, authored at 0.01, read
+	# 0.020, and `twist_deg`, authored at 0.5, read 12.500. `ShapeGen.effective_ranges()` carries
+	# it through both `_narrow()` and `_pin_neutral()`; it only had to be asked for.
+	var authored: float = maxf(_num(spec.get("step", null), 0.0), 0.0)
+	var step: float = 1.0 if is_int else (authored if authored > 0.0 else SNAP_OFF_STEP)
 	var field: NumericField = NumericField.new()
 	field.name = "Param" + key
 	field.configure(key, minimum, maximum, step, is_int)

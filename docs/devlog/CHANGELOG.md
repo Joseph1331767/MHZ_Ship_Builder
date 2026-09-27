@@ -3788,3 +3788,44 @@ the change that caused it.
 Looked at `reports/visual_modes.png` - all four rungs, side by side, on the same carbon.
 **gdUnit4 449/449**; selfcheck PASSED, hash unchanged at `5536787c6c35d236`; resolve, explode and
 visual (5 modes) checks PASSED; gdformat and gdlint clean.
+
+
+## [2026-09-27] R1: every number tells the truth
+
+The first row of the revised order of work (`docs/future/ux.md` section 7.3), and the author's first
+complaint: "angles are to a precision of x.xxx when our smallest snap precision is much smaller."
+
+The arithmetic was theirs and it was right. The finest angular snap offered anywhere is 0.1 degrees
+(`inspector.gd:96`), the display resolved 0.001, and the shipped default is 0.5 - so two of three
+decimals were structurally zero on YAW, PITCH and ROT X/Y/Z, on every ship, always. A digit that can
+never be anything but zero is not precision; it is noise a child has to read past.
+
+**A field now shows as many decimals as its own step can produce** - 0 for a whole-number step, 1
+for a tenth, 2 for a hundredth, 3 otherwise. YAW reads `0.0`, OFFSET `0.00`, SCALE `1.00`. An
+unquantized field keeps all three, which is honest rather than a special case: a snapped yaw really
+can be 37.418, and those two fields are read-only for that reason.
+
+**The three-decimal rule is a contract line** (`API_CONTRACT_UI.md:160`, SPEC section 11) so this is
+reported, not edited (F55) - and the reason the contract gives survives intact, because the width is
+held by a fixed 68 px right-aligned box and not by the digit count. The rule as written was stricter
+than its own stated reason.
+
+**The picker was committing the crime it configures**: SNAP DEG offered "0.500" in three decimals
+for a lattice whose finest setting is one. It reads `0.5°` now.
+
+**The pack had already authored the steps and the inspector threw them away.**
+`data/shapes/families.json` gives every parameter a `step` - `round` 0.01, `twist_deg` 0.5,
+`end_radius` 0.05 - and `ShapeGen.effective_ranges()` carries it through both `_narrow()` and
+`_pin_neutral()`. `inspector.gd:814` replaced it with 0.001 for every float, so `round` read `0.020`
+against an authored 0.01. It asks for the authored step now. The contract documents four returned
+keys where five are returned (F56).
+
+**And the BBOX gauge agrees about metres.** It printed `X 42.718 / 250.000 M`; the linear lattice is
+0.1 m, so it reads one decimal. A part's size and the ship's size now agree about how precise a
+metre is.
+
+### Verified
+
+Looked at `reports/visual_inspector.png`. **gdUnit4 455/455**; selfcheck PASSED with the hash
+unchanged; data validator PASSED (0 warnings); resolve, explode and visual (5 modes) checks PASSED;
+gdformat and gdlint clean.

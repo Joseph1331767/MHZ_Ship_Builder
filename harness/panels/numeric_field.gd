@@ -39,6 +39,26 @@ const DECIMALS: int = 3
 const NUMBER_FORMAT: String = "%.3f"
 const EPSILON_DISPLAY: float = 0.0005
 
+## A FIELD SHOWS AS MANY DECIMALS AS ITS STEP CAN PRODUCE, and no more. The author, 2026-09-27:
+## "angles are to a precision of x.xxx when our smallest snap precision is much smaller."
+##
+## The arithmetic is theirs: the finest angular snap offered anywhere is 0.1 degrees, the display
+## resolved 0.001, and at the shipped default of 0.5 two of three decimals were structurally zero
+## on YAW, PITCH and ROT X/Y/Z. A digit that can never be anything but zero is not precision, it
+## is noise a child has to read past.
+##
+## WRITTEN OUT, NOT BUILT. Same reason the constant above gives: Godot's format operator is a
+## printf SUBSET and dynamic precision is not something to bet a whole UI's numbers on.
+##
+## THE CONTRACT'S REASON SURVIVES INTACT. `API_CONTRACT_UI.md:160` and SPEC section 11 say
+## "always render numbers to exactly 3 decimals so field widths do not jitter" - but the width is
+## held by [constant FIELD_WIDTH], a fixed 68 px right-aligned box, not by the digit count. The
+## rule as written is stricter than the reason it gives. Reported, not edited (FOLLOWUPS F55).
+const FORMATS: Array = ["%.0f", "%.1f", "%.2f", "%.3f"]
+
+## Steps at or above these show 0, 1 and 2 decimals; anything finer shows 3.
+const DECIMAL_STEPS: Array = [1.0, 0.1, 0.01]
+
 const ROW_HEIGHT: float = 18.0
 const LABEL_WIDTH: float = 62.0
 const FIELD_WIDTH: float = 68.0
@@ -223,8 +243,22 @@ func bind_theme(ship_theme: ShipTheme) -> void:
 # ---------------------------------------------------------------- shared helpers
 
 
-## The one number formatter in the builder. Exactly three decimals, always, so a column of
-## fields never changes width as values change (SPEC section 11).
+## The one number formatter in the builder, at full precision. UNTOUCHED, and deliberately: it
+## has twenty callers outside this class (the gauges, the tree, the palette, the inspector), and
+## a field's own decimals are a property of the field, not of the number. [method _refresh_text]
+## is the only thing that narrows.
+## The number of decimals a field stepping by [param step] can actually produce. A step of zero -
+## an unquantized field, like a snapped yaw - keeps all three, which is honest rather than a
+## special case: that value really can be 37.418.
+static func decimals_for(step: float) -> int:
+	if step <= 0.0:
+		return DECIMALS
+	for i: int in DECIMAL_STEPS.size():
+		if step >= float(DECIMAL_STEPS[i]) - 1.0e-9:
+			return i
+	return DECIMALS
+
+
 static func format_number(value: float) -> String:
 	if is_nan(value):
 		return "---"
@@ -369,11 +403,23 @@ func _apply_value(value: float, notify: bool) -> void:
 func _refresh_text() -> void:
 	if _line == null:
 		return
-	var text: String = format_number(_value)
+	var text: String = _format_own(_value)
 	if _line.text == text:
 		return
 	_line.text = text
 	_line.caret_column = text.length()
+
+
+## This field's own reading of [param value] - as many decimals as its step can produce.
+func _format_own(value: float) -> String:
+	if is_nan(value) or value == INF or value == -INF:
+		return format_number(value)
+	var places: int = decimals_for(_step)
+	var v: float = value
+	# Half of the last shown digit, or "-0" prints at zero decimals and reads as another number.
+	if absf(v) < 0.5 * pow(10.0, -float(places)):
+		v = 0.0
+	return str(FORMATS[places]) % v
 
 
 ## Units per pixel of horizontal drag: a full sweep of the declared range in SCRUB_SPAN_PX,

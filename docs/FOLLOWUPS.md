@@ -2041,3 +2041,36 @@ while two edits to different parts keep their own.
 ADDITIVE, in the shape F18-F47 established: the pinned two-argument form still compiles and behaves
 exactly as before, because an empty key never folds. Nothing that was written against the contract
 had to change. Reported here rather than edited into the contract, per AGENTS section 9.
+
+
+## F55 - A field shows as many decimals as its step can produce
+
+`API_CONTRACT_UI.md:160` and `SHIP_BUILDER_SPEC.md:435` both say numbers render to **exactly three
+decimals** "so field widths do not jitter". As of 2026-09-27 a `NumericField` shows as many as its
+own step can produce: 0 for a whole-number step, 1 for a tenth, 2 for a hundredth, 3 otherwise.
+
+THE REASON THE CONTRACT GIVES IS FULLY PRESERVED. The width is held by `FIELD_WIDTH`, a fixed 68 px
+right-aligned box, not by the digit count - nothing jitters. The rule as written is stricter than
+the reason it states.
+
+The author, seeing it: "angles are to a precision of x.xxx when our smallest snap precision is much
+smaller." The arithmetic is theirs. The finest angular snap offered anywhere is 0.1 degrees and the
+display resolved 0.001, so at the shipped 0.5 default two of three decimals were structurally zero
+on YAW, PITCH and ROT X/Y/Z.
+
+The static `NumericField.format_number()` is UNCHANGED and still gives three - twenty callers
+outside the class read it. Only a field's own `_refresh_text()` narrows, and an unquantized field
+(a snapped yaw, which really can be 37.418) still shows all three.
+
+Reported, not edited, per AGENTS section 9.
+
+## F56 - effective_ranges() returns five keys and the contract documents four
+
+`API_CONTRACT.md:162` lists four keys returned by `ShapeGen.effective_ranges()`. It returns five -
+`step` is the fifth, authored per parameter in `data/shapes/families.json` and carried through both
+`_narrow()` and `_pin_neutral()` (`shape_gen.gd:472, 496-502`).
+
+Nothing was broken by the omission, but the inspector threw the key away for as long as it existed
+(`inspector.gd:814`, `var step: float = 1.0 if is_int else SNAP_OFF_STEP`), quantizing every float
+parameter to 0.001 whatever the pack said - so `round`, authored at 0.01, read `0.020`. Fixed
+2026-09-27; the contract line is reported rather than edited.
