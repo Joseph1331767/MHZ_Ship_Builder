@@ -547,6 +547,15 @@ func begin_placement(
 			return
 		found_document(family_id, manufacturer_id)
 		return
+	# PICKING A PART IS ASKING TO EDIT, so it leaves the baked view rather than arming a ghost
+	# into one that cannot receive it. A baked view sends every event to the explode handler, so
+	# the ghost appeared and then ignored the mouse - "i click the part, a ghost version of it
+	# spawns, then i cant move, or apply the ghost version at all its a dead end" (2026-09-27),
+	# and again after EXPLODE and UPDATE MESHES: "same issue as last time". Fixing the one path
+	# that got there was not enough; this closes every path at once, which is where it belonged.
+	if _baked or _exploded:
+		_set_exploded(false)
+		_set_baked(false)
 	var parent: String = _selection[0] if not _selection.is_empty() else _doc.root
 	if not _doc.parts.has(parent):
 		parent = _doc.root
