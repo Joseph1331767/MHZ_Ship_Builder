@@ -248,6 +248,14 @@ var _handle_drag: int = 0
 var _handle_index: int = -1
 var _handle_last: Vector2 = Vector2.ZERO
 
+## Degrees a rotation drag has earned but not yet spent, because they did not add up to one snap
+## step. WITHOUT THIS A COARSE SNAP IS A BROKEN DRAG: the handler turns pixels into degrees, the
+## placement quantizes the RESULT, and the difference used to be discarded - so at 0.5 degrees
+## every pixel produced a step and it felt smooth, while at 5 degrees a slow drag rounded to zero
+## every event and the part did not move at all. Carried across events and spent whole steps at a
+## time, a 400 px drag is 80 clicks of 5 degrees however slowly it is made.
+var _rot_residue: float = 0.0
+
 ## One-shot debounce for the expensive half of the placement gate. See GATE_IDLE_SECONDS.
 var _gate_timer: Timer = null
 
@@ -1397,6 +1405,7 @@ func _try_begin_handle_drag(pos: Vector2) -> bool:
 	_handle_drag = int(hit[ShipHandles.HIT_HANDLE])
 	_handle_index = int(hit[ShipHandles.HIT_INDEX])
 	_handle_last = pos
+	_rot_residue = 0.0
 	return true
 
 
@@ -1425,11 +1434,27 @@ func _drive_handle(pos: Vector2) -> void:
 	var axis: int = _axis_lock
 	if axis < 0:
 		axis = ShipPlacement.axis_for_handle(_handle_drag)
-	var degrees: float = delta.x * ShipPlacement.ROT_DEG_PER_PIXEL
+	var degrees: float = _earned_degrees(delta.x * ShipPlacement.ROT_DEG_PER_PIXEL)
+	if is_zero_approx(degrees):
+		return
 	if _attached_pivot:
 		_swing_placement(axis, degrees)
 		return
 	_placement.rotate_selected(axis, degrees)
+
+
+## How much of [param raw] this event may actually spend: whole snap steps only, with the
+## remainder carried to the next event rather than dropped. With the snap off it spends the lot.
+func _earned_degrees(raw: float) -> float:
+	var step: float = _placement.snap_deg if _placement != null else 0.0
+	if step <= 0.0:
+		return raw
+	_rot_residue += raw
+	# int() truncates TOWARD ZERO, which is what carrying wants - floorf would turn a small
+	# backward drag into a forward step. GDScript has no truncf.
+	var whole: float = float(int(_rot_residue / step)) * step
+	_rot_residue -= whole
+	return whole
 
 
 ## ATTACHED PIVOT: the ring turns the PLACEMENT VECTOR instead of the part, so the part swings

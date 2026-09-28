@@ -4098,3 +4098,56 @@ Per-part mirror planes - "one part can be mirrored along x, and another can be m
 is a separate and larger change, designed but not built: it needs a new `ShipPart.symmetry` field
 written conditionally so the hash does not move, an INTERSECTION cascade rather than the present
 boolean one, and an ADR.
+
+
+## [2026-09-27] Placement snaps where you can see it
+
+"placement does not snap visually, its a contiounous movement where ever the mouse goes, and it
+should be snapping to its defined snaps."
+
+**The snap was applied all along.** `ShipPlacement._apply_values` has always quantized yaw and
+pitch, and the mouse path goes through it. The step was 0.5 degrees, which no eye can see - so the
+complaint is exactly right and the cause is the default, not a missing feature. It is 5 degrees now,
+and the linear one is 0.1 m, which is exactly one `hull_thickness_m` - one notch is one wall, a step
+a player can feel. The picker opens on the same value the config ships.
+
+The author cleared the way for this: "we are in full dev, there are no saved ships, and if you are
+refering to the prebuilds we simply hard update them to work." No compatibility burden, so the
+lattice moved outright rather than behind an option.
+
+### Three things a coarse lattice exposed, all invisible at half a degree
+
+**A rotation drag threw its remainder away** (the survey's B2). `_drive_handle` turns pixels into
+degrees, the placement quantizes the RESULT, and the difference was discarded every event. At 0.5
+degrees each pixel produced a whole step so it felt smooth; at 5 degrees a slow drag rounded to zero
+every event and the part did not move AT ALL. The residue is carried across events now and spent in
+whole steps, so a 400 px drag is 80 clicks of 5 degrees however slowly it is made. `int()` truncates
+toward zero deliberately - `floorf` would turn a small backward drag into a forward step, and
+GDScript has no `truncf`.
+
+**An input re-quantized fields it had not touched.** `_apply_values` snapped all four numbers
+whatever the caller passed, so a value already off the lattice - a snapped part's derived angle, say
+- was dragged onto it by an unrelated edit. It quantizes only what actually moved now, which
+generalises the rule `_apply_rot_offset` already stated for its own two fields.
+
+**And the arrow keys stepped an axis nobody pressed.** `ShipReseat.step_placement` re-gridded BOTH
+yaw and pitch, so a RIGHT press - yaw alone - dragged a pitch of 18 up to 20 with it.
+`ship_visual_check.gd` caught that one by name: "arrows: RIGHT moved pitch from 18.000 to 20.000".
+
+### Verified
+
+**gdUnit4 469/469**, five of them new and driving the accumulator directly: a 400 px slow drag turns
+the full amount, every spend is a whole step, it carries in both directions, and the snap off
+withholds nothing. Selfcheck PASSED with the hash unchanged; data validator PASSED (0 warnings);
+resolve, explode and visual (5 modes) checks PASSED.
+
+### Not yet
+
+`set_snap_bypass()` still has no key bound - `data/tuning.json` claimed a momentary bypass modifier
+that does not exist, and the description says so plainly now. At a five degree lattice a bypass
+matters more than it did, and every modifier is already taken: SHIFT is the horizontal drag, CTRL
+the drag mode and focus pick, ALT the clone. That is the author's call, not a silent grab.
+
+The placement ORIGIN and ALIGNMENT modes - radial from parent / another node / the founding node /
+the centre of mass, against align-to-placement-vector / to-surface-normal / to-global-orthogonal -
+are still to come. Two of the four designers for them died with the network.

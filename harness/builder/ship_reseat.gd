@@ -61,8 +61,15 @@ static func step_placement(
 	builder.begin_edit(LABEL_STEP)
 	for pid: String in steppable:
 		var part: ShipPart = doc.parts[pid]
-		var yaw: float = _on_grid(part.yaw + float(yaw_dir) * step_deg, step_deg)
-		var pitch: float = _on_grid(part.pitch + float(pitch_dir) * step_deg, step_deg)
+		# ONLY THE AXIS THE ARROW PRESSED. `_on_grid` was applied to both, so at a five degree
+		# lattice a RIGHT press - which is yaw alone - dragged a pitch of 18 up to 20 with it.
+		# Harmless at the old half-degree step and plainly wrong at this one.
+		var yaw: float = part.yaw
+		if yaw_dir != 0:
+			yaw = _on_grid(part.yaw + float(yaw_dir) * step_deg, step_deg)
+		var pitch: float = part.pitch
+		if pitch_dir != 0:
+			pitch = _on_grid(part.pitch + float(pitch_dir) * step_deg, step_deg)
 		part.yaw = ShipAttach.wrap_yaw_deg(yaw)
 		part.pitch = clampf(pitch, -90.0, 90.0)
 		part.snap_id = ""

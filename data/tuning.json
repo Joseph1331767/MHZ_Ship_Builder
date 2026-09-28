@@ -65,14 +65,14 @@
     "max": 5.0
   },
   "snap_deg": {
-    "value": 0.5,
-    "description": "Default angular snap increment in degrees, applied independently per axis to yaw/pitch/roll at input time (the doc stores exactly what is displayed). The picker offers 0.1 / 0.5 / 1 / 5 / 15 / off; a held modifier bypasses snapping momentarily.",
+    "value": 5.0,
+    "description": "Default angular snap increment in degrees, applied independently per axis to yaw/pitch/roll at input time (the doc stores exactly what is displayed). The picker offers 0.1 / 0.5 / 1 / 5 / 15 / off. Five, because at the old half-degree default the quantization was invisible and read as no snapping at all. NOTE: ShipPlacement.set_snap_bypass() exists and works but no key is bound to it, so there is no momentary bypass yet.",
     "min": 0.0,
     "max": 15.0
   },
   "snap_m": {
-    "value": 0.05,
-    "description": "Default linear snap increment in metres, applied to a part's attach offset at input time.",
+    "value": 0.1,
+    "description": "Default linear snap increment in metres, applied to a part's attach offset at input time. One notch is exactly one hull_thickness_m, which is a step a player can feel.",
     "min": 0.0,
     "max": 5.0
   },

@@ -97,7 +97,10 @@ const SNAP_CHOICES: Array = [0.1, 0.5, 1.0, 5.0, 15.0, 0.0]
 ## THE PICKER USED TO COMMIT THE CRIME IT CONFIGURES - it offered "0.500" in three decimals for
 ## a lattice whose finest setting is one. Degrees, written the way a person says them.
 const SNAP_LABELS: Array = ["0.1°", "0.5°", "1°", "5°", "15°", "OFF"]
-const SNAP_DEFAULT_INDEX: int = 1
+## 5 degrees, index 3 of [constant SNAP_CHOICES]. "snaps should be every 5 degrees" - and at the
+## old half-degree default the quantization was invisible, which read as no snapping at all:
+## "placement does not snap visually, its a contiounous movement where ever the mouse goes".
+const SNAP_DEFAULT_INDEX: int = 3
 
 ## THE HATCH SECTION (ADR 0029): the shapes a hole may take and the doors a hatch may wear, in
 ## the order the two selectors list them. "the user should be able to choose the general shape

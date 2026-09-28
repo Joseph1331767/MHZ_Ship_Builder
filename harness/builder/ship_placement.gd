@@ -943,8 +943,23 @@ func notify_doc_changed(_changed: ShipDoc) -> void:
 
 ## Snap, then store. Every input path goes through here; nothing writes the four numbers
 ## directly (SPEC section 6: quantize at input time, never in the display layer).
+##
+## QUANTIZE WHAT THE INPUT MOVED, AND ONLY THAT. A value the caller passed back unchanged is not
+## an input - it is the value already stored - and re-snapping it moves a number the player did
+## not touch. Invisible at the old half-degree lattice; at five degrees an arrow key that steps
+## YAW was dragging a pitch of 18 up to 20 with it, which `ship_visual_check.gd` caught as
+## "RIGHT moved pitch from 18.000 to 20.000".
+##
+## It also generalises the rule [method _apply_rot_offset] already states for its own two fields:
+## a snapped part's angles are DERIVED from its target, and pushing them back through the snap on
+## every frame walks them a little further off it each time.
 func _apply_values(yaw: float, pitch: float, rot: Vector3, offset: float) -> void:
-	_store_values(_snap_angle(yaw), _snap_angle(pitch), _snap_rot(rot), _snap_linear(offset))
+	_store_values(
+		_snap_angle(yaw) if not is_equal_approx(yaw, _yaw) else yaw,
+		_snap_angle(pitch) if not is_equal_approx(pitch, _pitch) else pitch,
+		_snap_rot(rot) if not rot.is_equal_approx(_rot) else rot,
+		_snap_linear(offset) if not is_equal_approx(offset, _offset) else offset
+	)
 
 
 ## Write rotation and offset through the quantizer while leaving yaw and pitch untouched.

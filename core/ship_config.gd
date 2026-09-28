@@ -47,8 +47,8 @@ var metrics_cell_m: float = 0.5
 
 ## Input quantization. What is stored is exactly what is displayed, so snapping happens
 ## at input time and never at resolve time.
-var snap_deg: float = 0.5
-var snap_m: float = 0.05
+var snap_deg: float = 5.0
+var snap_m: float = 0.1
 var snap_scale: float = 0.05
 
 ## Tie-break order when two budgets max out at once. Entries are the keys produced by
