@@ -121,6 +121,25 @@ const TUBE_SIDES: int = 6
 const HEAD_LENGTH_FACTOR: float = 2.2
 
 ## Pointer slop, in pixels of the inner viewport.
+## WHICH VERB'S HANDLES A GRAB MAY REACH, as a bitmask. [constant TOOL_ALL] is every handle at
+## once, which is what this class has drawn since the Tab gate was retired.
+##
+## THE TAB GATE FAILED FOR REASONS THAT ARE NOT MODALITY'S FAULT (see the class docs): the flag
+## "lived in three places at once with different defaults, and a focus change silently turned the
+## rings off", and the ball it revealed swallowed every grab. A mask with ONE owner, shown on
+## screen the whole time and changed only by clicking it, has none of those properties. The
+## author, 2026-09-27: "instead of all editing handles existing, we should have a menu in top left
+## under layers and alignment thats titled 'edit'. and under those edit options should be scale,
+## position, orientation, distance from parent, etc. and when one is selected its handles appear."
+##
+## It is also the fix for what they hit a minute earlier - grabbing a stretch arrow inside a
+## PICKED UP part and getting a move: with eleven handles live at once, two verbs share a pixel.
+const TOOL_LIFT: int = 1
+const TOOL_STRETCH: int = 2
+const TOOL_TURN: int = 4
+const TOOL_MOVE: int = 8
+const TOOL_ALL: int = 15
+
 const HIT_PX: float = 9.0
 ## Morph handles are points rather than loops, so they get a slightly wider target.
 const MORPH_HIT_PX: float = 11.0
@@ -454,25 +473,31 @@ static func hit_test(
 	pointer: Vector2,
 	rot: Vector3 = Vector3.ZERO,
 	seam_local: Transform3D = Transform3D.IDENTITY,
-	has_seam: bool = false
+	has_seam: bool = false,
+	tools: int = TOOL_ALL
 ) -> Dictionary:
 	var miss: Dictionary = {HIT_HANDLE: ShipPlacement.Handle.NONE, HIT_INDEX: -1, HIT_DISTANCE: INF}
 	if camera == null or shape == null:
 		return miss
-	var offset: Dictionary = _hit_offset(camera, xform, shape, pointer)
-	if float(offset[HIT_DISTANCE]) <= MORPH_HIT_PX:
-		return offset
-	var morph: Dictionary = _hit_morph(camera, xform, shape, pointer)
-	if float(morph[HIT_DISTANCE]) <= MORPH_HIT_PX:
-		return morph
+	if (tools & TOOL_LIFT) != 0:
+		var offset: Dictionary = _hit_offset(camera, xform, shape, pointer)
+		if float(offset[HIT_DISTANCE]) <= MORPH_HIT_PX:
+			return offset
+	if (tools & TOOL_STRETCH) != 0:
+		var morph: Dictionary = _hit_morph(camera, xform, shape, pointer)
+		if float(morph[HIT_DISTANCE]) <= MORPH_HIT_PX:
+			return morph
 	# The rings are tested BEFORE the placement collar. When the old placement ARROW won ties
 	# against the rings it crossed, a grab on a ring at the crossing became a placement drag,
 	# and a "rotation" that then wandered off the silhouette deleted the part (F13). The collar
 	# sits at the base of the part and only meets a ring where a ring dips to the surface, so
 	# the tie is rarer now - and still decided the same way.
-	var ring: Dictionary = _hit_rings(camera, xform, shape, pointer, rot)
-	if float(ring[HIT_DISTANCE]) <= HIT_PX:
-		return ring
+	if (tools & TOOL_TURN) != 0:
+		var ring: Dictionary = _hit_rings(camera, xform, shape, pointer, rot)
+		if float(ring[HIT_DISTANCE]) <= HIT_PX:
+			return ring
+	if (tools & TOOL_MOVE) == 0:
+		return miss
 	var placement: Dictionary = _hit_placement(camera, xform, shape, pointer, seam_local, has_seam)
 	return placement if float(placement[HIT_DISTANCE]) <= HIT_PX else miss
 

@@ -163,6 +163,12 @@ class PartVisual:
 	var has_seam: bool = false
 
 
+## WHICH VERB'S HANDLES ARE DRAWN, a `ShipHandles.TOOL_*` mask owned by [ShipEditTool]. A public
+## var with a private setter, for the same reason as the layers below: this class stands at
+## gdlint's thirty-public-method cap and gdlint counts `func`, not `var`.
+var edit_tools: int = ShipHandles.TOOL_ALL:
+	set = _set_edit_tools
+
 ## THE LAYERS THAT ARE NOT DRAWN - `ShipCsgBake.SURFACE_*` names, plus
 ## `ShipLayersControl.LAYER_DOOR` (ADR 0046, extended 2026-09-26). WALLS start dropped, because
 ## the mode that gains most from the switch is INTERIOR and its whole purpose is looking into
@@ -756,31 +762,34 @@ func _refresh_handles() -> void:
 	var head: float = ShipHandles.head_radius(shape, _m_per_px)
 	var length: float = ShipHandles.arrow_length(shape, _m_per_px)
 	var own: PackedVector3Array = PackedVector3Array()
-	for handle: int in ShipHandles.ring_handles():
-		own.append_array(ShipHandles.ring_solid(shape, handle, rot, tube))
+	if (edit_tools & ShipHandles.TOOL_TURN) != 0:
+		for handle: int in ShipHandles.ring_handles():
+			own.append_array(ShipHandles.ring_solid(shape, handle, rot, tube))
 	# ARROWS, not crosses. "all handles should be visible as they are in spore tiny 3d arrows
 	# that you grab and pull" - each stretch handle is an arrow pointing out along the axis it
 	# grows, its head on the hit point just off the part's face and its tail back inside the
 	# part, so it reads as an arrow emerging from the face. The offset stalk starts ON the top
 	# face and runs out along the mount normal to its hit point.
-	var points: PackedVector3Array = ShipHandles.morph_points(shape)
-	for i: int in points.size():
-		var axis: Vector3 = ShipHandles.morph_axis(i)
-		var tail: Vector3 = points[i] - axis * length * 0.75
-		var tip: Vector3 = points[i] + axis * length * 0.25
-		own.append_array(ShipHandles.arrow_solid(tail, tip, shaft, head))
-	own.append_array(
-		ShipHandles.arrow_solid(
-			ShipHandles.offset_tail(shape), ShipHandles.offset_point(shape), shaft, head
+	if (edit_tools & ShipHandles.TOOL_STRETCH) != 0:
+		var points: PackedVector3Array = ShipHandles.morph_points(shape)
+		for i: int in points.size():
+			var axis: Vector3 = ShipHandles.morph_axis(i)
+			var tail: Vector3 = points[i] - axis * length * 0.75
+			var tip: Vector3 = points[i] + axis * length * 0.25
+			own.append_array(ShipHandles.arrow_solid(tail, tip, shaft, head))
+	if (edit_tools & ShipHandles.TOOL_LIFT) != 0:
+		own.append_array(
+			ShipHandles.arrow_solid(
+				ShipHandles.offset_tail(shape), ShipHandles.offset_point(shape), shaft, head
+			)
 		)
-	)
 	# The placement handle in the ACCENT role, not the selection role: it belongs to the
 	# attachment rather than to the part, and it must be tellable apart from the six stretch
 	# arrows pointing out of the same object. A collar on the parent's surface round the base
 	# of the part (ShipHandles.footprint_loop); the old parent-centre ray is kept as a dim
 	# reference line that grabs nothing.
 	var collar: PackedVector3Array = PackedVector3Array()
-	if v.has_seam:
+	if v.has_seam and (edit_tools & ShipHandles.TOOL_MOVE) != 0:
 		collar = ShipHandles.tube_solid(ShipHandles.footprint_loop(shape, v.seam_local), tube)
 	# Two passes per role, dim under bright - see GIZMO_DIM_PRIORITY.
 	_append_triangles(mesh, own, _gizmo_material("selection", true))
@@ -1136,6 +1145,13 @@ func _set_hidden_layers(layers: PackedStringArray) -> void:
 		return
 	hidden_layers = layers
 	refresh_materials()
+
+
+func _set_edit_tools(mask: int) -> void:
+	if mask == edit_tools:
+		return
+	edit_tools = mask
+	_refresh_handles()
 
 
 func refresh_materials() -> void:

@@ -60,6 +60,9 @@ const LINK_CYCLE: Array = ["wall", "doorway", "hatched", "open"]
 ## RETIRED(2026-09-27): SEAM_STYLE_ITEMS and the whole seam-style feature -> [ShipSeamMenu]
 ## (harness/builder/ship_seam_menu.gd), which owns the table, the menu and the edit it makes.
 
+## Where the EDIT menu starts, in DESIGN pixels: clear of the layers panel above it.
+const EDIT_MENU_TOP: float = 96.0
+
 const HEADER_HEIGHT: int = 30
 const LEFT_WIDTH: int = 236
 const RIGHT_WIDTH: int = 292
@@ -118,6 +121,7 @@ var _hint_bar: ShipHintBar = null
 ## The raw line the 78 `set_status()` callers write, handed on to the hint as STATE_STATUS.
 var _status_text: String = ""
 var _layers: ShipLayersControl = null
+var _edit_tool: ShipEditTool = null
 var _undo_button: Button = null
 var _redo_button: Button = null
 ## EXPLODE / ASSEMBLE (ADR 0008). The exploded view shows bakes, not the document, so any edit
@@ -201,6 +205,7 @@ func _ready() -> void:
 	_build_post_process()
 	_view.setup(_ship_theme, self)
 	_layers.use(_view)
+	_edit_tool.use(_view)
 	_explode_opts = ShipExplodeControl.new(
 		_view.get_parent() as Control, _view, _config, _ship_theme
 	)
@@ -1240,6 +1245,9 @@ func _build_layout() -> void:
 	# order, so built first it was covered by the 3D view for its whole life. ShipExplodeControl
 	# is built after _build_layout() for the same reason, and visibly works.
 	_layers = ShipLayersControl.new(view_frame, _ship_theme)
+	# THE EDIT MENU, stacked under the layers panel exactly as asked: "a menu in top left under
+	# layers and alignment thats titled 'edit'".
+	_edit_tool = ShipEditTool.new(view_frame, _ship_theme, EDIT_MENU_TOP)
 
 	var right: VBoxContainer = VBoxContainer.new()
 	right.name = "RightColumn"

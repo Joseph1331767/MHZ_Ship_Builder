@@ -757,6 +757,14 @@ func _washed_material() -> Material:
 	return m
 
 
+## WHICH VERB'S HANDLES ARE LIVE, a `ShipHandles.TOOL_*` mask owned by [ShipEditTool]. Gates the
+## DRAWING and the HIT TEST from the one value, so a handle that is not on screen can never be
+## grabbed - which is the whole point: with all eleven live, two verbs share a pixel.
+func set_edit_tools(mask: int) -> void:
+	if _scene != null:
+		_scene.edit_tools = mask
+
+
 func set_rooms_whole(on: bool) -> void:
 	if _explode != null:
 		_explode.set_rooms_whole(on)
@@ -1395,7 +1403,8 @@ func _try_begin_handle_drag(pos: Vector2) -> bool:
 		pos,
 		_scene.part_rot(ids[0]),
 		_scene.part_seam(ids[0]),
-		_scene.part_has_seam(ids[0])
+		_scene.part_has_seam(ids[0]),
+		_scene.edit_tools
 	)
 	if int(hit[ShipHandles.HIT_HANDLE]) == ShipPlacement.Handle.NONE:
 		return false

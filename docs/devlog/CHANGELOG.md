@@ -4151,3 +4151,52 @@ the drag mode and focus pick, ALT the clone. That is the author's call, not a si
 The placement ORIGIN and ALIGNMENT modes - radial from parent / another node / the founding node /
 the centre of mass, against align-to-placement-vector / to-surface-normal / to-global-orthogonal -
 are still to come. Two of the four designers for them died with the network.
+
+
+## [2026-09-27] The EDIT menu: one verb at a time
+
+"instead of all editing handles existing, we should have a menu in top left under layers and
+alignment thats titled 'edit'. and under those edit options should be scale, position, orientation,
+distance from parent, etc. and when one is selected its handles appear."
+
+`ShipEditTool` - EVERYTHING / MOVE / TURN / SCALE / LIFT, stacked under the layers panel. One
+`ShipHandles.TOOL_*` mask gates the DRAWING and the HIT TEST from the same value, so a handle that
+is not on screen can never be grabbed.
+
+### Why this is the fix for the two notes before it
+
+Two SHIFT+F notes four minutes apart reported a scale drag that moved the part off its attachment
+and changed its alignment. Neither is a maths bug - measured, a `morph_selected` on a seated part
+grows the right axis, leaves yaw and pitch alone, and leaves the origin where it was, and
+`_rebuild_ghost_shape` re-solves the ghost's seat so the preview and the commit agree.
+
+The frame the note carried says what actually happened: the status line reads **"PICKED UP - DRAG
+THE RING TO TURN IT"**. The part was already in a move gesture, and with eleven handles live at once
+- three rings, six stretch arrows, an offset stalk and a placement collar sharing a few hundred
+pixels - the grab was never the verb they aimed at. One verb at a time removes the collision rather
+than arguing about which handle should win a tie.
+
+### This is not the Tab gate coming back
+
+`ShipHandles`' class docs record why that one was retired on 2026-08-31, and none of the three
+reasons is modality: the flag "lived in three places at once with different defaults, and a focus
+change silently turned the rings off", and the ball it revealed swallowed every grab and returned
+`BALL_ROTATE` for all of them. This mask has ONE owner, is on screen the whole time, changes only
+when clicked, and reveals nothing that was not already drawn. `hit_test` regains the `advanced`
+argument it dropped, as `tools`, and `API_CONTRACT_SPORE.md:216` records the original removal.
+
+EVERYTHING is the default and stays a choice: the author works with every handle live and asked for
+the current view to be preserved, so opening the app takes nothing away.
+
+### Seen while checking it
+
+The six stretch arrows are nearly invisible - small nubs the same colour as the part, mostly buried
+in its faces. That is very likely the other half of why a grab landed on the wrong verb, and it is
+the "better rotation, position, stretching handles" the author asked for a day earlier. Not fixed
+here; this note is so it is not rediscovered.
+
+### Verified
+
+Looked at `reports/visual_edit_tools.png` (all five verbs) and `reports/visual_scale_handles.png`
+(EVERYTHING beside SCALE, zoomed enough to see the arrows survive). **gdUnit4 469/469**; selfcheck
+PASSED with the hash unchanged; resolve, explode and visual (5 modes) checks PASSED.
