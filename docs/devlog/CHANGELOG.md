@@ -4200,3 +4200,62 @@ here; this note is so it is not rediscovered.
 Looked at `reports/visual_edit_tools.png` (all five verbs) and `reports/visual_scale_handles.png`
 (EVERYTHING beside SCALE, zoomed enough to see the arrows survive). **gdUnit4 469/469**; selfcheck
 PASSED with the hash unchanged; resolve, explode and visual (5 modes) checks PASSED.
+
+
+## [2026-09-27] Mirroring places REAL parts
+
+The author, on being told a twin is derived and would have to be materialised:
+
+> "if it were me id just place 2 parts and mirror their placement, rather then have 1 part.. ill
+> let you figure out the logistics. so long as the intent is fulfilled."
+
+That is a better design than the one being argued about, and it answers three SHIFT+F notes at
+once - "i want to be able to select any of the mirrored pieces (so i can make them unique etc)",
+"i cant do that because it wont let me select the sister part, and so i cant select its merger
+type", and "in theory i should be able to select ANY part wether placed via mirror or not".
+
+`ShipMirror.place_reflections()` lays one ORDINARY part per reflection the document's planes call
+for. No `mirror_source`, no derivative record, nothing regenerating them - each is a part like any
+other, so every verb that works on a part works on it: select, make unique, link, merge into a
+composite room.
+
+They go in as part of the SAME edit, so one undo takes a symmetric placement back whole rather than
+leaving half of it behind.
+
+**Every part involved is marked asymmetric, the source included**, or a mirrored placement would put
+a real sibling AND a solve-time twin in the same place. A test asserts the solve emits no twin ids
+at all afterwards.
+
+### The maths, and where it is honest
+
+A placement is a DIRECTION on the parent's surface, and `ShipAttach.direction_from_angles` /
+`angles_from_direction` are exact inverses - so reflecting the direction and reading the angles back
+is exact for any yaw, any pitch and any number of planes. That is strictly better than
+`mirror_attach_angles`, whose own docstring says its per-plane table is not exact and which nothing
+was using.
+
+`rot.z` negates once per reflection, because a reflection reverses the sense of rotation about the
+mount normal - so an EVEN number of them composes back to a rotation and the spin comes home. The
+tilt (`rot.x`, `rot.y`) passes through, which is the same approximation the old function documents;
+it shows only on a part carrying a tilt, and the sibling is a real part the player can adjust.
+
+### What it gives up, deliberately
+
+The copies no longer follow the original. A derived twin was regenerated every solve and could never
+drift; two real parts can. The author took that trade knowingly and named the consequence first -
+floating structure - as something to catch later with a notice and a link-via-node-insert.
+
+### Caught by the first test written against it
+
+`ShipPart.duplicate_part()` carries the source's ID, and `ShipDoc.add_part` mints a new one only for
+an EMPTY id. So the first version OVERWROTE the part it copied: `made` came back full of ids while
+`doc.parts` never grew, and the ship stayed the same size. One line, and it would have been a
+silent data-loss bug in the hands of a player.
+
+### Verified
+
+**gdUnit4 476/476**, seven of them new: one real part per reflection for one, two and three planes;
+a copy is an ordinary part with no `mirror_source`; the solve adds no twin on top; a copy stands
+exactly at the reflection, measured on the resolved transform; a part ON the plane lays nothing; the
+direction reflection is exact across fifteen angle pairs; and the spin reverses once per reflection.
+Selfcheck PASSED with the hash unchanged; resolve, explode and visual (5 modes) checks PASSED.

@@ -1627,6 +1627,10 @@ func _commit_new(doc: ShipDoc) -> String:
 	var new_id: String = doc.add_part(part)
 	if new_id == "":
 		return ""
+	# MIRRORING PLACES REAL PARTS (ShipMirror.place_reflections): the copies go in as part of the
+	# SAME edit, so one undo takes the whole symmetric placement back rather than leaving half of
+	# it behind.
+	ShipMirror.place_reflections(doc, _data(), _config(), new_id)
 	# Empty changed_ids: the topology changed, so the view must diff everything.
 	_builder.commit_edit(PackedStringArray())
 	var after: ShipDoc = _builder.get_doc()

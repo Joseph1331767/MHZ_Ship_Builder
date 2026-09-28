@@ -105,6 +105,101 @@ static func mirror_attach_angles(
 	}
 
 
+## The placement a REAL sibling needs to stand where [param axes] reflects this one, as
+## `{"yaw": float, "pitch": float, "rot": Vector3}`.
+##
+## EXACT FOR THE DIRECTION, which is what a player sees. A placement is a DIRECTION on the
+## parent's surface, and [method ShipAttach.direction_from_angles] and
+## [method ShipAttach.angles_from_direction] are exact inverses - so reflecting the direction and
+## reading the angles back is exact, for any yaw and pitch and any number of planes. That is
+## strictly better than [method mirror_attach_angles]'s per-plane table, which handles one plane
+## and says so.
+##
+## `rot.z` NEGATES because a reflection reverses the sense of rotation about the mount normal.
+## `rot.x` and `rot.y` - the tilt - pass through, and that is the same approximation
+## [method mirror_attach_angles] documents: a correct tilt reflection has to account for the mount
+## frame being rebuilt right-handed from the already-reflected normal. It shows only on a part
+## that carries a tilt, and the sibling is a REAL part the player can simply adjust.
+static func mirrored_placement(
+	yaw_deg: float, pitch_deg: float, rot: Vector3, axes: String
+) -> Dictionary:
+	var dir: Vector3 = ShipAttach.direction_from_angles(yaw_deg, pitch_deg)
+	var flips: int = 0
+	for axis: String in ShipSymmetry.axes_of(axes):
+		var index: int = ShipSymmetry.plane_axis(axis)
+		if index >= 0:
+			dir[index] = -dir[index]
+			flips += 1
+	var angles: Vector2 = ShipAttach.angles_from_direction(dir)
+	# Each reflection reverses the spin once; an even number of them composes back to a rotation.
+	var spin: float = rot.z if flips % 2 == 0 else -rot.z
+	return {
+		"yaw": angles.x,
+		"pitch": angles.y,
+		"rot": Vector3(rot.x, rot.y, _wrap_deg(spin)),
+	}
+
+
+## MIRRORING PLACES REAL PARTS. One ordinary sibling per reflection the document's planes call
+## for, each a full part of its own with no link back to the one it came from.
+##
+## The author, 2026-09-27: "if it were me id just place 2 parts and mirror their placement, rather
+## then have 1 part". That is the whole design, and it answers three notes at once - "i want to be
+## able to select any of the mirrored pieces (so i can make them unique etc)", "i cant do that
+## because it wont let me select the sister part, and so i cant select its merger type", and "in
+## theory i should be able to select ANY part wether placed via mirror or not so i can change
+## their link types".
+##
+## WHAT IT GIVES UP, deliberately: the copies no longer follow the original. A derived twin was
+## regenerated from its source every solve and so could never drift; two real parts can. The
+## author took that trade knowingly - "ill let you figure out the logistics. so long as the intent
+## is fulfilled" - and named the consequence themselves, floating structure, as something to catch
+## later with a notice and a link-via-node-insert.
+##
+## EVERY PART INVOLVED IS MARKED ASYMMETRIC, source included, so the solve-time twin pass adds
+## nothing on top of the copies - otherwise a mirrored placement would produce both a real sibling
+## and a derived twin of each, standing in the same place.
+##
+## Returns the new ids, in the order the reflections were listed.
+static func place_reflections(
+	doc: ShipDoc, data: ShipData, cfg: ShipConfig, source_id: String
+) -> PackedStringArray:
+	var out: PackedStringArray = PackedStringArray()
+	if doc == null or cfg == null:
+		return out
+	var source: ShipPart = doc.parts.get(source_id, null)
+	if source == null or source.parent.is_empty() or source.asymmetric:
+		return out
+	var xforms: Dictionary = ShipAttach.resolve_all(doc, data, cfg)
+	if not xforms.has(source_id):
+		return out
+	# Asked BEFORE anything is marked: reflections_of refuses an asymmetric part, and it is the
+	# one place that knows which planes this part actually stands off.
+	var wanted: PackedStringArray = ShipSymmetry.reflections_of(
+		doc, source_id, xforms[source_id], cfg
+	)
+	for axes: String in wanted:
+		var copy: ShipPart = source.duplicate_part()
+		# A DUPLICATE CARRIES THE SOURCE'S ID, and `ShipDoc.add_part` mints a new one only for an
+		# EMPTY id - so without this the copy overwrites the part it came from and the ship never
+		# grows. The first test written against this caught it.
+		copy.id = ""
+		var placement: Dictionary = mirrored_placement(source.yaw, source.pitch, source.rot, axes)
+		copy.yaw = float(placement["yaw"])
+		copy.pitch = float(placement["pitch"])
+		copy.rot = placement["rot"]
+		copy.asymmetric = true
+		# A copy stands where the reflection puts it, not on the source's snap target.
+		copy.snap_id = ""
+		copy.display_name = "%s %s" % [source.display_name, axes.to_upper()]
+		var made: String = doc.add_part(copy)
+		if made != "":
+			out.append(made)
+	if not out.is_empty():
+		source.asymmetric = true
+	return out
+
+
 ## Add derivative records for `part_id` and everything under it. Returns the new derivative ids in
 ## creation order (parents before children), or an empty array if the operation was refused.
 ##
