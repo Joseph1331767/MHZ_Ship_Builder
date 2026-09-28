@@ -4027,3 +4027,74 @@ founded ON a root part today.
 
 **gdUnit4 459/459**; selfcheck PASSED with the hash unchanged; resolve, explode and visual (5 modes)
 checks PASSED.
+
+
+## [2026-09-27] The twin vanishes on commit: one cause, three symptoms
+
+The author: "mirroring works across 1 axis until actual clicked placement, when the mirror part
+dissapears ... also pressing x, y, and or z is not causing a mirror effect across all orthognal
+directions."
+
+Both sentences are the same defect. ADR 0043 widened `ShipDoc.symmetry_plane` from a letter to a
+SET and taught two of the three passes about it: `ShipAttach._add_symmetry_twins` keys a twin
+transform `id~mx` / `id~my` / `id~mxy` once a doc has more than one plane, and `ShipSeams` keys its
+seams the same way. **`ShipAttach.resolve_shapes` was missed** and went on aliasing the twin's shape
+under the bare `id~m` (`ship_attach.gd:677`, `:1006`).
+
+Every consumer pairs the two maps by key and skips anything present in only one
+(`ship_scene_builder.gd:294-299`, `ship_sdf.gd:181-186`). So the instant a second plane came on, the
+shape lookup missed for every twin and not one twin mesh was built - not on screen, not in the bake.
+
+**The ghost survived because it needs no shape lookup.** `_preview_twin` walks `planes_of()` and
+reflects the transform directly (`ship_scene_builder.gd:430-441`), so it drew a twin the commit then
+could not. Its own docstring claims "the preview never shows a twin the commit will not make"; as
+shipped that was false.
+
+And the default is ONE plane, so the author's first press of Y took a working single-plane ship
+straight into the broken state - which is why it reads as "mirroring does not work" rather than
+"multi-axis mirroring does not work".
+
+### The fix
+
+`ShipSymmetry.possible_twin_ids(doc, id)` - every key the plane set could produce, which is the bare
+`~m` for one plane and all 2^n-1 subsets for more. `resolve_shapes` aliases the shared
+`ResolvedShape` under all of them, which keeps the policy its own comment already states: aliased
+"for anything that COULD twin rather than anything that DOES, because whether a twin exists depends
+on where the part landed and only the transform pass knows that". No other pass learns anything; the
+transform pass stays the one place that decides which keys get a transform.
+
+`ShipSymmetry.all_twin_ids(id)` - every subset of x/y/z whatever the document says - for the
+incremental path at `ship_scene_builder.gd:332`, which only ever synced `~m`. It is also the path
+the MIRROR row itself takes, so turning a plane OFF has to destroy the visuals its twins left
+behind, and by then the document no longer names the planes they were made under.
+
+### Why nothing caught it, which is the part worth remembering
+
+`tools/ship_visual_check.gd::_check_twins` exists precisely to catch "a twin has a transform but no
+mesh" - its docstring says so - and it early-returned on
+`ShipSymmetry.plane_axis(doc.symmetry_plane) < 0`. `plane_axis("xy")` is **-1**, because it reads a
+single letter. So the one check written for this skipped exactly the documents where it was true.
+
+Four more sites carried the same single-letter idiom and all four told a correctly-mirrored
+two-plane ship it had no mirror at all: the inspector's cost line, the tree's status, and BREAK
+SYMMETRY, which refused outright with "THIS SHIP MIRRORS ACROSS NO PLANE, SO THERE IS NOTHING TO
+BREAK." All five now ask `planes_of(doc).is_empty()`.
+
+`tests/core/test_symmetry.gd` asserted the transform pass's keys and nothing asserted the shape pass
+keyed the same set. `tests/core/test_twin_keys.gd` closes that: for five plane sets, every twin
+transform must have a shape. Proved non-vacuous by restoring the bug and watching it name
+`p_0002~mx has a transform and NO shape, so no mesh is ever built`.
+
+### Verified
+
+Measured on screen, not in the document: **1, 3 and 7 twin meshes** for one, two and three planes.
+**gdUnit4 464/464**; selfcheck PASSED with the hash unchanged at `5536787c6c35d236` - the document
+is untouched, only how its shapes are keyed; data validator PASSED (0 warnings); resolve, explode
+and visual (5 modes) checks PASSED.
+
+### Not this
+
+Per-part mirror planes - "one part can be mirrored along x, and another can be mirrored along y" -
+is a separate and larger change, designed but not built: it needs a new `ShipPart.symmetry` field
+written conditionally so the hash does not move, an INTERSECTION cascade rather than the present
+boolean one, and an ADR.

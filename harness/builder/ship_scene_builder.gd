@@ -329,7 +329,12 @@ func refresh_parts(doc: ShipDoc, data: ShipData, cfg: ShipConfig, ids: PackedStr
 	var xforms: Dictionary = ShipAttach.resolve_all(doc, data, cfg)
 	for pid: String in ids:
 		_sync_or_destroy(pid, shapes, xforms)
-		_sync_or_destroy(ShipSymmetry.twin_id(pid), shapes, xforms)
+		# EVERY possible twin key, not the bare one - and every subset of x/y/z whatever the
+		# document currently says, because this is also the path the MIRROR row takes: turning a
+		# plane OFF has to destroy the visuals its twins left behind, and `_sync_or_destroy`
+		# destroys any key that has no transform.
+		for twin_key: String in ShipSymmetry.all_twin_ids(pid):
+			_sync_or_destroy(twin_key, shapes, xforms)
 		_sync_expanded(pid, shapes, xforms)
 
 

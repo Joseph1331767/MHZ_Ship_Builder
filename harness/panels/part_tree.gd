@@ -510,7 +510,7 @@ func _on_break_symmetry_toggled(pressed: bool) -> void:
 		)
 		_refresh_symmetry_button()
 		return
-	if ShipSymmetry.plane_axis(doc.symmetry_plane) < 0:
+	if ShipSymmetry.planes_of(doc).is_empty():
 		_refuse(
 			"SYMMETRY",
 			(
@@ -591,7 +591,7 @@ func _refresh_symmetry_button() -> void:
 	var effective: bool = ShipSymmetry.is_effectively_asymmetric(doc, part_id)
 	var source: String = _break_source(doc, part_id)
 	var inherited: bool = effective and source != part_id
-	var plane_off: bool = ShipSymmetry.plane_axis(doc.symmetry_plane) < 0
+	var plane_off: bool = ShipSymmetry.planes_of(doc).is_empty()
 	_break_button.set_pressed_no_signal(effective)
 	# An inherited break cannot be undone here: clearing this part's own flag would leave
 	# the ancestor's break in force and the button would spring back. Say where to go.
@@ -619,7 +619,7 @@ func _symmetry_tooltip(
 
 ## One phrase describing a part's effective symmetry, shared by the tooltip and the tree.
 func _symmetry_phrase(doc: ShipDoc, part_id: String) -> String:
-	if ShipSymmetry.plane_axis(doc.symmetry_plane) < 0:
+	if ShipSymmetry.planes_of(doc).is_empty():
 		return "NO MIRROR PLANE - SINGLE COST"
 	if not ShipSymmetry.is_effectively_asymmetric(doc, part_id):
 		return "MIRRORED - DOUBLE COST"

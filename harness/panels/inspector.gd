@@ -969,7 +969,7 @@ func _refresh_symmetry(doc: ShipDoc, part: ShipPart) -> void:
 	if doc == null or part == null or _target_id == "":
 		_symmetry_label.text = "---"
 		return
-	if ShipSymmetry.plane_axis(doc.symmetry_plane) < 0:
+	if ShipSymmetry.planes_of(doc).is_empty():
 		_symmetry_label.text = "NO MIRROR PLANE - SINGLE COST"
 		return
 	var cost: String = NumericField.format_number(_cost_of(doc, _target_id))

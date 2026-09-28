@@ -674,7 +674,13 @@ static func resolve_shapes(doc: ShipDoc, data: ShipData, cfg: ShipConfig) -> Dic
 			# knows that.
 			var twin: bool = _may_twin(doc, id)
 			if twin:
-				out[ShipSymmetry.twin_id(id)] = shape
+				# EVERY key the plane set could produce, not just the bare one. The transform
+				# pass keys a multi-plane twin `id~mx` / `id~my` / `id~mxy` (ADR 0043) and this
+				# aliased only `id~m`, so no consumer could pair the two and every twin of a
+				# two-plane ship was silently dropped - present in the transform map, absent from
+				# the shape map, skipped by the rule that needs both.
+				for key: String in ShipSymmetry.possible_twin_ids(doc, id):
+					out[key] = shape
 			if part.kind == KIND_COMPONENT_INSTANCE:
 				var scale: Vector3 = _safe_scale(part.scale, cfg)
 				_expand_instance_shapes(doc, data, cfg, id, part, scale, 0, out, twin)
@@ -1003,7 +1009,8 @@ static func _expand_instance_shapes(
 			continue
 		out[inner_key] = shape
 		if twin:
-			out[ShipSymmetry.twin_id(inner_key)] = shape
+			for twin_key: String in ShipSymmetry.possible_twin_ids(doc, inner_key):
+				out[twin_key] = shape
 		if inner_part.kind == KIND_COMPONENT_INSTANCE:
 			_expand_instance_shapes(
 				doc, data, cfg, inner_key, inner_part, scale, depth + 1, out, twin

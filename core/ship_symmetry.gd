@@ -156,6 +156,50 @@ static func reflections_of(
 	return out
 
 
+## EVERY twin id [param source_id] could take under [param doc]'s planes - not the ones it does.
+##
+## The shape pass aliases a twin's shape "for anything that COULD twin rather than anything that
+## DOES, because whether a twin exists depends on where the part landed and only the transform
+## pass knows that" (`ShipAttach.resolve_shapes`). Before ADR 0043 that was one key, `id~m`, and
+## the alias was written directly. With a SET of planes the transform pass emits `id~mx`, `id~my`
+## and `id~mxy`, so the one bare alias matched none of them and every consumer - which pairs the
+## shape and transform maps by key and skips anything in only one - silently built no twin at all.
+##
+## Returns the bare `~m` for a one-plane document, exactly as [method reflections_of] does, so a
+## single-plane ship keys identically to the way it always has.
+static func possible_twin_ids(doc: ShipDoc, source_id: String) -> PackedStringArray:
+	var out: PackedStringArray = PackedStringArray()
+	var planes: PackedStringArray = planes_of(doc)
+	if planes.is_empty():
+		return out
+	if planes.size() == 1:
+		out.append(twin_id(source_id))
+		return out
+	# Every non-empty subset, in the same binary order reflections_of counts them.
+	for mask: int in range(1, 1 << planes.size()):
+		var chosen: String = ""
+		for i: int in planes.size():
+			if (mask >> i) & 1 == 1:
+				chosen += planes[i]
+		out.append(twin_id(source_id, chosen))
+	return out
+
+
+## EVERY twin id of [param source_id] across any axis subset at all, whatever the document says.
+##
+## For DESTRUCTION, not creation: turning a plane off has to remove the visuals its twins left
+## behind, and by then the document no longer names the planes they were made under.
+static func all_twin_ids(source_id: String) -> PackedStringArray:
+	var out: PackedStringArray = PackedStringArray([twin_id(source_id)])
+	for mask: int in range(1, 1 << AXIS_ORDER.length()):
+		var chosen: String = ""
+		for i: int in AXIS_ORDER.length():
+			if (mask >> i) & 1 == 1:
+				chosen += str(AXIS_ORDER[i])
+		out.append(twin_id(source_id, chosen))
+	return out
+
+
 ## Twin id for a source part, reflected across [param axes].
 ##
 ## FORMAT: "<source_id>~m" for a document with ONE plane, and "<source_id>~m<axes>" for one with

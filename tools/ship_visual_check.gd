@@ -258,7 +258,8 @@ func _build_demo_ship() -> void:
 ## mirrored halves were never actually drawn on the incremental edit path at all. Counting
 ## `~m` entries in the scene builder is the question that was never asked.
 func _check_twins(doc: ShipDoc, data: ShipData) -> void:
-	if ShipSymmetry.plane_axis(doc.symmetry_plane) < 0:
+	# AN EMPTY SET, never a letter: plane_axis("xy") is -1, so this skipped the very docs it guards.
+	if ShipSymmetry.planes_of(doc).is_empty():
 		return
 	var cfg: ShipConfig = _builder.call("get_config")
 	var xforms: Dictionary = ShipAttach.resolve_all(doc, data, cfg)
