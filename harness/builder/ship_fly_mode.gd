@@ -38,7 +38,7 @@ signal changed
 ## settled it in one run: a shaded box in this very viewport reads luma 0.836 under the existing
 ## directional light, 0.922 with an OmniLight3D and 0.928 with a SpotLight3D. F7 was a dark albedo
 ## quantizing onto the background, not a lighting failure - see FOLLOWUPS F7, now RESOLVED.
-const TORCH_ENERGY: float = 3.4
+const TORCH_ENERGY: float = 4.0
 
 ## The beam's half-angle in degrees - the flashlight's FOV. NARROW, deliberately: "flashlight fov
 ## very narrow, the player should feel like they are in a black void and cant see anything outside
@@ -48,17 +48,22 @@ const TORCH_ANGLE_DEG: float = 19.0
 
 ## How hard the cone's edge falls off (0 hard, 1 soft) and how the brightness falls with distance.
 ## 1.0 is Godot's physically-plausible inverse-square; lower spreads the light further.
-const TORCH_ANGLE_FALLOFF: float = 0.55
-const TORCH_ATTENUATION: float = 1.2
+const TORCH_ANGLE_FALLOFF: float = 1.4
+const TORCH_ATTENUATION: float = 2.0
 
-## The beam reaches this many scene radii. GENEROUS, and it has to be: Godot's spot attenuation is
-## `pow(1 - d/range, attenuation)`, which is essentially ZERO at the range itself. The first tuning
-## set the range to the scene radius and the camera enters fly at about that distance, so the beam
-## arrived at roughly 1% strength and the mode looked like the torch was not on at all. The CONE is
-## what makes the void a void; the range only has to be far enough not to be the thing that stops
-## the light.
-const TORCH_REACH_RADII: float = 6.0
-const TORCH_REACH_MIN_M: float = 50.0
+## HOW FAR THE BEAM REACHES, IN METRES, AND IT IS FIXED. A flashlight reaches as far as a flashlight
+## reaches; it does not get longer because the ship got bigger.
+##
+## SCALING IT TO THE SHIP WAS THE BUG, and it is worth writing down because the reasoning sounded
+## right. The distance cue is scaled to the scene, so I scaled this the same way - and on a baked
+## carbon class, whose scene radius is 32 m, the reach came out at **190 m**. Godot's falloff is
+## `pow(1 - d/range, attenuation)`, so at 190 m of range everything within the cone at any
+## distance is at essentially full brightness: no falloff, no darkness, "everything is lit, theres
+## no flashlight, all of ship is lit". Measured: only 3.6% of the ship's pixels were black.
+##
+## At 18 m with an attenuation of 2, a wall 2 m away reads at 0.79, at 5 m 0.52, at 10 m 0.20 and at
+## 15 m 0.03. That is a torch: bright where you point it, gone a room away.
+const TORCH_REACH_M: float = 18.0
 
 ## Where ENTER-to-keep-the-view puts the orbit rig's new focus point. The rig orbits a POINT, so
 ## leaving fly has to invent one, and the point you were flying toward is the only defensible pick.
@@ -241,17 +246,13 @@ func previous_mode() -> int:
 	return _prev_mode
 
 
-## Size the beam to the ship. Called on entry and whenever the scene bounds could have changed -
-## NOT every tick, because the light is parented to the camera and follows it by itself. That is the
-## point of using a real light: there is no per-frame bookkeeping to get wrong.
-##
-## THE REACH IS SCALED TO THE SHIP for the same reason the distance cue is: a 6 m pod and a 300 m
-## hull cannot share one number, and a beam that cannot reach your own ship is not a flashlight.
+## Set the beam's reach. A FIXED distance - see [constant TORCH_REACH_M] for why scaling it to the
+## ship was wrong. Kept as a call rather than set once, because the tuning is the thing most likely
+## to be revisited and one place to change it is worth a function.
 func size_torch() -> void:
-	if _torch == null or _scene == null:
+	if _torch == null:
 		return
-	var radius: float = maxf(_scene.scene_aabb().size.length() * 0.5, MIN_RADIUS)
-	_torch.spot_range = maxf(radius * TORCH_REACH_RADII, TORCH_REACH_MIN_M)
+	_torch.spot_range = TORCH_REACH_M
 
 
 ## How far the fly rig is from the model's centre - what the part shader's distance cue is derived

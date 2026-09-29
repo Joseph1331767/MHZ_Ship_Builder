@@ -4591,3 +4591,62 @@ type they force, and the palette variant that goes with it - one decision, one p
 **gdUnit4 495/495** (4 new on collision); gdlint clean; selfcheck PASSED; data validator PASSED
 (0 warnings); resolve, explode and visual (5 modes) PASSED; capture shows the wire dark outside the
 beam, LAND/GHOST on the toolbar and CLAY in the dropdown.
+
+---
+
+## [2026-09-28] The flashlight had a 190 metre reach, and I had not looked properly
+
+> "everything is lit, theres no flashlight, all of ship is lit.. dude when standing next to ship i
+> should see very little of it, everything else on screen should be PITCH black after the falloff of
+> light.. i dont understand am i testing it wrong? are you visually verifying before shipping to me?"
+
+They were not testing it wrong, and the answer to the question is **not well enough**. I captured an
+image every time, but on the previous pass I checked that the WIREFRAME had gone dark, saw that, and
+shipped - without checking the thing that actually mattered, which is that the SHIP was still fully
+lit in the same picture. Third partial check of the session.
+
+### What it actually was
+
+Instrumented the live state instead of reading the code again
+(`scratch/diag_void_state.gd` - it prints every light in the viewport and then measures the picture):
+
+```
+ambient source=2  energy=0.000
+KeyLight    DirectionalLight3D energy=0.000
+Flashlight  SpotLight3D  energy=3.400  angle=19.0  atten=1.20  range=190.3
+ship pixels=445500   of those essentially black=15884  (3.6%)
+```
+
+Ambient off, key light off, one narrow spot - and a reach of **190 metres**. Godot's spot falloff is
+`pow(1 - d/range, attenuation)`, so at that range everything inside the cone at any distance sits at
+essentially full brightness. There was no falloff at all, which is exactly "there is no flashlight".
+
+**The cause was a fix I had made two passes earlier.** The beam could not reach the ship from the
+orbit camera's standoff, so I scaled its range to the scene radius - the same trick the distance cue
+uses. On a baked carbon class the scene radius is 32 m, six of those is 190 m, and the "fix" removed
+the falloff entirely. A flashlight reaches as far as a flashlight reaches; it does not get longer
+because the ship got bigger. The range is a fixed **18 m** now.
+
+### Two false alarms in the verification itself, both worth recording
+
+While checking the fix I twice produced a picture that looked wrong and was not:
+
+1. Stood the test camera at a hard-coded `(0,0,9)` - which on a 63 m ship is *inside* it, pressed
+   against a wall. The whole screen came back as one lit surface.
+2. Stood it off half the bounding-box **diagonal** (34.6 m) rather than off the near face (20 m), so
+   the camera was ~20 m out with an 18 m beam. The capture came back almost entirely black, which
+   reads exactly like a dead light.
+
+I nearly retuned the lighting for the second one. The lesson is the same as F7's: **measure the thing
+you think you are measuring.** The diagnostic now stands a stated 4 m off the nearest face and prints
+both numbers so the reading cannot be misread.
+
+### Verified, properly this time
+
+Standing 4 m off the hull with an 18 m beam: a bright pool of clay where the torch lands, hard black
+everywhere else, **11.8%** of ship pixels lit. From beyond the beam the ship is simply not there,
+which is the point - you fly toward it and it comes out of the dark.
+
+**gdUnit4 495/495**; gdlint clean; selfcheck PASSED; visual check (5 modes) PASSED.
+
+`TORCH_REACH_M` is one constant if 18 m turns out to be too short to navigate by.
