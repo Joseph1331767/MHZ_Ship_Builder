@@ -77,11 +77,25 @@ Concretely:
 - **CLAY, the void and the torch are separable and are NOT covered by this ADR.** They are render
   types and shader terms, they touch no camera, and they need no reversal - `DisplayMode` documents
   itself as append-safe. They ship on their own merits.
-- **The flashlight is a shader term, not a light.** `part_faceted.gdshader` is
-  `render_mode unshaded`; a `SpotLight3D` would light exactly nothing (FOLLOWUPS F7: shaded
-  materials render **black** in this SubViewport - flipping one part to unshaded took it from 0 px
-  to 115,582 px). The torch is a cone term pushed **into the ramp index**, never added as a colour,
-  so the palette quantizer stays a no-op on parts.
+- **The flashlight is a real `SpotLight3D`** - real cone angle, real inverse-square falloff, real
+  shadows, parented to the fly camera.
+
+  **REVISED 2026-09-28, and the first version of this bullet was wrong.** It said the torch had to
+  be a faked shader term because `part_faceted.gdshader` is `render_mode unshaded` and "a
+  `SpotLight3D` would light exactly nothing", citing FOLLOWUPS F7. The author refused that premise -
+  "godot cant render real light sources, shadows, pbr material effects etc.. why do we have to fake
+  lighting" - and they were right. F7 was an OPEN finding with **ROOT CAUSE UNKNOWN**, and I treated
+  an unsolved bug as a property of the engine.
+
+  Measured in the real viewport: a shaded box reads luma **0.836** under the existing directional
+  light, **0.922** with an `OmniLight3D` added, **0.928** with a `SpotLight3D`. Real lights work and
+  always did. F7 was a mid-dark albedo multiplied by light and then rounded onto the background
+  entry by the 16-colour quantizer - see F7, now RESOLVED.
+
+  So `DisplayMode.CLAY` is a genuinely lit `StandardMaterial3D` with a deliberately bright albedo,
+  and the faceted shader keeps every other mode. Its banding is a **style** - every band is an exact
+  palette entry, which is what stops a part rendering as one lit face floating in space - and not a
+  workaround for a renderer that was never broken.
 
 **Marked in place**: `orbit_camera.gd`'s "THE CAMERA IS AN ORBIT/TURNTABLE ONLY" paragraph carries
 a `RETIRED(ADR 0049)` note pointing at `ShipFlyCamera`, per AGENTS section 10a. The sentence stays
@@ -99,6 +113,11 @@ both. Two consumers are load-bearing and silent when they starve: `_push_depth_r
 part shader's distance cue, and `_push_handle_scale()` the gizmo's metres-per-pixel. A frozen
 distance cue looks exactly like a shading bug, so fly keeps the depth range fed from its own
 position.
+
+**Corrected.** This ADR shipped once with a faked flashlight, on the strength of an unclosed
+finding nobody had re-measured. The correction cost a day and closed a month-old bug. An OPEN
+finding with ROOT CAUSE UNKNOWN is a question, not a constraint, and it becomes a false constraint
+the moment someone designs around it.
 
 **Constrained.**
 

@@ -11,11 +11,13 @@
 ## free 6-DOF rig with conserved momentum, added because the brief's audience is a child and
 ## because these hulls have INSIDES an orbit rig can never get into. ADR 0049 states the boundary
 ## once, in writing: the clone target governs the build gesture grammar, not the camera. It
-## explicitly does NOT reopen `pan_by()` or the axis-snap presets below - those were inventions
-## WITHIN the orbit grammar, where the research does apply, and they stay retired. SPORE_CLONE_SPEC section 2 records four independent
-## research passes over the official manual, the wikis and the forums finding no pan verb, no
-## reset-view control and no front/side/top snap views in ANY Spore editor. Both were our own
-## inventions and both are gone; see the two RETIRED notes below.
+## explicitly does NOT reopen `pan_by()` or the axis-snap presets below - those were
+## inventions WITHIN the orbit grammar, where the research does apply, and they stay retired.
+##
+## SPORE_CLONE_SPEC section 2 records four independent research passes over the official manual, the
+## wikis and the forums finding no pan verb, no reset-view control and no front/side/top snap views
+## in ANY Spore editor. Both were our own inventions and both are gone; see the two RETIRED notes
+## below.
 ##
 ## RENDER-TO-TEXTURE RULE (SPEC section 10). This class never reads DisplayServer, never
 ## calls get_window(), and never asks for a global mouse position. Every input it handles
@@ -175,7 +177,6 @@ func frame_aabb(aabb: AABB) -> void:
 # has front/side/top axis-snap views, and four research passes found no source for one
 # (SPORE_CLONE_SPEC section 2, section 8b item 17). The 1/2/3/4 hotkeys that drove it are gone
 # from ShipBuilder and the ShipView3D forwarder is gone with them.
-
 
 # ---------------------------------------------------------------- internals
 

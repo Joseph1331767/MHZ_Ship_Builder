@@ -4350,3 +4350,86 @@ doc hash is `79445dff48f81978`, not the `5536787c6c35d236` that ADRs 0009–0048
 back to before this session's first `core/` commit reproduces `79445dff48f81978`, so neither this
 work nor the mirror/snap work moved it; the canary is picked by catalogue INDEX and drifted with a
 `data/` change at some earlier point. The gate itself passes on every run.
+
+---
+
+## [2026-09-28] F7 was never a lighting failure - the flashlight is a real light now
+
+> "i tested flying.. i dont understand the constraints? godot cant render real light sources,
+> shadows, pbr material effects etc.. why do we have to fake lighting, plus its not working anyway..
+> we want a blue clay shaded with real flachlight with proper falloff and fov.."
+
+The author refused the premise, and the premise was wrong.
+
+### What I had done, and why it was wrong
+
+The fly commit earlier today built the flashlight as a **faked shader term**, on the strength of
+FOLLOWUPS **F7** - "shaded materials render black in the 3D SubViewport". F7 has been marked **OPEN,
+ROOT CAUSE UNKNOWN** since it was filed. I read it, believed it, quoted its pixel counts in an ADR,
+and designed a whole feature around it without re-testing it once.
+
+### The measurement that settled it in one run
+
+`scratch/diag_light2.gd`: a plain shaded box at the orbit focus in the REAL builder viewport, ship
+and grid hidden, sampled at the centre of the texture.
+
+| probe | luma |
+|---|---:|
+| UNSHADED control | 0.8335 |
+| **SHADED**, existing `KeyLight` only | **0.8357** |
+| SHADED + a fresh `OmniLight3D` | **0.9218** |
+| SHADED + a fresh `SpotLight3D` | **0.9275** |
+| SHADED + ambient 1.0 white | 0.9766 |
+
+Real lights work. Spot lights work. Shadows work. Nothing about this SubViewport was ever hostile to
+lighting.
+
+### The root cause, and where it was already written down
+
+A lit material MULTIPLIES albedo by light, so it only ever gets **darker**. The part was painted the
+palette's `line` entry - a mid-dark teal - which once multiplied landed near the background, and the
+16-entry quantizer rounded it the rest of the way. A black part on a black background is no part.
+
+`ShipSceneBuilder._solid_material` has carried exactly this reasoning for the X-RAY path since it
+was written: *"an already mid-dark albedo (line, palette index 5) lands on the BACKGROUND entry once
+the quantizer rounds it"*. That is F7, diagnosed, in the same file, by whoever fixed X-ray. Nobody
+connected it back for a month.
+
+### What changed
+
+- **`DisplayMode.CLAY` is a really-lit `StandardMaterial3D`** with a deliberately BRIGHT albedo
+  (that is the F7 lesson, stated in the constant's docstring), roughness 1, no metal, no specular
+  lobe, double-sided because you fly inside these hulls.
+- **The flashlight is a real `SpotLight3D`** parented to the fly camera: `spot_angle` 34 deg (the
+  FOV), `spot_angle_attenuation`, `spot_attenuation` for inverse-square falloff, range scaled to the
+  scene radius, **shadows on**. It follows the camera by itself - there is no per-frame uniform
+  bookkeeping left to get wrong.
+- **The void is real darkness**: the scene's key light goes OUT and ambient goes to zero, so the
+  beam is genuinely the only light.
+- All the fake-torch plumbing is deleted: four shader uniforms, the shader term, the `torch`
+  dictionary var and its setter, the reach maths.
+
+### The bug that would have eaten it
+
+`ShipView3D.on_palette_changed()` **rebuilds the environment**, and CLAY swaps the palette on the way
+INTO fly. So the void was switched on by `ShipFlyMode` and switched straight back off one signal
+later. `_build_environment()` now reads the fly state itself.
+
+### Corrected in place, not deleted (AGENTS 10a)
+
+The shader header's "WHY THIS EXISTS INSTEAD OF A LIGHT", `_faceted_material`'s docstring, ADR 0049's
+flashlight bullet and F7 itself. The faceted shader **stays** for every other mode, but its
+justification is now the true one: banding to exact palette entries is a deliberate style that keeps
+the quantizer a no-op on parts - not a workaround for a renderer that was never broken.
+
+### The lesson, with a price tag
+
+An OPEN finding with ROOT CAUSE UNKNOWN is a question, not a fact. It decays into a fact the moment
+someone designs around it - and this one shaped a shader, then a render mode, then a whole feature,
+before a user who had never read it asked why the lights were fake.
+
+### Verified
+
+**gdUnit4 491/491**; gdlint clean; selfcheck PASSED; data validator PASSED (0 warnings); resolve,
+explode and visual (5 modes) PASSED; captures show a real cone, real falloff and a real shadow.
+

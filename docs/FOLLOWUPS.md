@@ -96,7 +96,7 @@ Implemented as union-find over `ShipJoints.part_box` / `pair_state` — delibera
 discovery's overlap predicate rather than writing a second one, since two disagreeing definitions of
 "these parts touch" would surface to the player as a joint that exists beside an island that does not.
 
-## F7 — OPEN, ROOT CAUSE UNKNOWN: shaded materials render black in the 3D SubViewport
+## F7 — RESOLVED 2026-09-28: the albedo was too dark, and the quantizer finished the job
 
 **The symptom.** With `SHADING_MODE_PER_PIXEL`, a part renders pure black and the palette
 quantizer rounds it to the background entry, so the ship is invisible while the grid (unshaded)
@@ -131,6 +131,52 @@ wrong here will still be wrong then. Next things to try: render the inner SubVie
 isolation to separate rendering from compositing; test a shaded material in a plain (non-nested)
 SubViewport to see whether nesting is the trigger; check whether `own_world_3d` plus a
 `WorldEnvironment` added *after* `add_child(_viewport)` leaves the world's environment unset.
+
+### RESOLVED 2026-09-28 — and it was never a lighting failure
+
+**The author refused the premise**, which is what cracked it: "godot cant render real light sources,
+shadows, pbr material effects etc.. why do we have to fake lighting". Fair question, and the honest
+answer was that nobody had re-tested the claim in a month — I had inherited it and built a fake
+flashlight on top of it (ADR 0049's first draft).
+
+**Measured, in the real builder viewport, one run** (`scratch/diag_light2.gd`): a plain shaded box
+parked at the orbit focus with the ship and grid hidden, sampled at the centre of the texture.
+
+| probe | luma |
+|---|---|
+| UNSHADED control | 0.8335 |
+| **SHADED**, existing `KeyLight` only | **0.8357** |
+| SHADED + a fresh `OmniLight3D` | **0.9218** |
+| SHADED + a fresh `SpotLight3D` | **0.9275** |
+| SHADED + ambient 1.0 white | 0.9766 |
+
+Real lights work. `SpotLight3D` works. Shadows work. **Nothing about this SubViewport was ever
+hostile to lighting.**
+
+**The root cause.** A lit material MULTIPLIES its albedo by the incoming light, so it can only get
+DARKER than the colour written on it. The part was painted the palette's `line` entry — a mid-dark
+teal, `#277c79` — which once multiplied landed near `#081216`, and the 16-entry quantizer rounded it
+straight onto the BACKGROUND. A black part on a black background reads as no part at all.
+
+**The evidence was already in the repo.** `ShipSceneBuilder._solid_material` has carried this exact
+reasoning for the X-RAY path since it was written:
+
+> "Solid parts sit at `text_dim`, NOT `line`. A shaded material multiplies its albedo by the
+> incoming light, so an already mid-dark albedo (line, palette index 5) lands on the BACKGROUND
+> entry once the quantizer rounds it — the first windowed render showed the grid floor and no ship
+> at all, with the mesh present, visible, and correctly framed."
+
+That *is* F7, diagnosed, in the same file, by whoever fixed X-ray. It was never connected back.
+
+**What changed in the code.** `DisplayMode.CLAY` now uses a genuinely lit `StandardMaterial3D` with
+a bright albedo, and fly mode's flashlight is a real `SpotLight3D` with a real cone, real
+inverse-square falloff and real shadows. The faceted shader stays for every other mode — but its
+justification is corrected in place: banding to exact palette entries is a deliberate STYLE that
+keeps the quantizer a no-op on parts, not a workaround for a broken renderer.
+
+**The lesson, which is AGENTS §10a with a price tag.** An OPEN finding with ROOT CAUSE UNKNOWN is a
+question, not a fact, and it decays into a fact the moment someone designs around it. This one shaped
+a whole shader and then a whole feature. Re-measure before you build on it.
 
 ## F0 — CRITICAL: every tuning lever was silently ignored — RESOLVED
 

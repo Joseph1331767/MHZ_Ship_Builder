@@ -382,7 +382,7 @@ func _ready() -> void:
 	add_child(_gate_timer)
 
 	# Every node the mode drives now exists, so it can be handed them once and never reach back.
-	fly = ShipFlyMode.new(_camera_rig, _fly, _scene, _env, _grid, _bbox_cage, _com_cross)
+	fly = ShipFlyMode.new(_camera_rig, _fly, _scene, _env, _grid, _bbox_cage, _com_cross, _light)
 	fly.changed.connect(_refresh_hints)
 
 	_rebuild_grid()
@@ -858,7 +858,8 @@ func _handle_mode_input(event: InputEvent) -> bool:
 
 
 func _on_fly_moved() -> void:
-	fly.push_torch()
+	# The flashlight is parented to the fly camera and follows it with no help from here (ADR 0049);
+	# only the shader's distance cue still needs feeding.
 	_push_depth_range()
 	_refresh_hints()
 
@@ -1844,7 +1845,12 @@ func _build_environment() -> Environment:
 	# two mid-dark teals multiply to something the 16-entry quantizer rounds to background.
 	# Ambient therefore sits high on the ramp and the albedo carries the hue.
 	env.ambient_light_color = _role_color("accent", Color(0.47, 0.85, 0.67))
-	env.ambient_light_energy = 0.75
+	# ZERO WHILE FLYING, because this function is also how a palette change rebuilds the
+	# environment - and CLAY swaps the palette on the way INTO fly. Without this the void was
+	# switched on by ShipFlyMode and then switched straight back off again one signal later, which
+	# is the kind of bug that looks like the feature simply not working.
+	var flying: bool = fly != null and fly.is_flying()
+	env.ambient_light_energy = 0.0 if flying else 0.75
 	# Linear tonemap: anything filmic would re-map the ramp before the palette quantizer
 	# ever sees it, and the palette is meant to be the only colour authority.
 	env.tonemap_mode = Environment.TONE_MAPPER_LINEAR

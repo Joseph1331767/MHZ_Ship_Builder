@@ -22,16 +22,31 @@ extends RefCounted
 ## Emitted after entering or leaving, so the view can refresh hints and the builder its toolbar.
 signal changed
 
-## How bright the torch is. Strong enough that a face square-on to the beam reaches the ramp's top
-## band; the falloff, not this, is what makes distance read.
-const TORCH_STRENGTH: float = 1.35
+## THE FLASHLIGHT IS A REAL [SpotLight3D] (ADR 0049, revised 2026-09-28) - real cone, real inverse
+## -square falloff, real shadows, parented to the camera so it points where you look.
+##
+## IT WAS FAKED FIRST, AND THAT WAS A MISTAKE BUILT ON AN UNCLOSED BUG. FOLLOWUPS F7 recorded
+## "shaded materials render black in this SubViewport" as OPEN, ROOT CAUSE UNKNOWN, and I treated
+## it as a property of the engine. The author pushed back - "godot cant render real light sources,
+## shadows, pbr material effects etc.. why do we have to fake lighting" - and a direct measurement
+## settled it in one run: a shaded box in this very viewport reads luma 0.836 under the existing
+## directional light, 0.922 with an OmniLight3D and 0.928 with a SpotLight3D. F7 was a dark albedo
+## quantizing onto the background, not a lighting failure - see FOLLOWUPS F7, now RESOLVED.
+const TORCH_ENERGY: float = 6.0
 
-## The beam is half strength at this many scene radii, so it reaches across the ship you are flying
-## around whatever size that ship is. Measured at a fixed 14 m: entering fly on a 12 m ship from
-## the orbit camera's standoff put the beam at 8% and the mode looked like the lights had simply
-## gone out.
-const TORCH_REACH_RADII: float = 1.5
-const TORCH_REACH_MIN_M: float = 10.0
+## The beam's half-angle in degrees - the flashlight's FOV. Tight enough to read as a torch rather
+## than as a headlamp, wide enough to see a room you are standing in.
+const TORCH_ANGLE_DEG: float = 34.0
+
+## How hard the cone's edge falls off (0 hard, 1 soft) and how the brightness falls with distance.
+## 1.0 is Godot's physically-plausible inverse-square; lower spreads the light further.
+const TORCH_ANGLE_FALLOFF: float = 0.35
+const TORCH_ATTENUATION: float = 1.1
+
+## The beam reaches this many scene radii, so it lights the ship you are flying around whatever
+## size that ship is - the same reasoning the distance cue already uses.
+const TORCH_REACH_RADII: float = 3.0
+const TORCH_REACH_MIN_M: float = 25.0
 
 ## Where ENTER-to-keep-the-view puts the orbit rig's new focus point. The rig orbits a POINT, so
 ## leaving fly has to invent one, and the point you were flying toward is the only defensible pick.
@@ -47,8 +62,11 @@ var _env: WorldEnvironment = null
 var _grid: MeshInstance3D = null
 var _cage: MeshInstance3D = null
 var _com: MeshInstance3D = null
+var _torch: SpotLight3D = null
+var _key: DirectionalLight3D = null
 var _return: Dictionary = {}
 var _prev_mode: int = -1
+var _key_was: float = 0.0
 
 
 func _init(
@@ -58,7 +76,8 @@ func _init(
 	env: WorldEnvironment,
 	grid: MeshInstance3D,
 	cage: MeshInstance3D,
-	com: MeshInstance3D
+	com: MeshInstance3D,
+	key: DirectionalLight3D = null
 ) -> void:
 	_rig = rig
 	_fly = fly
@@ -67,6 +86,7 @@ func _init(
 	_grid = grid
 	_cage = cage
 	_com = com
+	_key = key
 
 
 func is_flying() -> bool:
@@ -154,25 +174,17 @@ func previous_mode() -> int:
 	return _prev_mode
 
 
-## Push the torch's position, aim and reach at the part shader. Called every tick the rig moves,
-## exactly as the distance cue is - and pushes strength 0 the moment fly ends, which turns the
-## shader term off entirely.
-func push_torch() -> void:
-	if _scene == null:
+## Size the beam to the ship. Called on entry and whenever the scene bounds could have changed -
+## NOT every tick, because the light is parented to the camera and follows it by itself. That is the
+## point of using a real light: there is no per-frame bookkeeping to get wrong.
+##
+## THE REACH IS SCALED TO THE SHIP for the same reason the distance cue is: a 6 m pod and a 300 m
+## hull cannot share one number, and a beam that cannot reach your own ship is not a flashlight.
+func size_torch() -> void:
+	if _torch == null or _scene == null:
 		return
-	if not is_flying():
-		_scene.torch = {"pos": Vector3.ZERO, "dir": Vector3.FORWARD, "strength": 0.0, "reach": 1.0}
-		return
-	# THE REACH IS SCALED TO THE SHIP, exactly as the distance cue is, and for the same reason a
-	# fixed range fails there: a 6 m pod and a 300 m hull cannot share one number.
-	var box: AABB = _scene.scene_aabb()
-	var radius: float = maxf(box.size.length() * 0.5, MIN_RADIUS)
-	_scene.torch = {
-		"pos": _fly.position_now(),
-		"dir": _fly.forward_now(),
-		"strength": TORCH_STRENGTH,
-		"reach": maxf(radius * TORCH_REACH_RADII, TORCH_REACH_MIN_M),
-	}
+	var radius: float = maxf(_scene.scene_aabb().size.length() * 0.5, MIN_RADIUS)
+	_torch.spot_range = maxf(radius * TORCH_REACH_RADII, TORCH_REACH_MIN_M)
 
 
 ## How far the fly rig is from the model's centre - what the part shader's distance cue is derived
@@ -201,7 +213,41 @@ func _set_void(on: bool) -> void:
 		if _com != null:
 			_com.visible = false
 	if _scene != null:
-		# One flag: the gizmo goes away, the clay ambient drops and the fixed world sun stands
-		# down, all from the same fact.
 		_scene.flying = on
-	push_torch()
+	_light_void(on)
+
+
+## THE FLASHLIGHT, and the darkness that makes it worth having.
+##
+## Entering: the scene's key light goes OUT and ambient goes to zero, so the ONLY thing lighting the
+## ship is the [SpotLight3D] parented to the fly camera. That is what "pitch black aside whats in
+## players flashlight" means, and with real lights it is literally true rather than approximated.
+##
+## SHADOWS ARE ON. A flashlight that does not cast a shadow inside a hull reads as a glow; one that
+## does is how you tell a doorway from a wall. It costs one shadow map.
+func _light_void(on: bool) -> void:
+	if not on:
+		if _torch != null:
+			_torch.visible = false
+		if _key != null:
+			_key.light_energy = _key_was
+		return
+	if _key != null:
+		_key_was = _key.light_energy
+		# OUT, not dimmed. A fixed world sun is exactly what stops a void being a void.
+		_key.light_energy = 0.0
+	if _torch == null:
+		_torch = SpotLight3D.new()
+		_torch.name = "Flashlight"
+		_torch.spot_angle = TORCH_ANGLE_DEG
+		_torch.spot_angle_attenuation = TORCH_ANGLE_FALLOFF
+		_torch.spot_attenuation = TORCH_ATTENUATION
+		_torch.light_energy = TORCH_ENERGY
+		_torch.shadow_enabled = true
+		# A spot light points down its own -Z, which is also where the camera looks, so parenting it
+		# to the camera is the whole of "the flashlight is attached to the camera".
+		var cam: Camera3D = _fly.get_camera()
+		if cam != null:
+			cam.add_child(_torch)
+	_torch.visible = true
+	size_torch()
