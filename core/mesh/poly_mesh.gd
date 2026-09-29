@@ -568,17 +568,44 @@ func to_array_mesh_grouped(group_of: PackedInt32Array, names: PackedStringArray)
 ## flat face looks criss-crossed for no reason the model can explain. That was half of what
 ## "janky triangles all over the place" described. This draws [method boundary_edges] instead, so
 ## a box is twelve lines however it happens to be triangulated on the way to the screen.
+## A NORMAL PER VERTEX, as the normalized sum of the planes of every face that touches it.
+##
+## Only the wireframe needs these, and only since CLAY started lighting its edges for real
+## (ADR 0049): a line mesh normally carries no normals, and a LIT material with no normal to work
+## from renders every edge black. Presentation only - nothing hashed depends on it.
+func vertex_normals() -> PackedVector3Array:
+	var out: PackedVector3Array = PackedVector3Array()
+	out.resize(vertices.size())
+	for i: int in faces.size():
+		var n: Vector3 = face_plane(i).normal
+		if n == Vector3.ZERO:
+			continue
+		for id: int in faces[i]:
+			if id >= 0 and id < out.size():
+				out[id] = out[id] + n
+	for i: int in out.size():
+		# A vertex no face claimed keeps UP rather than a zero vector, which would light as black
+		# and be indistinguishable from the bug this exists to fix.
+		out[i] = out[i].normalized() if out[i].length_squared() > 1e-12 else Vector3.UP
+	return out
+
+
 func to_wire_mesh() -> ArrayMesh:
 	var mesh: ArrayMesh = ArrayMesh.new()
 	var edges: PackedInt32Array = boundary_edges()
 	if edges.is_empty():
 		return mesh
+	var normals: PackedVector3Array = vertex_normals()
 	var points: PackedVector3Array = PackedVector3Array()
+	var norms: PackedVector3Array = PackedVector3Array()
 	for id: int in edges:
 		points.append(vertices[id])
+		norms.append(normals[id] if id < normals.size() else Vector3.UP)
 	var arrays: Array = []
 	arrays.resize(Mesh.ARRAY_MAX)
 	arrays[Mesh.ARRAY_VERTEX] = points
+	# CLAY lights the wire for real, and a line with no normal shades black - see vertex_normals().
+	arrays[Mesh.ARRAY_NORMAL] = norms
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_LINES, arrays)
 	return mesh
 

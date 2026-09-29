@@ -17,10 +17,6 @@ signal say(text: String)
 ## The buttons changed, so whatever draws the hint should re-read.
 signal changed
 
-## How hard the palette quantizer is dithered while CLAY is up - far above the shipped default,
-## because CLAY is the only mode with a continuous gradient to preserve.
-const CLAY_DITHER: float = 0.22
-
 var _fly_button: Button = null
 var _solid_button: Button = null
 var _mode_option: OptionButton = null
@@ -113,7 +109,7 @@ func wear_clay(on: bool) -> void:
 	if _theme == null:
 		return
 	_theme.set_variant("clay" if on else "")
-	_theme.set_dither_strength(CLAY_DITHER if on else ShipTheme.DITHER_DEFAULT)
+	_theme.set_dither_strength(ShipTheme.CLAY_DITHER if on else ShipTheme.DITHER_DEFAULT)
 
 
 ## FLY (ADR 0049). The author asked twice - "also camera fly around modes", then in full detail,
@@ -122,6 +118,11 @@ func wear_clay(on: bool) -> void:
 ##
 ## BASIC FLIES TOO, with heavier damping and direct look instead of torque (ux.md Q15): "the
 ## little kids mode cannot fly" is the version a child would resent.
+## The FLY verb, reachable from the button and from the `V` key alike.
+func toggle() -> void:
+	_on_fly_pressed()
+
+
 func _on_fly_pressed() -> void:
 	if _view == null:
 		return
@@ -133,8 +134,10 @@ func _on_fly_pressed() -> void:
 	# REFUSED while something else owns the view: a live placement, or a handle grab in progress.
 	# The BUILDER owns the placement, so it answers that half; the view's gesture state is read the
 	# same way STATE_PIVOT_HELD is.
+	# ONE question, asked of the BUILDER, which owns both halves of the answer. Reading the view's
+	# `_handle_drag` by string from here was a reflective peek into another class's private field -
+	# from a class whose own docstring says it reaches back into nothing.
 	var busy: bool = _busy.is_valid() and bool(_busy.call())
-	busy = busy or int(_view.get("_handle_drag")) != 0
 	if not _view.fly.enter(basic, busy):
 		# Say why rather than doing nothing, which reads as a dead button.
 		say.emit("FINISH PLACING FIRST, THEN FLY")

@@ -33,13 +33,30 @@ const FLY_LAYER: int = 2
 const BODY_RADIUS: float = 0.35
 
 ## Ship meshes bigger than this many triangles are skipped rather than turned into a trimesh shape.
-## A diced hull can run to hundreds of thousands of triangles and building a concave shape for every
-## one of them would stall the frame that the button was pressed on.
 const MAX_TRIANGLES: int = 120000
+
+## AND A BUDGET ACROSS THE WHOLE SHIP, which the per-mesh cap alone does not give. A diced hull is
+## hundreds of pieces; capping each one at 120k while building an unbounded NUMBER of them is not a
+## cap at all. Every [ConcavePolygonShape3D] is built synchronously on the frame the button was
+## pressed and lives in the physics server until collision is switched off, so the total is what
+## actually costs - and an out-of-memory in the physics server is a native crash, not a GDScript
+## error you would see in the log.
+##
+## 600k triangles is about 22 MB of vertices alone (36 bytes a triangle), and Godot builds a BVH per
+## shape on top of that - call it 50-60 MB all in. A lot of ship, and still not dangerous.
+const MAX_TOTAL_TRIANGLES: int = 600000
+
+## How many meshes to build shapes for at most, whatever their size. A guard against a pathological
+## piece count rather than a pathological triangle count.
+const MAX_BODIES: int = 512
 
 var _body: CharacterBody3D = null
 var _shapes: Node3D = null
 var _built: bool = false
+var _triangles: int = 0
+var _bodies: int = 0
+var _skipped: int = 0
+var _normal: Vector3 = Vector3.ZERO
 
 
 func _ready() -> void:
@@ -75,54 +92,115 @@ func build(roots: Array[Node3D]) -> void:
 	_built = true
 
 
+## What the last [method build] covered, as `{bodies, triangles, skipped}` - so a caller can TELL
+## THE PLAYER when the ship was too big to make fully solid, rather than leaving them to find out by
+## flying through a wall. No silent caps.
+func coverage() -> Dictionary:
+	return {"bodies": _bodies, "triangles": _triangles, "skipped": _skipped}
+
+
 func clear() -> void:
 	_built = false
+	_triangles = 0
+	_bodies = 0
+	_skipped = 0
 	if _shapes == null:
 		return
 	for child: Node in _shapes.get_children():
+		# REMOVED FROM THE TREE FIRST, not just queued. `queue_free` is deferred to the end of the
+		# frame, and `build` re-adds immediately after calling this - so without the remove, a
+		# rebuild leaves the old bodies live in the physics server for a frame alongside the new
+		# ones, and a toggle-happy player stacks them up.
+		_shapes.remove_child(child)
 		child.queue_free()
 
 
 ## Resolve a step. Returns where the camera actually ends up: [param to] when nothing is in the way,
 ## or the point it slid to. Returns [param to] unchanged when nothing has been built, so the caller
 ## needs no branch of its own.
+##
+## IT REALLY SLIDES. The first version called `move_and_collide` once and returned the stop point,
+## which stops the camera DEAD on contact - the opposite of what its own docstring claimed. The
+## remainder of the step is now projected onto the surface and attempted again, so grazing a hull
+## carries you along it.
 func resolve(from: Vector3, to: Vector3) -> Vector3:
+	_normal = Vector3.ZERO
 	if not _built or _body == null or not _body.is_inside_tree():
 		return to
 	var step: Vector3 = to - from
 	if step.length() < 1e-6:
 		return to
 	_body.global_position = from
-	# SLIDE, not stop: a camera that halts dead on contact reads as a bug, and sliding along a hull
-	# is how every flying camera in every game behaves.
 	var hit: KinematicCollision3D = _body.move_and_collide(step)
 	if hit == null:
 		return to
+	# THE REAL SURFACE NORMAL, from the collision itself. Deriving one from (wanted - landed) gives
+	# the direction of BLOCKED TRAVEL, which only coincides with the surface normal on a head-on
+	# hit - the single case an axis-aligned test would cover, and not the case a curved hull is.
+	_normal = hit.get_normal()
+	var left: Vector3 = hit.get_remainder()
+	var along: Vector3 = left.slide(_normal)
+	if along.length() > 1e-6:
+		_body.move_and_collide(along)
 	return _body.global_position
 
 
-## The velocity a step should keep after a collision - the component along the wall, with the part
-## going INTO it removed. Without this the camera keeps its full speed while pressed against a hull
-## and shoots off the moment it clears the edge.
-func slide_velocity(velocity: Vector3, landed: Vector3, wanted: Vector3) -> Vector3:
-	if not _built:
+## The surface normal of the last blocked step, or zero when nothing was hit.
+func last_normal() -> Vector3:
+	return _normal
+
+
+## The velocity a blocked step should keep: the component along the WALL, with whatever pointed into
+## it removed. Without this the camera stores up speed while pressed against a hull and fires off
+## the moment it clears the edge.
+func slide_velocity(velocity: Vector3, normal: Vector3) -> Vector3:
+	if normal.length_squared() < 1e-12:
 		return velocity
-	var blocked: Vector3 = wanted - landed
-	if blocked.length_squared() < 1e-10:
-		return velocity
-	var normal: Vector3 = blocked.normalized()
-	# Project onto the wall: drop the whole component pointing into it, keep the rest.
-	return velocity - normal * velocity.dot(normal)
+	return velocity.slide(normal.normalized())
 
 
 func _add_collider(mi: MeshInstance3D) -> void:
 	if mi == null or mi.mesh == null or not mi.is_visible_in_tree():
 		return
-	var faces: PackedVector3Array = mi.mesh.get_faces()
-	if faces.is_empty() or faces.size() > MAX_TRIANGLES * 3:
+	if _bodies >= MAX_BODIES or _triangles >= MAX_TOTAL_TRIANGLES:
+		_skipped += 1
 		return
+	# THE SIZE IS CHECKED BEFORE THE DE-INDEX. `get_faces()` materialises the whole surface into a
+	# fresh PackedVector3Array, so testing the cap on its result paid exactly the allocation the cap
+	# exists to avoid. An ArrayMesh can be asked its length without building anything.
+	if _estimated_triangles(mi.mesh) > MAX_TRIANGLES:
+		_skipped += 1
+		return
+	var faces: PackedVector3Array = mi.mesh.get_faces()
+	# Empty covers every non-triangle surface, a wireframe included: a line mesh has no faces, so it
+	# contributes no wall. Measured on the real wire mesh, indexed and with normals.
+	if faces.is_empty():
+		return
+	_triangles += int(faces.size() / 3)
+	_bodies += 1
+	# BAKED INTO WORLD SPACE, with the body left at identity.
+	#
+	# A MIRRORED PART'S COLLIDER WAS INERT. Handing the body `mi.global_transform` works for a plain
+	# part, but a mirror twin's basis has a NEGATIVE DETERMINANT (ShipAttach.resolve_all emits one;
+	# ShipMirror: "a reflection has determinant -1") and the physics server will not collide through
+	# a mirrored basis at all. Measured: identity stops at z=2.500, a (1,2,3) scale stops at 6.406,
+	# and a (-1,2,3) mirror PASSES STRAIGHT THROUGH from every direction. So on any symmetric ship,
+	# half of it was not solid and nothing said so.
+	#
+	# Transforming the vertices instead costs one pass over the faces and is immune to mirroring,
+	# shear and non-uniform scale together.
+	var xf: Transform3D = mi.global_transform
+	var world: PackedVector3Array = PackedVector3Array()
+	world.resize(faces.size())
+	for i: int in faces.size():
+		world[i] = xf * faces[i]
 	var shape: ConcavePolygonShape3D = ConcavePolygonShape3D.new()
-	shape.set_faces(faces)
+	# BOTH SIDES, which is the whole of "collision both inner and outer". A concave shape collides
+	# on its front faces only by default, so the inside of a room would have been a one-way wall you
+	# could leave through - and a MIRRORED part, whose winding is reversed by its own reflection,
+	# would have been solid from the wrong side entirely.
+	shape.backface_collision = true
+	shape.set_faces(world)
 	var body: StaticBody3D = StaticBody3D.new()
 	body.collision_layer = FLY_LAYER
 	body.collision_mask = 0
@@ -130,7 +208,20 @@ func _add_collider(mi: MeshInstance3D) -> void:
 	cs.shape = shape
 	body.add_child(cs)
 	_shapes.add_child(body)
-	body.global_transform = mi.global_transform
+
+
+## Triangles in [param mesh] WITHOUT de-indexing it. Exact for an ArrayMesh, which every baked piece
+## and every preview part is; anything else answers 0 and is let through to the real check.
+static func _estimated_triangles(mesh: Mesh) -> int:
+	var am: ArrayMesh = mesh as ArrayMesh
+	if am == null:
+		return 0
+	var total: int = 0
+	for i: int in am.get_surface_count():
+		var indexed: int = am.surface_get_array_index_len(i)
+		var verts: int = am.surface_get_array_len(i)
+		total += int((indexed if indexed > 0 else verts) / 3)
+	return total
 
 
 ## Every drawn mesh under [param root]. A wireframe is not a wall, and is dropped by

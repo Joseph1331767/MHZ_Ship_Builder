@@ -99,3 +99,24 @@ static func outside(box: AABB, half: Vector3) -> bool:
 		maxf(absf(box.position.z), absf(box.end.z))
 	)
 	return reach.x > half.x or reach.y > half.y or reach.z > half.z
+
+
+## THE CENTRE-OF-MASS CROSS (ADR 0045) - three axis-aligned bars through [param centre].
+##
+## Sized off the ship rather than fixed, so the mark reads the same on a three-metre pod and a
+## twenty-metre hull. Drawn on the ship's OWN axes because the rule it serves is about those axes;
+## [param mats] supplies one material per axis, and the CALLER picks them - a bar on an axis the
+## ship is centred on is drawn in the line colour, one it is off on in the warning colour, so which
+## axis is out says itself without a readout.
+static func mass_cross(mats: Array, centre: Vector3, arm: float) -> ImmediateMesh:
+	var mesh: ImmediateMesh = ImmediateMesh.new()
+	for axis: int in 3:
+		if axis >= mats.size():
+			break
+		var along: Vector3 = Vector3.ZERO
+		along[axis] = arm
+		mesh.surface_begin(Mesh.PRIMITIVE_LINES, mats[axis] as Material)
+		mesh.surface_add_vertex(centre - along)
+		mesh.surface_add_vertex(centre + along)
+		mesh.surface_end()
+	return mesh

@@ -83,17 +83,81 @@ func test_a_line_mesh_contributes_no_collider() -> void:
 	assert_vector(collide.resolve(Vector3(0.0, 0.0, 12.0), through)).is_equal(through)
 
 
-## The velocity a blocked step keeps is the part ALONG the wall. Without this the camera stores up
-## speed while pressed against a hull and fires off the moment it clears the edge.
-func test_slide_velocity_drops_the_component_into_the_wall() -> void:
+## THE VELOCITY A BLOCKED STEP KEEPS is the component along the WALL.
+##
+## THIS TEST USED TO BE WRITTEN ALONG THE ONE AXIS WHERE THE BUG WAS INVISIBLE. It fed a pure -Z
+## block against an axis-aligned box face, where the direction of blocked travel and the surface
+## normal coincide - so the old implementation, which derived its "normal" from (wanted - landed),
+## passed while being wrong for every oblique hit on a curved hull, which is the normal case here.
+## It asks for an OBLIQUE hit now, and takes the normal from the collision itself.
+func test_slide_velocity_keeps_only_what_runs_along_the_wall() -> void:
 	var collide: ShipFlyCollide = _collider()
+	# A wall facing +Z, approached at 45 degrees.
+	var normal: Vector3 = Vector3(0.0, 0.0, 1.0)
+	var kept: Vector3 = collide.slide_velocity(Vector3(4.0, 0.0, -4.0), normal)
+	assert_float(kept.z).is_equal_approx(0.0, 1e-4)
+	# The along-wall component survives untouched - that is what sliding means.
+	assert_float(kept.x).is_equal_approx(4.0, 1e-4)
+
+	# And on a SLANTED wall the answer is not simply "drop z": a 45-degree normal takes a
+	# straight-ahead velocity and turns it along the surface.
+	var slanted: Vector3 = Vector3(1.0, 0.0, 1.0).normalized()
+	var turned: Vector3 = collide.slide_velocity(Vector3(0.0, 0.0, -5.0), slanted)
+	assert_float(turned.length()).is_greater(0.5)
+	assert_float(turned.dot(slanted)).is_equal_approx(0.0, 1e-4)
+
+	# A zero normal means nothing was hit, so nothing is taken away.
+	assert_vector(collide.slide_velocity(Vector3(1.0, 2.0, 3.0), Vector3.ZERO)).is_equal(
+		Vector3(1.0, 2.0, 3.0)
+	)
+
+
+## A BLOCKED STEP SLIDES rather than stopping dead - the behaviour the docstring always claimed and
+## the first implementation did not have.
+func test_a_grazing_step_carries_on_along_the_wall() -> void:
 	var holder: Node3D = _box_at_origin(4.0)
+	var collide: ShipFlyCollide = _collider()
 	collide.build([holder] as Array[Node3D])
 	await get_tree().physics_frame
-	# Blocked straight along -Z, moving down and forward.
-	var wanted: Vector3 = Vector3(0.0, -5.0, -5.0)
-	var landed: Vector3 = Vector3(0.0, -5.0, 0.0)
-	var kept: Vector3 = collide.slide_velocity(Vector3(0.0, -3.0, -4.0), landed, wanted)
-	assert_float(kept.z).is_equal_approx(0.0, 1e-4)
-	# And the sideways part is untouched, which is what "slide" means.
-	assert_float(kept.y).is_equal_approx(-3.0, 1e-4)
+	await get_tree().physics_frame
+	# Aimed diagonally INTO the box's +Z face: blocked in z, free in x.
+	var from: Vector3 = Vector3(-3.0, 0.0, 6.0)
+	var landed: Vector3 = collide.resolve(from, from + Vector3(6.0, 0.0, -6.0))
+	assert_float(landed.z).is_greater(1.9)
+	(
+		assert_float(landed.x)
+		. append_failure_message("the step stopped dead instead of sliding along the face")
+		. is_greater(from.x + 1.0)
+	)
+	assert_vector(collide.last_normal()).is_not_equal(Vector3.ZERO)
+
+
+## THE BUDGET IS REPORTED, NOT SILENT. A ship too big to make fully solid has to say so, or the
+## player finds out by flying through a wall and concludes the feature is broken.
+func test_coverage_reports_what_was_built() -> void:
+	var holder: Node3D = _box_at_origin(4.0)
+	var collide: ShipFlyCollide = _collider()
+	collide.build([holder] as Array[Node3D])
+	await get_tree().physics_frame
+	var cover: Dictionary = collide.coverage()
+	assert_int(int(cover["bodies"])).is_equal(1)
+	assert_int(int(cover["triangles"])).is_greater(0)
+	assert_int(int(cover["skipped"])).is_equal(0)
+	# And clearing resets the tally, so a later build cannot inherit a stale one.
+	collide.clear()
+	assert_int(int(collide.coverage()["bodies"])).is_equal(0)
+
+
+## COLLIDERS ONLY EXIST WHILE FLYING. `_solid` is a remembered preference that survives landing, so
+## a bake finishing in the orbit view used to rebuild a full set of trimesh shapes nobody could
+## touch - and over BOTH the preview parts and the baked pieces, because both were visible.
+func test_rebuild_does_nothing_when_not_flying() -> void:
+	var collide: ShipFlyCollide = _collider()
+	# A mode with no fly rig is never flying, which is the condition under test.
+	var mode: ShipFlyMode = ShipFlyMode.new(
+		null, null, null, null, null, null, null, null, null, collide
+	)
+	mode.set_solid(true)
+	mode.rebuild_solids()
+	assert_bool(collide.is_built()).is_false()
+	assert_int(int(collide.coverage()["bodies"])).is_equal(0)

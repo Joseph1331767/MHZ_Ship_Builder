@@ -22,6 +22,15 @@ extends RefCounted
 signal palette_changed(palette: PackedColorArray)
 
 const PALETTE_SIZE: int = 16
+## How hard the quantizer is dithered while CLAY is up. CLAY is the one mode whose shading is a
+## continuous engine-lit gradient rather than palette bands, and a gradient through a 16-entry
+## quantizer comes out as hard concentric rings.
+##
+## HERE, NOT IN A TOOLBAR. It lived on ShipFlyToolbar, so the correct APPEARANCE of a render mode
+## depended on a button bar being wired up - and this module is built to lift into MHZ_Origins
+## behind a diegetic quad, where that header does not exist.
+const CLAY_DITHER: float = 0.22
+
 ## The shipped dither strength. Named so a mode that needs more of it (CLAY, whose shading is a
 ## continuous gradient rather than palette bands) can put it back afterwards.
 const DITHER_DEFAULT: float = 0.06

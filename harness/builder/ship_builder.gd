@@ -847,7 +847,11 @@ func _on_hotkey_hovered(action: String, chord: String) -> void:
 ## Is a placement live? ShipFlyToolbar asks before entering fly, because the builder owns the
 ## placement and the toolbar should not learn about it.
 func _placement_busy() -> bool:
-	return _placement != null and _placement.active
+	if _placement != null and _placement.active:
+		return true
+	# The other half of "something else owns the view": a handle grab in progress. Read here rather
+	# than from the toolbar, which has no business knowing the view's gesture state.
+	return _view != null and int(_view.get("_handle_drag")) != 0
 
 
 func _refresh_hint() -> void:
@@ -1010,6 +1014,9 @@ func _on_rooms_pressed() -> void:
 func _update_meshes() -> void:
 	if _doc == null or _view == null:
 		return
+	# BREADCRUMB - see ShipFlyMode. The bake is the heaviest thing this builder does and the crash
+	# log of 2026-09-28 could not say whether one had been running.
+	print("[bake] update meshes  parts=%d" % _doc.parts.size())
 	# Asking for a bake is asking to SEE one. `_resolve_on_load` lowers this again straight after.
 	_show_on_land = true
 	if not _bake_session.busy and _bake_hud != null:
@@ -1937,6 +1944,14 @@ func _handle_view_hotkey(key: InputEventKey) -> bool:
 		return true
 	if key.keycode == KEY_E:
 		_set_exploded(not _exploded)
+		return true
+	# V ENTERS FLY, and until now it only LEFT it. ShipKeymap advertised "fly_toggle" on V as
+	# STATUS_LIVE and ShipHotkeys printed "PRESS V" on the FLY button, but the only KEY_V in the
+	# repo was ShipFlyCamera's exit key - which is unreachable unless you are already flying. The
+	# button worked and the key it advertised did nothing, which is exactly the class of lie
+	# ShipKeymap exists to prevent.
+	if key.keycode == KEY_V and _fly_toolbar != null:
+		_fly_toolbar.toggle()
 		return true
 	# RETIRED(2026-08-31): 1/2/3/4 -> front/side/top axis-snap views, removed as un-Spore-like
 	# inventions; no Spore editor has them (SPORE_CLONE_SPEC section 2). OrbitCamera's

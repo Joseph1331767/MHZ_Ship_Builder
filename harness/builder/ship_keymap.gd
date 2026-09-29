@@ -302,7 +302,7 @@ const ROWS: Array[Dictionary] = [
 		FIELD_CONTEXT: CONTEXT_ALWAYS,
 		FIELD_TIER: TIER_BUILD,
 		FIELD_GROUP: GROUP_LOOK,
-		FIELD_HANDLER: "harness/builder/ship_builder.gd:_on_fly_pressed",
+		FIELD_HANDLER: "harness/builder/ship_builder.gd:_handle_view_hotkey",
 		FIELD_STATUS: STATUS_LIVE,
 		FIELD_NOTE: "",
 	},
@@ -1265,24 +1265,38 @@ static func _distinct(field: String) -> PackedStringArray:
 	return out
 
 
+## The modifier bits a printed chord implies, so the two can never disagree.
+static func _mods_in(chord: String) -> int:
+	var bits: int = MOD_NONE
+	if chord.contains("SHIFT"):
+		bits |= MOD_SHIFT
+	if chord.contains("CTRL"):
+		bits |= MOD_CTRL
+	if chord.contains("ALT"):
+		bits |= MOD_ALT
+	return bits
+
+
 ## Every FLY binding, built rather than written out thirteen times - the rows are identical but for
 ## the chord and the label, and a table of literals that long is where a typo hides.
 static func _fly_rows() -> Array[Dictionary]:
 	var spec: Array = [
 		["fly_forward", "W", ["S"], KEY_W, "Fly forwards - S flies backwards", NOTE_FLY_DRIFT],
 		["fly_strafe", "A", ["D"], KEY_A, "Slide left - D slides right", ""],
-		["fly_rise", "SPACE", ["Z"], KEY_SPACE, "Rise - Z sinks", ""],
+		["fly_rise", "R", ["Z"], KEY_R, "Rise - Z sinks", ""],
 		["fly_roll", "Q", ["E"], KEY_Q, "Roll left - E rolls right", ""],
 		["fly_pitch", "UP", ["DOWN"], KEY_UP, "Tip your nose up - DOWN tips it down", NOTE_FLY_DRIFT],
 		["fly_yaw", "LEFT", ["RIGHT"], KEY_LEFT, "Turn left - RIGHT turns right", NOTE_FLY_DRIFT],
-		["fly_brake", "X", ["SPACE"], KEY_X, "STOP - kills your drift and your spin", NOTE_FLY_DRIFT],
+		# SPACE is primary and X is the alias - "i need space to halt the player to rest". ONE row for
+		# the pair: a second `fly_halt` row was added alongside this one and declared the same two
+		# keys again, which is exactly the ambiguity chord_for() cannot resolve.
+		["fly_brake", "SPACE", ["X"], KEY_SPACE, "STOP - kills your drift and your spin", NOTE_FLY_DRIFT],
 		["fly_fast", "SHIFT", [], KEY_SHIFT, "Three times the push while held", ""],
 		["fly_slow", "ALT", [], KEY_ALT, "A third of the push, for fine moves", ""],
 		["fly_look", "RMB DRAG", [], KEY_NONE, "Swing your view round", NOTE_FLY_TORQUE],
 		["fly_land", "V", ["ESC"], KEY_V, "Land - puts the view back exactly as it was", NOTE_FLY_EXIT],
 		["fly_land_fit", "F", [], KEY_F, "Land and fit the whole ship on screen", ""],
 		["fly_land_keep", "ENTER", [], KEY_ENTER, "Land looking where you are looking", NOTE_FLY_EXIT],
-		["fly_halt", "SPACE", ["X"], KEY_SPACE, "STOP - kills your drift and your spin", NOTE_FLY_DRIFT],
 		["fly_solid", "C", [], KEY_C, "Solid walls on or off - bump into the ship", NOTE_FLY_SOLID],
 	]
 	var out: Array[Dictionary] = []
@@ -1293,7 +1307,10 @@ static func _fly_rows() -> Array[Dictionary]:
 				FIELD_CHORD: str(row[1]),
 				FIELD_ALTS: row[2],
 				FIELD_CODE: int(row[3]),
-				FIELD_MODS: MOD_NONE,
+				# DERIVED FROM THE CHORD, not hardcoded. SHIFT and ALT are themselves the binding
+				# here (hold for boost, hold for precision), so a flat MOD_NONE made the row
+				# contradict its own printed chord - which is the one invariant this table has.
+				FIELD_MODS: _mods_in(str(row[1])),
 				FIELD_LABEL: str(row[4]),
 				FIELD_CONTEXT: CONTEXT_FLY,
 				# BASIC flies too (docs/future/ux.md Q15), so these are BUILD tier, not ENGINEER.

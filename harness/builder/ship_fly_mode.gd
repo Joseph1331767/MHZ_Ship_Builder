@@ -22,6 +22,9 @@ extends RefCounted
 ## Emitted after entering or leaving, so the view can refresh hints and the builder its toolbar.
 signal changed
 
+## A line for the status bar. The mode has no business writing there itself.
+signal say(text: String)
+
 ## THE FLASHLIGHT IS A REAL [SpotLight3D] (ADR 0049, revised 2026-09-28) - real cone, real inverse
 ## -square falloff, real shadows, parented to the camera so it points where you look.
 ##
@@ -82,6 +85,7 @@ var _com: MeshInstance3D = null
 var _torch: SpotLight3D = null
 var _key: DirectionalLight3D = null
 var _collide: ShipFlyCollide = null
+var _view: Node = null
 var _explode: Node3D = null
 var _solid: bool = false
 var _return: Dictionary = {}
@@ -111,6 +115,13 @@ func _init(
 	_key = key
 	_explode = explode
 	_collide = collider
+
+
+## The VIEW, handed over after construction because ShipView3D builds this inside its own _ready and
+## cannot pass itself usefully before the rest of the scene exists. Optional: without it the mode
+## falls back to the scene builder alone, which is what the headless tests use.
+func use_view(view: Node) -> void:
+	_view = view
 
 
 func is_flying() -> bool:
@@ -147,7 +158,13 @@ func set_solid(on: bool) -> void:
 ## Re-derive the colliders from what is currently drawn. Called when collision is switched on, and
 ## again after a bake, because the pieces they were built from are replaced by then.
 func rebuild_solids() -> void:
-	if _collide == null or not _solid:
+	# NOT FLYING MEANS NO COLLIDERS, and `_solid` alone is not that test. It is a remembered
+	# PREFERENCE that survives landing, so a bake finishing while the player was back in the orbit
+	# view rebuilt a full set of trimesh shapes nobody could touch - and held them in the physics
+	# server until the next toggle. Caught by the breadcrumb print: "[fly] solid rebuilt bodies=56"
+	# with no "[fly] enter" before it, and 56 because BOTH the preview parts and the baked pieces
+	# were visible at that moment and each got a collider.
+	if _collide == null or not _solid or not is_flying():
 		return
 	var roots: Array[Node3D] = []
 	if _scene != null:
@@ -155,6 +172,23 @@ func rebuild_solids() -> void:
 	if _explode != null:
 		roots.append(_explode)
 	_collide.build(roots)
+	var seen: Dictionary = _collide.coverage()
+	print(
+		(
+			"[fly] solid rebuilt  bodies=%d triangles=%d skipped=%d"
+			% [int(seen.get("bodies", 0)), int(seen.get("triangles", 0)), int(seen.get("skipped", 0))]
+		)
+	)
+	# NO SILENT CAPS. A ship big enough to hit the budget gets PARTLY solid walls, and a player who
+	# is not told will find out by flying through one and conclude the feature is broken.
+	var cover: Dictionary = seen
+	if int(cover.get("skipped", 0)) > 0:
+		say.emit(
+			(
+				"SOLID: %d PIECES, %d SKIPPED - THIS SHIP IS TOO BIG TO MAKE FULLY SOLID"
+				% [int(cover.get("bodies", 0)), int(cover.get("skipped", 0))]
+			)
+		)
 
 
 ## Metres per second, for the mode strip.
@@ -188,11 +222,19 @@ func enter(basic: bool, refuse: bool) -> bool:
 	_fly.lin_damp = ShipFlyState.BASIC_LIN_DAMP if basic else ShipFlyState.LIN_DAMP
 	_fly.ang_damp = ShipFlyState.BASIC_ANG_DAMP if basic else ShipFlyState.ANG_DAMP
 	_prev_mode = _scene.get_display_mode() if _scene != null else -1
-	if _scene != null:
-		_scene.set_display_mode(ShipSceneBuilder.DisplayMode.CLAY)
+	# THROUGH THE VIEW, not straight at the scene builder. ShipView3D.set_display_mode sets the mode
+	# on the scene AND on the exploded view AND rebuilds the environment; going direct left a baked
+	# ship rendering in SHADED+WIRE while the preview parts went clay, and left CLAY without its
+	# ambient occlusion.
+	_set_mode(ShipSceneBuilder.DisplayMode.CLAY)
 	# Start exactly where the orbit camera stands, so the first frame of fly is the last frame of
 	# orbit. Anything else is a teleport and costs the player their bearings immediately.
 	var cam: Camera3D = _rig.get_camera()
+	# BREADCRUMB. The builder is silent in normal use, so when it crashed with signal 11 on
+	# 2026-09-28 the log held the engine banner and nothing else - no way to tell what the player had
+	# been doing. These four lines (fly in/out, solid on/off) cost nothing, fire only on a rare
+	# user-initiated action, and would have named the last thing attempted.
+	print("[fly] enter  basic=%s solid=%s" % [str(basic), str(_solid)])
 	_fly.begin(cam.global_transform if cam != null else Transform3D.IDENTITY)
 	if _solid:
 		rebuild_solids()
@@ -211,6 +253,7 @@ func enter(basic: bool, refuse: bool) -> bool:
 func leave(restore: bool = true, frame: bool = false) -> void:
 	if _fly == null or not _fly.is_flying():
 		return
+	print("[fly] leave  restore=%s frame=%s" % [str(restore), str(frame)])
 	var pose: Dictionary = _fly.keep_view_pose(LOOK_AHEAD_M)
 	_fly.end()
 	# The colliders are only meaningful while something is flying, and a trimesh of the whole ship
@@ -219,8 +262,8 @@ func leave(restore: bool = true, frame: bool = false) -> void:
 		_collide.clear()
 		_fly.use_collider(null)
 	_set_void(false)
-	if _scene != null and _prev_mode >= 0:
-		_scene.set_display_mode(_prev_mode)
+	if _prev_mode >= 0:
+		_set_mode(_prev_mode)
 	_prev_mode = -1
 	var cam: Camera3D = _rig.get_camera()
 	if cam != null:
@@ -238,6 +281,15 @@ func leave(restore: bool = true, frame: bool = false) -> void:
 		_rig.set_focus(pose["focus"])
 	_return = {}
 	changed.emit()
+
+
+## Set the render type everywhere it has to land. [member _view] is optional so the mode can still
+## be constructed headless with nulls; without it this falls back to the scene builder alone.
+func _set_mode(mode: int) -> void:
+	if _view != null:
+		_view.set_display_mode(mode)
+	elif _scene != null:
+		_scene.set_display_mode(mode)
 
 
 ## The render type this mode took away, so the caller can put its own toolbar back. -1 when nothing
@@ -271,15 +323,21 @@ func distance_to_scene() -> float:
 ## NO STARFIELD: at sixteen colours a star field quantizes to single-pixel noise indistinguishable
 ## from the dither, which is why the void is plain.
 func _set_void(on: bool) -> void:
-	if _env != null and _env.environment != null:
-		_env.environment.ambient_light_energy = 0.0 if on else 0.75
+	# DARKEN ON THE WAY IN ONLY. The ambient the other modes want depends on the RENDER TYPE -
+	# CLAY runs at ShipViewEnv.CLAY_AMBIENT_ENERGY, not 0.75 - so restoring a hard-coded literal on
+	# the way out left the wrong one behind. `_set_mode` rebuilds the whole environment through the
+	# view on both transitions, which is the one place that knows what the mode wants.
+	if on and _env != null and _env.environment != null:
+		_env.environment.ambient_light_energy = 0.0
 	if _grid != null:
 		_grid.visible = not on
-	if on:
-		if _cage != null:
-			_cage.visible = false
-		if _com != null:
-			_com.visible = false
+	# HIDDEN ON THE WAY IN AND SHOWN AGAIN ON THE WAY OUT. The `if on:` block had no else, so after
+	# landing the budget cage and the centre-of-mass cross stayed invisible until the player's next
+	# edit happened to rebuild them - which reads as the mass cross having silently broken.
+	if _cage != null:
+		_cage.visible = not on
+	if _com != null:
+		_com.visible = not on
 	if _scene != null:
 		_scene.flying = on
 	_light_void(on)

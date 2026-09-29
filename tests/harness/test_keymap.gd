@@ -31,6 +31,10 @@ const ALLOWED_CONTEXTS: Array[String] = [
 	ShipKeymap.CONTEXT_MENU,
 	ShipKeymap.CONTEXT_FIELD,
 	ShipKeymap.CONTEXT_PAINT,
+	# FLY replaces the whole view grammar while it is up - A strafes, X brakes, E rolls - so its
+	# bindings live in a context of their own (ADR 0049). It was missing here, and so were the
+	# fifteen rows that use it, because the suite iterated the const ROWS and never saw them.
+	ShipKeymap.CONTEXT_FLY,
 ]
 
 const ALLOWED_GROUPS: Array[String] = [
@@ -38,6 +42,7 @@ const ALLOWED_GROUPS: Array[String] = [
 	ShipKeymap.GROUP_PLACE,
 	ShipKeymap.GROUP_CHANGE,
 	ShipKeymap.GROUP_FILE,
+	ShipKeymap.GROUP_FLY,
 ]
 
 const ALLOWED_STATUSES: Array[String] = [
@@ -86,8 +91,12 @@ func _actions_of(rows: Array[Dictionary]) -> PackedStringArray:
 
 
 func test_the_table_is_not_empty_and_every_row_has_every_column() -> void:
-	assert_int(ShipKeymap.ROWS.size()).is_greater(30)
-	for row: Dictionary in ShipKeymap.ROWS:
+	# THROUGH all(), NOT the const. Every shape assertion below used to iterate ShipKeymap.ROWS,
+	# which is only the hand-written half - so the fifteen GENERATED fly rows were covered by none
+	# of them. A malformed generated row (a bad context, a duplicate action, an unknown tier) would
+	# have sailed straight through a green suite.
+	assert_int(ShipKeymap.all().size()).is_greater(30)
+	for row: Dictionary in ShipKeymap.all():
 		for field: String in REQUIRED_FIELDS:
 			(
 				assert_bool(row.has(field))
@@ -100,7 +109,7 @@ func test_the_table_is_not_empty_and_every_row_has_every_column() -> void:
 
 
 func test_no_row_is_blank_where_it_must_speak() -> void:
-	for row: Dictionary in ShipKeymap.ROWS:
+	for row: Dictionary in ShipKeymap.all():
 		var action: String = str(row[ShipKeymap.FIELD_ACTION])
 		assert_str(action).is_not_empty()
 		(
@@ -122,7 +131,7 @@ func test_no_row_is_blank_where_it_must_speak() -> void:
 
 func test_action_ids_are_unique_and_snake_case() -> void:
 	var seen: PackedStringArray = PackedStringArray()
-	for row: Dictionary in ShipKeymap.ROWS:
+	for row: Dictionary in ShipKeymap.all():
 		var action: String = str(row[ShipKeymap.FIELD_ACTION])
 		(
 			assert_bool(seen.has(action))
@@ -140,7 +149,7 @@ func test_action_ids_are_unique_and_snake_case() -> void:
 
 
 func test_every_context_tier_group_and_status_is_one_we_named() -> void:
-	for row: Dictionary in ShipKeymap.ROWS:
+	for row: Dictionary in ShipKeymap.all():
 		var action: String = str(row[ShipKeymap.FIELD_ACTION])
 		(
 			assert_bool(ALLOWED_CONTEXTS.has(str(row[ShipKeymap.FIELD_CONTEXT])))
@@ -159,7 +168,7 @@ func test_every_context_tier_group_and_status_is_one_we_named() -> void:
 ## The handler anchor is the only thing tying a row to the code that runs it. A path that has gone
 ## stale means the binding may have moved or gone; either way the row needs a human.
 func test_every_handler_anchor_names_a_file_that_exists() -> void:
-	for row: Dictionary in ShipKeymap.ROWS:
+	for row: Dictionary in ShipKeymap.all():
 		var anchor: String = str(row[ShipKeymap.FIELD_HANDLER])
 		var parts: PackedStringArray = anchor.split(":")
 		(
@@ -179,7 +188,7 @@ func test_every_handler_anchor_names_a_file_that_exists() -> void:
 ## collision the player experiences as one of them silently not working.
 func test_no_chord_is_claimed_twice_in_one_context() -> void:
 	var claimed: Dictionary = {}
-	for row: Dictionary in ShipKeymap.ROWS:
+	for row: Dictionary in ShipKeymap.all():
 		var context: String = str(row[ShipKeymap.FIELD_CONTEXT])
 		var action: String = str(row[ShipKeymap.FIELD_ACTION])
 		for chord: String in _chords_of(row):
@@ -199,7 +208,7 @@ func test_no_chord_is_claimed_twice_in_one_context() -> void:
 ## A chord's modifier words and its `mods` bits have to agree, or a dispatcher built on this table
 ## later will match on something the legend never printed.
 func test_the_modifier_bits_agree_with_the_printed_chord() -> void:
-	for row: Dictionary in ShipKeymap.ROWS:
+	for row: Dictionary in ShipKeymap.all():
 		var chord: String = str(row[ShipKeymap.FIELD_CHORD])
 		var mods: int = int(row[ShipKeymap.FIELD_MODS])
 		for word: String in MOD_WORDS:
@@ -216,7 +225,7 @@ func test_the_modifier_bits_agree_with_the_printed_chord() -> void:
 ## LABEL_MAX is a rendering budget, not a style preference - see its docstring. A label over it
 ## is clipped on the hold-`?` card, which is exactly where a beginner is reading.
 func test_every_label_fits_the_card() -> void:
-	for row: Dictionary in ShipKeymap.ROWS:
+	for row: Dictionary in ShipKeymap.all():
 		var label: String = str(row[ShipKeymap.FIELD_LABEL])
 		(
 			assert_int(label.length())
@@ -233,7 +242,7 @@ func test_every_label_fits_the_card() -> void:
 ## A table that lies is worse than no table: anything not LIVE has to say what is actually true,
 ## and an UNBOUND row has to admit it in its chord rather than inventing a key.
 func test_a_row_that_is_not_live_explains_itself() -> void:
-	for row: Dictionary in ShipKeymap.ROWS:
+	for row: Dictionary in ShipKeymap.all():
 		var status: String = str(row[ShipKeymap.FIELD_STATUS])
 		var action: String = str(row[ShipKeymap.FIELD_ACTION])
 		var unbound: bool = str(row[ShipKeymap.FIELD_CHORD]) == ShipKeymap.UNBOUND_CHORD
@@ -285,7 +294,7 @@ func test_the_known_broken_bindings_are_on_the_record() -> void:
 ## instead of the building one (ADR 0049).
 func test_the_fly_rows_are_listed_at_their_own_context() -> void:
 	var fly: Array[Dictionary] = ShipKeymap.for_context(ShipKeymap.CONTEXT_FLY)
-	assert_int(fly.size()).is_equal(15)
+	assert_int(fly.size()).is_equal(14)
 	for row: Dictionary in fly:
 		(
 			assert_str(str(row[ShipKeymap.FIELD_GROUP]))
@@ -296,7 +305,8 @@ func test_the_fly_rows_are_listed_at_their_own_context() -> void:
 		assert_str(str(row[ShipKeymap.FIELD_TIER])).is_equal(ShipKeymap.TIER_BUILD)
 		assert_bool(ShipKeymap.is_live(row)).is_true()
 	# The brake and the guaranteed non-ESC exit are the two a player cannot do without.
-	assert_str(ShipKeymap.chord_for("fly_brake")).is_equal("X")
+	# SPACE is the advertised stop key and X is the alias - "i need space to halt the player to rest".
+	assert_str(ShipKeymap.chord_for("fly_brake")).is_equal("SPACE")
 	assert_str(ShipKeymap.chord_for("fly_land")).is_equal("V")
 	# ESC is offered as an ALTERNATE, never as the only way out - the diegetic host eats it.
 	var land: Dictionary = ShipKeymap.row_for("fly_land")

@@ -28,12 +28,12 @@ extends SceneTree
 ##   INK COVERAGE     - the ship must occupy a plausible share of the viewport, so an empty or
 ##                      off-screen scene fails instead of passing as "no bands, no error".
 ##
-## It writes reports/visual_<n>_<mode>.png so a human can look at the same frames the assertions
-## ran over, because an assertion suite nobody eyeballs is how the mint triangle survived several
-## rounds of green checks.
+## It writes reports/visual_<n>_<mode>.png so a human can look at the same frames the assertions ran
+## over - an assertion suite nobody eyeballs is how the mint triangle survived rounds of green.
 
 const OUT_DIR: String = "res://reports"
-const MODE_NAMES: Array = ["flat", "wireframe", "shaded_wire", "xray", "fresnel"]
+## Indexed by DisplayMode - append here or a mode ships ungated, which is what happened to CLAY.
+const MODE_NAMES: Array = ["flat", "wireframe", "shaded_wire", "xray", "fresnel", "inside", "clay"]
 
 ## Frames to let the scene settle before the first capture, and between mode switches. The builder
 ## resolves shapes, rebuilds materials and reframes the camera across several frames; capturing

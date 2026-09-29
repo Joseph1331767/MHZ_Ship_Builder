@@ -688,6 +688,11 @@ static func _feature_wire(solid: PolyMesh) -> ArrayMesh:
 		normals[f] = solid.face_plane(f).normal
 	var first: Dictionary = {}
 	var lines: PackedVector3Array = PackedVector3Array()
+	# One normal per LINE VERTEX, appended in lockstep with `lines` in BOTH loops below - the array
+	# lengths have to match exactly or add_surface_from_arrays rejects the surface outright
+	# ("array.size() != p_vertex_array_len") and the wireframe simply does not appear.
+	var vn: PackedVector3Array = solid.vertex_normals()
+	var norms: PackedVector3Array = PackedVector3Array()
 	for f: int in solid.face_count():
 		var loop: PackedInt32Array = solid.faces[f]
 		for k: int in loop.size():
@@ -702,15 +707,21 @@ static func _feature_wire(solid: PolyMesh) -> ArrayMesh:
 			if normals[f].dot(normals[g]) < limit:
 				lines.append(solid.vertices[a])
 				lines.append(solid.vertices[b])
+				norms.append(vn[a] if a < vn.size() else Vector3.UP)
+				norms.append(vn[b] if b < vn.size() else Vector3.UP)
 	for key: Vector2i in first:
 		lines.append(solid.vertices[key.x])
 		lines.append(solid.vertices[key.y])
+		norms.append(vn[key.x] if key.x < vn.size() else Vector3.UP)
+		norms.append(vn[key.y] if key.y < vn.size() else Vector3.UP)
 	var mesh: ArrayMesh = ArrayMesh.new()
 	if lines.is_empty():
 		return mesh
 	var arrays: Array = []
 	arrays.resize(Mesh.ARRAY_MAX)
 	arrays[Mesh.ARRAY_VERTEX] = lines
+	# CLAY lights the wire for real; a line with no normal shades black (PolyMesh.vertex_normals).
+	arrays[Mesh.ARRAY_NORMAL] = norms
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_LINES, arrays)
 	return mesh
 

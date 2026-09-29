@@ -1390,8 +1390,11 @@ func _clay_material(_selected: bool) -> ShaderMaterial:
 	# meet here and both were measured: too DARK and light multiplies it onto the background entry,
 	# which is F7; too BRIGHT and every face clips past 1.0 onto the top entry, which is the flat
 	# white blob the author got. Mid leaves range on both sides, which is what surface shading IS.
-	var c: Color = _role_color("text_dim")
-	m.set_shader_parameter("clay_color", Vector3(c.r, c.g, c.b))
+	# THE COLOR GOES IN AS A Color, NOT A Vector3. `clay_color` is declared `: source_color`, and
+	# Godot performs the sRGB->linear conversion for a source_color uniform ONLY when the Variant
+	# handed to it is actually a COLOR - a Vector3 takes the raw path and arrives unconverted, which
+	# is a visibly wrong (too light, too saturated) clay.
+	m.set_shader_parameter("clay_color", _role_color("text_dim"))
 	m.set_shader_parameter("clay_roughness", CLAY_ROUGHNESS)
 	m.set_shader_parameter("clay_specular", CLAY_SPECULAR)
 	m.set_shader_parameter("clay_rim", CLAY_RIM)

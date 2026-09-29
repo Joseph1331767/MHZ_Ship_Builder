@@ -39,17 +39,23 @@ func watch(button: Button, action: String) -> void:
 	var chord: String = ShipKeymap.chord_for(action)
 	if chord.is_empty() or chord == ShipKeymap.UNBOUND_CHORD:
 		return
-	var row: Dictionary = ShipKeymap.row_for(action)
+	var keyrow: Dictionary = ShipKeymap.row_for(action)
 	# A DEAD or LYING binding is not offered. Printing a key that does nothing is worse than
 	# printing none, and ShipKeymap exists partly to keep that record honest.
-	if not row.is_empty() and not ShipKeymap.is_live(row):
+	if not keyrow.is_empty() and not ShipKeymap.is_live(keyrow):
 		return
 	var label: String = button.text
 	_reserve(button, label, chord)
 	button.tooltip_text = _tooltip(button.tooltip_text, label, chord)
+	var row: Dictionary = {"button": button, "action": action, "chord": chord, "label": label}
 	button.mouse_entered.connect(_on_enter.bind(button, action, chord))
-	button.mouse_exited.connect(_on_exit.bind(button, label))
-	_rows.append({"button": button, "action": action, "chord": chord, "label": label})
+	# THE ROW, NOT THE LABEL. `Callable.bind` copies its arguments by value and a String is a value
+	# type, so binding `label` froze the build-time text into the connection for good: after FLY
+	# became LAND (or GHOST became SOLID), hovering and leaving restored the ORIGINAL word and the
+	# button lied about its own state. Binding the row Dictionary - a reference - means
+	# [method relabel] actually reaches the restore path.
+	button.mouse_exited.connect(_on_exit.bind(row))
+	_rows.append(row)
 
 
 ## Re-read every watched button's resting label. Call after anything that rewrites button text -
@@ -70,8 +76,10 @@ func _on_enter(button: Button, action: String, chord: String) -> void:
 	hovered.emit(action, chord)
 
 
-func _on_exit(button: Button, label: String) -> void:
-	button.text = label
+func _on_exit(row: Dictionary) -> void:
+	var button: Button = row["button"]
+	if is_instance_valid(button):
+		button.text = str(row["label"])
 	hovered.emit("", "")
 
 

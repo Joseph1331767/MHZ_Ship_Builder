@@ -2181,3 +2181,80 @@ consumes output") - but it means a moved canary does not distinguish "someone ad
 `cylinder_spar`/`halcyon`) instead of indices, then record the hash it produces once and assert it
 in the tool rather than in ADR prose. A canary nobody can read is not a canary. Until then, ADR
 boilerplate should stop quoting a literal value it has not measured in that session.
+
+---
+
+## F60 - OPEN, ROOT CAUSE UNKNOWN: signal 11 in the EDITOR, clean everywhere else
+
+**Reported 2026-09-28 by the author ("the game crashed"), not reproduced.** Two runs crashed with
+`CrashHandlerException: signal 11`, identical backtraces, and **zero GDScript output** before the
+crash - the builder prints nothing in normal use, so the log gives no clue about what was happening.
+
+**Both crash logs say `debugger active=true`.** That is the `godot_ai` plugin reporting an EDITOR run
+(F5). Every standalone run is clean.
+
+### What has been ruled out, each by a run rather than by reading
+
+| hypothesis | result |
+|---|---|
+| crash at startup | `--path .` ran 20 s, no crash |
+| `get_faces()` over-reading a PRIMITIVE_LINES index buffer | returns empty safely: unindexed, indexed, and indexed-with-normals, including the real wire mesh |
+| the collision build / toggle / re-bake cycle | 6 full cycles of bake -> fly -> SOLID -> fly into hull -> toggle -> rebuild-while-flying -> land -> re-bake, survived |
+| a per-frame viewport readback racing SSAO + a shadow-casting spot | 400 per-frame `get_image()` calls on BOTH viewports while flying, survived |
+| a mirrored part's negative-determinant collider basis | measured: the shape is silently INERT, no crash (fixed anyway - see below) |
+
+### What has NOT been done, and should be first
+
+**Bisect the five fly commits against an EDITOR run.** The difference between the editor and the
+standalone build is a short, testable list: the remote debugger attached, remote scene-tree property
+inspection, the editor-side import of the new `.gdshader`, and six new `class_name`s. Only the author
+can run the editor, so this needs one pass from them:
+
+1. `git checkout 5db1961` (the commit before FLY) and run from the editor. Does it still crash?
+   - **If yes**, this predates the whole fly feature and the bisect continues backwards.
+   - **If no**, bisect forward through `0811dc6`, `4df8cb8`, `79330d6`, `dbe931a`, `c67a41d`.
+2. Whatever it lands on, say what was on screen and what had been pressed.
+
+### What HAS been added so the next one is diagnosable
+
+Four `print()` breadcrumbs on the rare heavy actions - `[fly] enter`, `[fly] leave`,
+`[fly] solid rebuilt`, `[bake] update meshes`. They paid for themselves within an hour of being
+added, surfacing two real bugs nobody had noticed (colliders being built while not flying, and over
+BOTH the preview parts and the baked pieces at once - 56 bodies where 28 were expected).
+
+**THE RULE THIS FINDING EXISTS TO ENFORCE, which F7 taught the hard way and cost a week:** this entry
+is OPEN and its root cause is UNKNOWN. **No design decision may cite it as a constraint**, and no ADR
+may rest on it. If a feature needs it to be true, close it first with a measurement taken that day.
+
+---
+
+## F61 - Symmetry silently stops below the first mirrored part
+
+**Reported 2026-09-29, not fixed.** Since mirroring began placing REAL parts (ADR 0043 / `5db1961`),
+`ShipMirror.place_reflections` marks the source AND every copy `asymmetric = true` - deliberately, so
+the solve-time twin pass does not lay a derived twin on top of a real one.
+
+But `ShipSymmetry.is_effectively_asymmetric` **cascades to descendants**
+(`core/ship_symmetry.gd:76-82`), and both `reflections_of` (`:141`) and `ShipAttach`'s twin pass
+(`core/attach/ship_attach.gd:696`) refuse an asymmetric part. So:
+
+> Attach a part BENEATH a mirrored part and it gets no real copy and no derived twin. It is simply
+> not mirrored, and nothing says so.
+
+Under the old derived-twin model a child of a mirrored parent mirrored automatically. This is a
+**behaviour regression the "real parts" commit did not name**, and `tests/core/test_real_mirror.gd`
+does not cover it.
+
+**Two candidate fixes, author's call:**
+1. `place_reflections` walks the source's mirrored SIBLINGS and places the new child on each of them
+   as well - which restores the old behaviour with real parts.
+2. The UI says it out loud: placing under a mirrored part warns that this branch is no longer
+   mirrored, and offers the mirror as an explicit action.
+
+Option 1 is what a player expects. Option 2 is cheaper and more honest about what the data model now
+says. Neither is done.
+
+**Also in that file:** `mirror_subtree` is marked `RETIRED` at `core/ship_mirror.gd:81` but is still
+live code with four tests in `tests/core/test_mirror.gd` pinning its behaviour. Two mirror
+implementations in one file, one of them nominally dead and test-pinned, is a trap - retire it
+properly or delete it with its tests.

@@ -4650,3 +4650,90 @@ which is the point - you fly toward it and it comes out of the dark.
 **gdUnit4 495/495**; gdlint clean; selfcheck PASSED; visual check (5 modes) PASSED.
 
 `TORCH_REACH_M` is one constant if 18 m turns out to be too short to navigate by.
+
+---
+
+## [2026-09-29] Shoring up: a 73-agent audit, twelve real defects, and a crash still unexplained
+
+> "the game crashed. shore it up and complete any loose ends. and analyse any good or bad
+> implementation direction you may or may not have choosen."
+
+### The crash is NOT fixed, and saying otherwise would repeat F7
+
+Two crash logs, `signal 11`, identical backtraces, **zero GDScript output**. Both say
+`debugger active=true` - EDITOR runs. Every standalone run is clean. Four hypotheses were each ruled
+out by a RUN rather than by reading: startup (20 s clean), `get_faces()` on the wire mesh (returns
+empty safely in all four shapes), the collision build/toggle/re-bake cycle (6 full cycles), and a
+per-frame viewport readback racing SSAO and a shadow-casting spot (400 frames).
+
+Recorded as **FOLLOWUPS F60**, OPEN, root cause UNKNOWN, with the bisect the author has to run
+(the editor is the one environment I cannot drive). The entry carries the rule F7 cost a week to
+learn, in bold: **no design decision may cite an OPEN finding as a constraint.**
+
+### The audit
+
+A 73-agent workflow over five dimensions - segfault, lifecycle, regression, loose ends, contract -
+each finding then handed to an independent agent whose job was to REFUTE it. 46 survived. Several
+were refuted correctly, including the claim that the mirrored-collider bug was the crash (an agent
+measured it: silently inert, no crash).
+
+### Twelve fixed
+
+- **Clicking FLY never gave the 3D view keyboard focus.** Fly keys arrive through `_gui_input`,
+  which runs only while the view has focus, and every `grab_focus()` is on a left-press path. A
+  player who last clicked a panel got the mode, the void, the torch - and a dead W A S D. **This is
+  the most likely thing behind "i cant move".**
+- **`V` never entered fly.** The keymap advertised it LIVE and the button printed "PRESS V", but the
+  only `KEY_V` in the repo was fly's own exit key, unreachable unless already flying.
+- **A mirrored part's collider was inert.** Handing a `StaticBody3D` a negative-determinant basis
+  makes the physics server drop the shape; half of every symmetric ship was not solid. Faces are
+  baked to world space now and the body sits at identity. Walls are two-sided as well, which is what
+  "inner and outer" actually requires.
+- **The slide did not slide.** `resolve()` called `move_and_collide` once and stopped dead - the
+  opposite of its own docstring - and `slide_velocity` derived a "normal" from the direction of
+  BLOCKED TRAVEL. **The test was written along the one axis where that is invisible.** Both fixed;
+  the test is oblique now and takes the normal from the collision.
+- **Colliders were built while not flying**, over BOTH the preview parts and the baked pieces - 56
+  bodies where 28 were expected. Caught by a breadcrumb `print` within an hour of adding it.
+- **The clay albedo lost its sRGB conversion**: a `source_color` uniform is only converted when the
+  Variant is a `Color`, and it was being handed a `Vector3`.
+- **Baked wire meshes had no normals**, so CLAY's lit wire rendered every baked edge black.
+  `PolyMesh.vertex_normals()` now exists and both baked wire builders use it.
+- **DELETE, BACKSPACE and G still edited the document while flying.**
+- **The bbox cage and the mass cross were hidden on entering fly and never restored.**
+- **Entering fly set CLAY on the preview parts only**, so a baked ship stayed in SHADED+WIRE.
+- **Landing restored a hard-coded ambient** instead of the one the render type wants.
+- **`fly_halt` duplicated `fly_brake`** and `fly_rise` still claimed SPACE after rise moved to `R`.
+
+### Two gates that were not gating
+
+- `tools/ship_visual_check.gd` stopped at mode 4, so **CLAY - the one mode with a new shader AND a
+  new lighting model - was the only one nobody captured.** Now 7 modes.
+- `tests/harness/test_keymap.gd` iterated the const `ROWS`, so the **fifteen generated FLY rows were
+  covered by none of its shape assertions.** Switched to `all()`, and it immediately caught three
+  real defects: an undeclared context, a duplicate chord, and two rows whose printed modifier
+  disagreed with their mod bits.
+
+### The critique, verbatim where it stings
+
+An agent was asked to judge the session's DIRECTIONS, bluntly. Its findings that stand:
+
+- **The four extractions were one seam and three shaves.** `ShipFlyMode` is real. `ShipViewGrid` is
+  fine but trivial. `ShipViewEnv` is "a private method became a public static one". `ShipFlyToolbar`
+  *created* a defect. Both parent files are still within 3% of the cap - "four classes bought about
+  a week of headroom", and `.gdlintrc`'s own advice ("if the cap fires and there is no seam, revisit
+  this number") was never taken, four times running.
+- **`CLAY_DITHER` lived on the toolbar**, so a render mode's correct appearance depended on a button
+  bar being wired up - in a module built to lift into MHZ_Origins without that header. Moved to
+  `ShipTheme`. The toolbar's string-keyed peek at the view's private `_handle_drag` is gone too.
+- **The dither is a patch over an undecided contradiction**: CLAY is a continuous engine-lit gradient
+  fed to a 16-entry quantizer, which is exactly what a quantizer cannot represent. Either CLAY gets
+  its own banded ramp or it is exempted from the quantizer. Not decided here.
+- **Mirroring real parts has an unrecorded landmine** - symmetry silently stops below the first
+  mirrored part. Recorded as **F61**.
+
+### Verified
+
+**gdUnit4 498/498** (3 new); gdlint clean; selfcheck PASSED (hash `79445dff48f81978`, unmoved);
+validator PASSED (0 warnings); visual check PASSED at **7 modes**; resolve and explode PASSED; the
+6-cycle fly/solid/bake stress survives.

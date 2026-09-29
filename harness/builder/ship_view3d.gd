@@ -176,12 +176,10 @@ const DEPTH_MIN_RADIUS: float = 1.5
 
 
 
-## FLY lives in [ShipFlyMode] - entering, the void, the torch and the way back are one cohesive
-## unit that drives nodes handed to it and reaches back into nothing here. A public VAR, not four
-## forwarding methods: this class stands at gdlint's thirty-public-method cap and gdlint counts
-## `func`, not `var`, so `view.fly.enter(...)` costs the cap nothing and reads better besides.
-##
-## Never null after `_ready`.
+## FLY lives in [ShipFlyMode] - entering, the void, the torch and the way back are one cohesive unit
+## that reaches back into nothing here. A public VAR, not four forwarding methods: this class stands
+## at gdlint's thirty-public-method cap and gdlint counts `func`, not `var`. Never null after
+## `_ready`.
 var fly: ShipFlyMode = null
 
 var _viewport: SubViewport = null
@@ -392,7 +390,9 @@ func _ready() -> void:
 	fly = ShipFlyMode.new(
 		_camera_rig, _fly, _scene, _env, _grid, _bbox_cage, _com_cross, _light, _explode, collide
 	)
-	fly.changed.connect(_refresh_hints)
+	fly.use_view(self)
+	fly.changed.connect(_on_fly_changed)
+	fly.say.connect(_on_fly_say)
 
 	_rebuild_grid()
 
@@ -875,6 +875,11 @@ func _handle_mode_input(event: InputEvent) -> bool:
 	if fly != null and fly.is_flying():
 		if _fly.handle_input(event):
 			accept_event()
+		elif event is InputEventKey:
+			# EVERY OTHER KEY IS SWALLOWED: unaccepted keys reach the builder's
+			# `_unhandled_key_input`, which has no fly guard, so DELETE deleted the selected part
+			# and G started a move from inside a camera mode. Flying looks; it does not edit.
+			accept_event()
 		return true
 	if not (_exploded or _baked):
 		return false
@@ -887,6 +892,22 @@ func _on_fly_moved() -> void:
 	# only the shader's distance cue still needs feeding.
 	_push_depth_range()
 	_refresh_hints()
+
+
+## FLY NEEDS THE KEYBOARD, and clicking the FLY button does not grant it: fly keys arrive through
+## `_gui_input`, which runs only while this control has FOCUS, and every `grab_focus()` here is on a
+## left-press path. A player who last clicked a panel and then pressed FLY got the mode, the void
+## and the torch - and a dead W A S D.
+func _on_fly_changed() -> void:
+	if fly.is_flying():
+		grab_focus()
+	_refresh_hints()
+
+
+## Relayed to the builder, which owns the status bar.
+func _on_fly_say(text: String) -> void:
+	if _builder != null:
+		_builder.set_status(text)
 
 
 func _on_fly_solid() -> void:
@@ -1923,21 +1944,18 @@ func _rebuild_com_cross(doc: ShipDoc, data: ShipData, cfg: ShipConfig) -> void:
 	if int(_balance.get("parts", 0)) <= 0 or _scene == null:
 		_com_cross.visible = false
 		return
-	var centre: Vector3 = _balance["centre"]
 	var spread: Vector3 = _balance["balance"]
 	var box: AABB = _scene.scene_aabb()
-	var arm: float = maxf(box.size.length() * COM_ARM_FRACTION, COM_ARM_MIN_M)
-	var mesh: ImmediateMesh = ImmediateMesh.new()
+	# One material per axis: the COLOUR is the readout, so that choice stays here.
+	var mats: Array = []
 	for axis: int in 3:
-		var along: Vector3 = Vector3.ZERO
-		along[axis] = arm
 		var centred: bool = spread[axis] >= COM_CENTRED
-		var tint: Color = _role_color("line" if centred else "warning", Color(0.35, 0.75, 0.70))
-		mesh.surface_begin(Mesh.PRIMITIVE_LINES, _mark_material(tint))
-		mesh.surface_add_vertex(centre - along)
-		mesh.surface_add_vertex(centre + along)
-		mesh.surface_end()
-	_com_cross.mesh = mesh
+		mats.append(
+			_mark_material(_role_color("line" if centred else "warning", Color(0.35, 0.75, 0.70)))
+		)
+	_com_cross.mesh = ShipViewGrid.mass_cross(
+		mats, _balance["centre"], maxf(box.size.length() * COM_ARM_FRACTION, COM_ARM_MIN_M)
+	)
 	_com_cross.visible = true
 
 

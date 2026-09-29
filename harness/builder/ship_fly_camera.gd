@@ -343,7 +343,7 @@ func _physics_process(delta: float) -> void:
 		if not landed.is_equal_approx(wanted):
 			_state[ShipFlyState.POS] = landed
 			_state[ShipFlyState.VEL] = _collide.slide_velocity(
-				_state[ShipFlyState.VEL], landed, wanted
+				_state[ShipFlyState.VEL], _collide.last_normal()
 			)
 	transform = ShipFlyState.transform_of(_state)
 	# Only report real movement: the torch and the distance cue are both rebuilt on this signal.
