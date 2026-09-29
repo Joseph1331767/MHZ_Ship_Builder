@@ -43,6 +43,15 @@
         "ghost": { "$ref": "#/$defs/lut_index" }
       }
     },
+    "variants": {
+      "description": "Render-type palette variants (ADR 0049), each a full 16-entry LUT swapped in wholesale the way an alert is - but driven by the render type, not by a budget. An active budget alert always beats a variant. By convention every variant holds indices 3/7/11/14 (the warm ramp) and 15 (the warning red) byte-identical to base, so a selected part stays amber and a warning stays red whatever the variant; nothing enforces that but the selection stops reading as selected if it is broken.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "_description": { "type": "string" },
+        "clay": { "$ref": "#/$defs/color16" }
+      }
+    },
     "ramps": {
       "description": "Named multi-step shading ramps, each an ORDERED list of LUT indices from darkest band to brightest. A 3D part picks one entry per shading band, so every shaded face is already an exact palette colour and the quantizer cannot move it. Ramps must be listed dark -> light; nothing enforces that but the shading reads inverted if it is broken.",
       "type": "object",

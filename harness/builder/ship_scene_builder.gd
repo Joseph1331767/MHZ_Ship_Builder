@@ -69,7 +69,11 @@ extends Node3D
 ## rendering effect/node to be listed among wire, flat, shaded options". So it is a mode: the body
 ## drops to the ramp's dark end and the silhouette rises to its top, which reads as an outlined
 ## shell rather than as a shaded solid with a bright edge.
-enum DisplayMode { FLAT, WIREFRAME, SHADED_WIRE, XRAY, FRESNEL, INSIDE }
+## CLAY is appended at 6 for the same reason FRESNEL was appended at 4: nothing already stored,
+## captured or listed moves. It is the render type fly mode wears (ADR 0049) - flat blue clay with
+## wire edges, in a deep void, lit by the camera's torch. The author: "a themed blue clay with wire
+## edges rendering mode with a completely dark environment like deep void of space".
+enum DisplayMode { FLAT, WIREFRAME, SHADED_WIRE, XRAY, FRESNEL, INSIDE, CLAY }
 
 ## Metadata key carrying the part id on each pick body.
 const PART_META: String = "mhz_part_id"
@@ -101,6 +105,28 @@ const FACET_RIM_POWER: float = 2.5
 const FRESNEL_RIM_STRENGTH: float = 0.95
 const FRESNEL_RIM_POWER: float = 1.8
 const FRESNEL_AMBIENT: float = 0.04
+
+## DisplayMode.CLAY (ADR 0049). CLAY IS MATTE, and every number here says so.
+##
+## THREE BANDS, not four: a fourth band reads as polish. `_clay_ramp` trims the ramp rather than
+## re-authoring the palette, so the clay variant's own colours are what show.
+##
+## `CLAY_RIM_STRENGTH` is deliberately LOW. A strong Fresnel rim is wet plastic - it is exactly
+## what DisplayMode.FRESNEL is for - and on clay it reads as a glaze. Enough is kept that a
+## silhouette still separates from the void behind it, which at 16 colours it otherwise would not.
+##
+## `CLAY_AMBIENT` has two values, and the difference is the whole point of the torch. Static CLAY
+## sits at 0.45, which is readable clay you can inspect. While FLYING it drops to CLAY_AMBIENT_FLY,
+## where the torch is genuinely the only light source and the far side of your own ship is not
+## there until you point at it - the "completely dark environment like deep void of space" the
+## author asked for. Answered as design question Q16 in docs/future/ux.md.
+const CLAY_AMBIENT: float = 0.45
+const CLAY_AMBIENT_FLY: float = 0.12
+const CLAY_DEPTH_STRENGTH: float = 0.10
+const CLAY_RIM_STRENGTH: float = 0.15
+const CLAY_RIM_POWER: float = 2.5
+## Bands in the clay ramp. Matte.
+const CLAY_BANDS: int = 3
 
 ## Transparent-queue priorities of the gizmo's two passes. Both draw after every opaque part;
 ## the DIM pass (no depth test) draws first and everywhere, the BRIGHT pass (depth-tested)
@@ -169,6 +195,28 @@ class PartVisual:
 var edit_tools: int = ShipHandles.TOOL_ALL:
 	set = _set_edit_tools
 
+## TRUE WHILE FLY MODE IS UP (ADR 0049), which HIDES the gizmo. Hidden, not cleared - clearing the
+## selection would fire `selection_changed` for nothing and lose the player's place. Eleven handles
+## in orange across a dark void is the one thing that stops it reading as being inside a ship.
+##
+## A public var with a private setter, for the same reason [member edit_tools] is one: this class
+## stands at gdlint's thirty-public-method cap and gdlint counts `func`, not `var`.
+## THE TORCH (ADR 0049) - the camera-mounted flashlight as `{pos, dir, strength, reach}`, written
+## every tick the fly rig moves, exactly as [method set_depth_range] is. `strength` 0 is the
+## shader's default and turns the whole term off, so no mode but CLAY-while-flying ever sees it.
+##
+## IT CANNOT BE A SpotLight3D: the part shader is `unshaded` and would ignore one, and making the
+## material shaded to receive it renders it BLACK in this SubViewport (FOLLOWUPS F7, measured at
+## 115,582 px -> 0 px). So the setter walks the material cache and writes four uniforms.
+##
+## A var rather than a setter method for the same reason [member edit_tools] is one: this class
+## stands at gdlint's thirty-public-method cap and gdlint counts `func`, not `var`.
+var torch: Dictionary = {}:
+	set = _set_torch
+
+var flying: bool = false:
+	set = _set_flying
+
 ## THE LAYERS THAT ARE NOT DRAWN - `ShipCsgBake.SURFACE_*` names, plus
 ## `ShipLayersControl.LAYER_DOOR` (ADR 0046, extended 2026-09-26). WALLS start dropped, because
 ## the mode that gains most from the switch is INTERIOR and its whole purpose is looking into
@@ -190,6 +238,13 @@ var _mode: int = DisplayMode.SHADED_WIRE
 var _visuals: Dictionary = {}
 var _selected: Dictionary = {}
 var _solid_materials: Dictionary = {}
+
+# THE TORCH's three uniforms (ADR 0049), mirrored here so a material built after the last push
+# still gets them - the same reason _depth_near/_depth_far are held.
+var _torch_pos: Vector3 = Vector3.ZERO
+var _torch_dir: Vector3 = Vector3.FORWARD
+var _torch_strength: float = 0.0
+var _torch_range: float = 14.0
 ## The faceted shader by cull mode ("", "back", "front") - see _faceted_shader.
 var _faceted_shaders: Dictionary = {}
 ## The component instance being edited in isolation, or "" (ADR 0024).
@@ -734,7 +789,7 @@ func selection() -> PackedStringArray:
 ## HIT-TESTED there can never drift apart.
 func _refresh_handles() -> void:
 	var ids: PackedStringArray = selection()
-	if ids.size() != 1 or _exploded or _is_covered(ids[0]):
+	if ids.size() != 1 or _exploded or flying or _is_covered(ids[0]):
 		_free_handles()
 		return
 	var v: PartVisual = _visuals.get(ids[0], null)
@@ -959,7 +1014,16 @@ func materials_for(mode: int, selected: bool) -> Array:
 ## wall thickness at every opening) both sides; nothing is translucent and there is no wire, so
 ## the near wall is simply not there and the far cavity wall faces the camera from any angle.
 func inside_materials(selected: bool) -> Dictionary:
-	var key: String = "inside|%d|%s" % [int(selected), "/".join(hidden_layers)]
+	# CLAY REACHES A BAKED PIECE (ADR 0049), and this is the set a baked piece wears - the exploded
+	# view asks for it by name. Without this branch fly mode would show blue clay on the preview
+	# primitives and teal on the finished hull, which is the one thing it is most for: "flying
+	# around a finished hull is the best thing this mode does".
+	var clay: bool = _mode == DisplayMode.CLAY
+	var base_mode: int = DisplayMode.CLAY if clay else DisplayMode.SHADED_WIRE
+	# The mode is in the key because this set is no longer always the same one.
+	var key: String = (
+		"inside|%d|%d|%s" % [int(selected), base_mode, "/".join(hidden_layers)]
+	)
 	if _solid_materials.has(key):
 		return _solid_materials[key]
 	# The faceted shader is cull_disabled by design (mirrored twins, F7); here each surface is
@@ -983,26 +1047,33 @@ func inside_materials(selected: bool) -> Dictionary:
 	# see an open room" (2026-09-25). INTERIOR is the mode that looks into rooms, so it is the mode
 	# that drops them; the surface is named on every mesh, so any other view can drop it too.
 	var out: Dictionary = {
-		"exterior": _faceted_material(DisplayMode.SHADED_WIRE, selected, false, "front"),
-		"interior": _faceted_material(DisplayMode.SHADED_WIRE, selected, false, "back"),
-		"cut": _faceted_material(DisplayMode.SHADED_WIRE, selected, false),
+		"exterior": _faceted_material(base_mode, selected, false, "front"),
+		"interior": _faceted_material(base_mode, selected, false, "back"),
+		"cut": _faceted_material(base_mode, selected, false),
 		# A wall wears the CUT material: both sides drawn, because a wall is the one surface the
 		# camera can legitimately meet from either room.
-		"wall": _faceted_material(DisplayMode.SHADED_WIRE, selected, false),
+		"wall": _faceted_material(base_mode, selected, false),
 		# What a DOOR leaf is shaded from. Never dropped with the cut layer - a leaf is its own
 		# thing and has its own switch - so it is kept aside before the layers come off.
-		"cut_solid": _faceted_material(DisplayMode.SHADED_WIRE, selected, false),
+		"cut_solid": _faceted_material(base_mode, selected, false),
 		"wire": null,
 	}
 	for name: String in ["exterior", "interior", "cut", "wall", "cut_solid"]:
 		var m: ShaderMaterial = out[name] as ShaderMaterial
 		m.set_shader_parameter("cut_plane", _cut_plane)
-		m.set_shader_parameter("depth_strength", INTERIOR_DEPTH_STRENGTH)
+		if not clay:
+			m.set_shader_parameter("depth_strength", INTERIOR_DEPTH_STRENGTH)
 	# The cavity wall is a bowl, and a bowl lit flat reads as a ball (measured: "filled solid").
 	# Strong directional shading with a low floor makes it shade bright-to-dark the way a hollow
 	# does; the far outer wall's inner side keeps a higher floor so the wall thickness reads.
-	(out["interior"] as ShaderMaterial).set_shader_parameter("ambient", INTERIOR_CAVITY_AMBIENT)
-	(out["exterior"] as ShaderMaterial).set_shader_parameter("ambient", INTERIOR_AMBIENT)
+	#
+	# NOT IN CLAY. These two ambients are the whole reason the cavity reads as hollow under a fixed
+	# world light - and in CLAY the light is the player's torch, so an ambient floor of 0.45 (let
+	# alone 0.62) would flood the room the torch is meant to be the only thing lighting. Clay keeps
+	# the single ambient _faceted_material already set from `flying`.
+	if not clay:
+		(out["interior"] as ShaderMaterial).set_shader_parameter("ambient", INTERIOR_CAVITY_AMBIENT)
+		(out["exterior"] as ShaderMaterial).set_shader_parameter("ambient", INTERIOR_AMBIENT)
 	# THE LAYERS COME OFF LAST, once every material is shaded - a dropped one is swapped for a
 	# fully transparent material rather than left out, because a surface with no override would
 	# simply fall back to the mesh's own and draw anyway.
@@ -1147,6 +1218,17 @@ func _set_hidden_layers(layers: PackedStringArray) -> void:
 	refresh_materials()
 
 
+## ONE FLAG, THREE CONSEQUENCES, because all three follow from the same fact: the gizmo goes away,
+## CLAY's ambient floor drops to [constant CLAY_AMBIENT_FLY], and the shader's fixed world sun
+## stands down so the torch is the only light there is. `refresh_materials` rebuilds the handles,
+## so the gizmo needs no separate call.
+func _set_flying(on: bool) -> void:
+	if on == flying:
+		return
+	flying = on
+	refresh_materials()
+
+
 func _set_edit_tools(mask: int) -> void:
 	if mask == edit_tools:
 		return
@@ -1286,15 +1368,37 @@ func _faceted_material(
 	m.shader = _faceted_shader(cull)
 	m.set_shader_parameter("light_dir", FACET_LIGHT_DIR)
 	var fresnel: bool = mode == DisplayMode.FRESNEL
-	m.set_shader_parameter("ambient", FRESNEL_AMBIENT if fresnel else FACET_AMBIENT)
-	m.set_shader_parameter("depth_strength", 0.0 if fresnel else FACET_DEPTH_STRENGTH)
-	# The body goes dark in FRESNEL: without this the lambert term alone still carries a lit face
-	# to the top band and the rim has nothing left to say.
-	m.set_shader_parameter("lambert_strength", 0.0 if fresnel else 1.0)
-	m.set_shader_parameter("rim_strength", FRESNEL_RIM_STRENGTH if fresnel else FACET_RIM_STRENGTH)
-	m.set_shader_parameter("rim_power", FRESNEL_RIM_POWER if fresnel else FACET_RIM_POWER)
-	_apply_ramp(m, "part_selected" if selected else "part", fresnel)
+	var clay: bool = mode == DisplayMode.CLAY
+	if clay:
+		# STATIC CLAY is matte but LIT: the fixed world lambert stays at full strength and the
+		# flatness comes from the three-band ramp.
+		#
+		# CLAY IN THE VOID STANDS THE SUN DOWN ENTIRELY. This is the fix for the first capture,
+		# which came out as brightly lit as static clay however far the ambient floor dropped: the
+		# shader's `light_dir` is a FIXED WORLD DIRECTION that knows nothing about flying, so a face
+		# turned toward it still climbed to the top band and the torch was a rounding error on top.
+		# With `lambert_strength` at 0 the body sits at `ambient` (0.12) and the ONLY thing that can
+		# lift a fragment off that floor is the torch - which is what "completely dark environment
+		# like deep void of space, where a flashlight is attached to camera" actually asks for.
+		var dark: bool = flying
+		m.set_shader_parameter("ambient", CLAY_AMBIENT_FLY if dark else CLAY_AMBIENT)
+		m.set_shader_parameter("depth_strength", 0.0 if dark else CLAY_DEPTH_STRENGTH)
+		m.set_shader_parameter("lambert_strength", 0.0 if dark else 1.0)
+		m.set_shader_parameter("rim_strength", CLAY_RIM_STRENGTH)
+		m.set_shader_parameter("rim_power", CLAY_RIM_POWER)
+	else:
+		m.set_shader_parameter("ambient", FRESNEL_AMBIENT if fresnel else FACET_AMBIENT)
+		m.set_shader_parameter("depth_strength", 0.0 if fresnel else FACET_DEPTH_STRENGTH)
+		# The body goes dark in FRESNEL: without this the lambert term alone still carries a lit
+		# face to the top band and the rim has nothing left to say.
+		m.set_shader_parameter("lambert_strength", 0.0 if fresnel else 1.0)
+		m.set_shader_parameter(
+			"rim_strength", FRESNEL_RIM_STRENGTH if fresnel else FACET_RIM_STRENGTH
+		)
+		m.set_shader_parameter("rim_power", FRESNEL_RIM_POWER if fresnel else FACET_RIM_POWER)
+	_apply_ramp(m, "part_selected" if selected else "part", fresnel, clay)
 	_apply_depth(m)
+	_apply_torch(m)
 	# Mirrored twins need no special case here: the shader runs cull_disabled and flips the
 	# normal on back faces via FRONT_FACING, so a negative-determinant basis shades correctly
 	# with this same material.
@@ -1324,7 +1428,9 @@ func _faceted_shader(cull: String) -> Shader:
 ## leaves stale entries behind from whatever was there before, and `ramp_size` is what actually
 ## bounds the lookup. The last real colour is repeated into the tail so even a mis-set ramp_size
 ## reads a sane colour rather than black.
-func _apply_ramp(m: ShaderMaterial, ramp_name: String, fresnel: bool = false) -> void:
+func _apply_ramp(
+	m: ShaderMaterial, ramp_name: String, fresnel: bool = false, clay: bool = false
+) -> void:
 	var colors: PackedColorArray = PackedColorArray()
 	if _theme != null:
 		colors = _theme.ramp_for(ramp_name)
@@ -1332,6 +1438,8 @@ func _apply_ramp(m: ShaderMaterial, ramp_name: String, fresnel: bool = false) ->
 		colors = PackedColorArray([_role_color("line"), _role_color("text_dim")])
 	if fresnel:
 		colors = _fresnel_ramp(ramp_name, colors)
+	elif clay:
+		colors = _clay_ramp(colors, ramp_name)
 	var used: int = mini(colors.size(), 8)
 	var vecs: PackedVector3Array = PackedVector3Array()
 	for i: int in range(8):
@@ -1361,6 +1469,35 @@ func _fresnel_ramp(ramp_name: String, colors: PackedColorArray) -> PackedColorAr
 	return PackedColorArray([body, colors[colors.size() - 1]])
 
 
+## CLAY's ramp: three bands, matte. A fourth reads as polish.
+##
+## MEASURED, TWICE. The first version trimmed the four-entry part ramp from its DARK end, on the
+## reasoning that keeping the top band lets a lit face read as lit. In the void that was exactly
+## wrong: it threw away the only dark colour there was, so the body floor sat at a mid blue
+## (#3a68a8) and the ship came out uniformly bright however far `ambient` dropped and however
+## strong the torch was. There was nothing left to BE dark with.
+##
+## So the bands are picked across the ramp rather than off one end, and in the void the body is
+## replaced outright by a near-black - the same substitution [method _fresnel_ramp] makes, for the
+## same reason: the mode needs a floor the palette's own part ramp does not contain.
+##
+## A SELECTED PART KEEPS ITS OWN DARKEST BAND as the body in both cases, because that band is warm
+## and already dark, so the selection still reads amber against the blue (the warm ramp is held
+## byte-identical in the clay variant precisely so this works for free).
+func _clay_ramp(colors: PackedColorArray, ramp_name: String) -> PackedColorArray:
+	var last: int = colors.size() - 1
+	if last < 1:
+		return colors
+	var top: Color = colors[last]
+	var mid: Color = colors[maxi(last - 1, 0)]
+	var body: Color = colors[0]
+	if flying and ramp_name != "part_selected":
+		# THE VOID. `grid` is one step off the background, so an unlit face is very nearly the
+		# blackness behind it and the torch is the only thing that can lift a fragment off it.
+		body = _role_color("grid")
+	return PackedColorArray([body, mid, top])
+
+
 func _apply_depth(m: ShaderMaterial) -> void:
 	m.set_shader_parameter("depth_near", _depth_near)
 	m.set_shader_parameter("depth_far", _depth_far)
@@ -1369,6 +1506,42 @@ func _apply_depth(m: ShaderMaterial) -> void:
 ## Distance-cue range, in metres from the camera. ShipView3D derives it from the orbit distance
 ## and the scene bounds so the ramp always spans the model rather than a fixed world range - at a
 ## fixed range the cue would wash out entirely on a zoomed-in part and clip on a zoomed-out ship.
+func _set_torch(t: Dictionary) -> void:
+	var pos: Vector3 = t.get("pos", Vector3.ZERO)
+	var dir: Vector3 = t.get("dir", Vector3.FORWARD)
+	var strength: float = float(t.get("strength", 0.0))
+	var reach: float = float(t.get("reach", 14.0))
+	var same: bool = (
+		_torch_pos.is_equal_approx(pos)
+		and _torch_dir.is_equal_approx(dir)
+		and is_equal_approx(_torch_strength, strength)
+		and is_equal_approx(_torch_range, reach)
+	)
+	if same:
+		return
+	torch = t
+	_torch_pos = pos
+	_torch_dir = dir
+	_torch_strength = strength
+	_torch_range = reach
+	for key: Variant in _solid_materials.keys():
+		var entry: Variant = _solid_materials[key]
+		if entry is ShaderMaterial:
+			_apply_torch(entry)
+		elif entry is Dictionary:
+			for name: Variant in entry as Dictionary:
+				var mat: Variant = (entry as Dictionary)[name]
+				if mat is ShaderMaterial:
+					_apply_torch(mat)
+
+
+func _apply_torch(m: ShaderMaterial) -> void:
+	m.set_shader_parameter("torch_pos", _torch_pos)
+	m.set_shader_parameter("torch_dir", _torch_dir)
+	m.set_shader_parameter("torch_strength", _torch_strength)
+	m.set_shader_parameter("torch_range", _torch_range)
+
+
 func set_depth_range(near_m: float, far_m: float, cut_plane: Vector4 = NO_CUT) -> void:
 	# [param cut_plane] is the INTERIOR mode's cutaway (ADR 0028): normal in xyz, distance in w;
 	# only the interior materials wear it, every other mode keeps the shader's default.

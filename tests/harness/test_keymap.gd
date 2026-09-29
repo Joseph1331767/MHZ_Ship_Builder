@@ -277,6 +277,29 @@ func test_the_known_broken_bindings_are_on_the_record() -> void:
 		)
 
 
+## FLY's thirteen bindings are all listed, at their own context, and reachable by action name -
+## which is what makes the legend and the hint chips able to print the flying meaning of A, X and E
+## instead of the building one (ADR 0049).
+func test_the_fly_rows_are_listed_at_their_own_context() -> void:
+	var fly: Array[Dictionary] = ShipKeymap.for_context(ShipKeymap.CONTEXT_FLY)
+	assert_int(fly.size()).is_equal(13)
+	for row: Dictionary in fly:
+		(
+			assert_str(str(row[ShipKeymap.FIELD_GROUP]))
+			. append_failure_message("every fly row belongs to the fly group")
+			. is_equal(ShipKeymap.GROUP_FLY)
+		)
+		# BASIC flies too, so none of these may be gated above the first tier.
+		assert_str(str(row[ShipKeymap.FIELD_TIER])).is_equal(ShipKeymap.TIER_BUILD)
+		assert_bool(ShipKeymap.is_live(row)).is_true()
+	# The brake and the guaranteed non-ESC exit are the two a player cannot do without.
+	assert_str(ShipKeymap.chord_for("fly_brake")).is_equal("X")
+	assert_str(ShipKeymap.chord_for("fly_land")).is_equal("V")
+	# ESC is offered as an ALTERNATE, never as the only way out - the diegetic host eats it.
+	var land: Dictionary = ShipKeymap.row_for("fly_land")
+	assert_array(land[ShipKeymap.FIELD_ALTS] as Array).contains(["ESC"])
+
+
 func test_the_lookups_answer_and_all_returns_a_copy() -> void:
 	assert_str(ShipKeymap.chord_for("frame_all")).is_equal("F")
 	assert_str(ShipKeymap.chord_for("snap_bypass")).is_equal(ShipKeymap.UNBOUND_CHORD)
@@ -290,7 +313,15 @@ func test_the_lookups_answer_and_all_returns_a_copy() -> void:
 	assert_int(ShipKeymap.tier_rank("SANDBOX")).is_equal(-1)
 
 	var copy: Array[Dictionary] = ShipKeymap.all()
-	assert_int(copy.size()).is_equal(ShipKeymap.ROWS.size())
+	# all() is ROWS PLUS the generated FLY rows (ADR 0049) - thirteen bindings built rather than
+	# written out, because thirteen rows identical but for a chord is where a typo hides. So this is
+	# deliberately `greater`, not `equal`: the old equality quietly asserted that nothing is ever
+	# generated, which is no longer true and was never the thing this case is about.
+	(
+		assert_int(copy.size())
+		. append_failure_message("all() must include the generated rows, not just the const")
+		. is_greater(ShipKeymap.ROWS.size())
+	)
 	copy.clear()
 	(
 		assert_int(ShipKeymap.ROWS.size())

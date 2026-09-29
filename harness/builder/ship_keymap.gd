@@ -78,6 +78,7 @@ const GROUP_LOOK: String = "LOOK AROUND"
 const GROUP_PLACE: String = "PICK AND PLACE"
 const GROUP_CHANGE: String = "CHANGE A PART"
 const GROUP_FILE: String = "FILE"
+const GROUP_FLY: String = "FLY AROUND"
 
 ## The state a binding needs. Exact match, never nested - see the class docs.
 const CONTEXT_ALWAYS: String = "ALWAYS"
@@ -103,6 +104,11 @@ const CONTEXT_MENU: String = "MENU"
 const CONTEXT_FIELD: String = "FIELD"
 ## Paint mode is armed. Nothing in the harness arms it - see [constant NOTE_PAINT].
 const CONTEXT_PAINT: String = "PAINT"
+
+## While FLY is up (ADR 0049) the view's whole grammar is replaced - `A` strafes rather than holding
+## break-symmetry, `X` brakes rather than locking an axis, `E` rolls rather than exploding. Its own
+## context so the legend lists the flying meaning and not both.
+const CONTEXT_FLY: String = "FLY"
 
 ## Longest a `label` may be, in characters.
 ##
@@ -168,12 +174,18 @@ const NOTE_PAINT: String = "PaintMode.handle_key has no caller anywhere in the r
 ## so these four keep working there even though their row's context is the assembled view.
 const NOTE_CAMERA_EVERYWHERE: String = "Stays live in the exploded and baked views too."
 
-## Every binding, in card order: look, place, change, file.
-##
-## `code` and `mods` are what a dispatcher would match on and are [constant MOD_NONE] / `KEY_NONE`
-## where the chord is a mouse gesture or a bare held modifier. `chord` is the readable form and is
-## the only field a legend prints; `alts` are the other keys the same handler already answers to,
-## so `=` and `NUMPAD +` do not each earn a line on the card.
+## FLY notes (ADR 0049).
+const NOTE_FLY_DRIFT: String = (
+	"Momentum is conserved - letting go leaves you drifting. X is how you stop."
+)
+const NOTE_FLY_EXIT: String = (
+	"V is the guaranteed exit and the same key that entered; the diegetic host eats ESC."
+)
+const NOTE_FLY_TORQUE: String = (
+	"Torque, not look: the drag leaves a spin behind. BASIC turns directly instead."
+)
+
+
 const ROWS: Array[Dictionary] = [
 	# ------------------------------------------------------------------ look around
 	{
@@ -1134,11 +1146,28 @@ const ROWS: Array[Dictionary] = [
 	},
 ]
 
+## THE FULL TABLE - [constant ROWS] plus the generated FLY rows (ADR 0049). Built once and cached.
+##
+## The fly bindings are GENERATED rather than written out, because thirteen rows identical but for
+## a chord and a label is exactly where a typo hides - and a generated row cannot live in
+## [constant ROWS], which is a const literal. Every reader goes through [method _rows] instead of
+## through ROWS, so the legend, the tier filter and the context filter all see them without
+## knowing they were generated.
+static var _all_rows: Array[Dictionary] = []
+
+
+
+static func _rows() -> Array[Dictionary]:
+	if _all_rows.is_empty():
+		_all_rows = ROWS.duplicate()
+		_all_rows.append_array(_fly_rows())
+	return _all_rows
+
 
 ## Every row, dead ones included. The array is a fresh one each call, the row Dictionaries inside
 ## it are the shared constants - read them, never write them.
 static func all() -> Array[Dictionary]:
-	return ROWS.duplicate()
+	return _rows().duplicate()
 
 
 ## Is this row one a legend may print? DEAD and UNBOUND rows are an audit record, not an offer.
@@ -1152,7 +1181,7 @@ static func is_live(row: Dictionary) -> bool:
 ## alternative is a nesting rule that has to be right in four places instead of one.
 static func for_context(context: String) -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
-	for row: Dictionary in ROWS:
+	for row: Dictionary in _rows():
 		if is_live(row) and str(row[FIELD_CONTEXT]) == context:
 			out.append(row)
 	return out
@@ -1165,7 +1194,7 @@ static func for_tier(tier: String) -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	if ceiling < 0:
 		return out
-	for row: Dictionary in ROWS:
+	for row: Dictionary in _rows():
 		if is_live(row) and tier_rank(str(row[FIELD_TIER])) <= ceiling:
 			out.append(row)
 	return out
@@ -1178,7 +1207,7 @@ static func tier_rank(tier: String) -> int:
 
 ## The whole row for a named action, or an empty Dictionary. Actions are unique across the table.
 static func row_for(action: String) -> Dictionary:
-	for row: Dictionary in ROWS:
+	for row: Dictionary in _rows():
 		if str(row[FIELD_ACTION]) == action:
 			return row
 	return {}
@@ -1209,8 +1238,55 @@ static func tiers() -> PackedStringArray:
 
 static func _distinct(field: String) -> PackedStringArray:
 	var out: PackedStringArray = PackedStringArray()
-	for row: Dictionary in ROWS:
+	for row: Dictionary in _rows():
 		var value: String = str(row[field])
 		if not out.has(value):
 			out.append(value)
 	return out
+
+
+## Every FLY binding, built rather than written out thirteen times - the rows are identical but for
+## the chord and the label, and a table of literals that long is where a typo hides.
+static func _fly_rows() -> Array[Dictionary]:
+	var spec: Array = [
+		["fly_forward", "W", ["S"], KEY_W, "Fly forwards - S flies backwards", NOTE_FLY_DRIFT],
+		["fly_strafe", "A", ["D"], KEY_A, "Slide left - D slides right", ""],
+		["fly_rise", "SPACE", ["Z"], KEY_SPACE, "Rise - Z sinks", ""],
+		["fly_roll", "Q", ["E"], KEY_Q, "Roll left - E rolls right", ""],
+		["fly_pitch", "UP", ["DOWN"], KEY_UP, "Tip your nose up - DOWN tips it down", NOTE_FLY_DRIFT],
+		["fly_yaw", "LEFT", ["RIGHT"], KEY_LEFT, "Turn left - RIGHT turns right", NOTE_FLY_DRIFT],
+		["fly_brake", "X", [], KEY_X, "STOP - kills your drift and your spin", NOTE_FLY_DRIFT],
+		["fly_fast", "SHIFT", [], KEY_SHIFT, "Three times the push while held", ""],
+		["fly_slow", "ALT", [], KEY_ALT, "A third of the push, for fine moves", ""],
+		["fly_look", "RMB DRAG", [], KEY_NONE, "Swing your view round", NOTE_FLY_TORQUE],
+		["fly_land", "V", ["ESC"], KEY_V, "Land - puts the view back exactly as it was", NOTE_FLY_EXIT],
+		["fly_land_fit", "F", [], KEY_F, "Land and fit the whole ship on screen", ""],
+		["fly_land_keep", "ENTER", [], KEY_ENTER, "Land looking where you are looking", NOTE_FLY_EXIT],
+	]
+	var out: Array[Dictionary] = []
+	for row: Array in spec:
+		out.append(
+			{
+				FIELD_ACTION: str(row[0]),
+				FIELD_CHORD: str(row[1]),
+				FIELD_ALTS: row[2],
+				FIELD_CODE: int(row[3]),
+				FIELD_MODS: MOD_NONE,
+				FIELD_LABEL: str(row[4]),
+				FIELD_CONTEXT: CONTEXT_FLY,
+				# BASIC flies too (docs/future/ux.md Q15), so these are BUILD tier, not ENGINEER.
+				FIELD_TIER: TIER_BUILD,
+				FIELD_GROUP: GROUP_FLY,
+				FIELD_HANDLER: "harness/builder/ship_fly_camera.gd:_handle_key",
+				FIELD_STATUS: STATUS_LIVE,
+				FIELD_NOTE: str(row[5]),
+			}
+		)
+	return out
+
+## Every binding, in card order: look, place, change, file.
+##
+## `code` and `mods` are what a dispatcher would match on and are [constant MOD_NONE] / `KEY_NONE`
+## where the chord is a mouse gesture or a bare held modifier. `chord` is the readable form and is
+## the only field a legend prints; `alts` are the other keys the same handler already answers to,
+## so `=` and `NUMPAD +` do not each earn a line on the card.

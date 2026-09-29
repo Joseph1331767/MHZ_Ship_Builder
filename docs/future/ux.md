@@ -1042,6 +1042,21 @@ if w.length() > 1e-9: q = (q * Quaternion(w.normalized(), w.length()*dt)).normal
 
 Steps ②–④ touch no camera and **could ship before the ADR is signed**, if the author wants to see blue clay before deciding about flying.
 
+> **DONE, 2026-09-28 — all nine steps.** ADR 0049 signed; `ShipFlyState` (pure static integrator,
+> 13 gdUnit4 cases), `ShipFlyCamera` (the rig), `ShipFlyMode` (entering, the void, the torch, the way
+> back), `DisplayMode.CLAY` at 6, the `clay` palette variant with the warm ramp byte-identical, the
+> torch as four shader uniforms defaulting to off, the tier table at BASIC, thirteen `ShipKeymap`
+> rows at `CONTEXT_FLY`, and the corrected hint strings.
+>
+> **Three corrections this section did not anticipate**, all found by looking at captures:
+> `lambert_strength` must go to **0** while flying or the shader's fixed world sun keeps the ship lit
+> however far `ambient` drops; the three-band ramp must **not** be trimmed from the dark end or there
+> is no dark colour left to be dark with; and `torch_range` must be **scaled to the scene**, not
+> fixed at 14 m, or the beam cannot reach the ship from the camera's own standoff.
+>
+> **Q14 / Q15 / Q16 answered as proposed**: torque with `direct_look` one flag away, BASIC flies with
+> training wheels, and CLAY is 0.45 static / 0.12 flying.
+
 ---
 
 #### 7.2.6 The UI lock-up and hot swapping

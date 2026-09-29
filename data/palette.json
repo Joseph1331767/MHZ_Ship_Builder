@@ -122,5 +122,26 @@
       6,
       8
     ]
+  },
+  "variants": {
+    "_description": "Render-type palette variants (ADR 0049). A variant is a full 16-entry LUT swapped in wholesale, exactly like an alert, but driven by the RENDER TYPE rather than by a budget. PRECEDENCE: an active budget alert always beats a variant - a maxed budget must never be hidden by a render mode. Every variant keeps indices 3/7/11/14 (the warm ramp) and 15 (the warning red) byte-identical to base, so a selected part stays amber and a warning stays red whatever the variant.",
+    "clay": [
+      "#04070f",
+      "#0a1222",
+      "#121d35",
+      "#4d3311",
+      "#23406e",
+      "#2d5490",
+      "#3a68a8",
+      "#8a5f22",
+      "#5c8fc9",
+      "#6f9ed4",
+      "#86b2e0",
+      "#bd8734",
+      "#9dc4e9",
+      "#cfe4f7",
+      "#e4a944",
+      "#dd493c"
+    ]
   }
 }

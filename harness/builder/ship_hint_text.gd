@@ -339,7 +339,7 @@ const LEDE: Dictionary = {
 	ID_MODAL_DIALOG: "ANSWER THE BOX ON THE SCREEN TO CARRY ON",
 	ID_BAKING: "BUILDING YOUR SHIP - THIS TAKES A MOMENT",
 	ID_TYPING: "TYPE THE NUMBER THEN PRESS {enter}",
-	ID_FLY: "FLYING - W A S D MOVES, HOLD RIGHT-CLICK TO LOOK",
+	ID_FLY: "FLYING - W A S D MOVES YOU, {brake} STOPS YOU, {land} BRINGS YOU BACK",
 	ID_DRAG_RING: "TURNING - LET GO TO KEEP IT, {cancel} TO PUT IT BACK",
 	ID_DRAG_STRETCH: "STRETCHING - LET GO TO KEEP IT",
 	ID_DRAG_OFFSET: "LIFTING IT OFF - LET GO TO KEEP IT",
@@ -408,7 +408,7 @@ const SUB: Dictionary = {
 	ID_MODAL_DIALOG: "nothing else can be touched until it is answered",
 	ID_BAKING: "it is working, nothing is broken",
 	ID_TYPING: "esc forgets it and keeps the drag",
-	ID_FLY: "",
+	ID_FLY: "you keep drifting - that is space. {brake} stops you dead",
 	ID_DRAG_RING: "or type a number for an exact angle",
 	ID_DRAG_STRETCH: "or type a number in metres",
 	ID_DRAG_OFFSET: "it stops every {snap_m} m",
@@ -502,7 +502,7 @@ const CHIPS: Dictionary = {
 	ID_MODAL_DIALOG: [],
 	ID_BAKING: [],
 	ID_TYPING: [["enter", "SET"], ["cancel", "DROP"]],
-	ID_FLY: [["fast", "FAST"], ["cancel", "BACK"]],
+	ID_FLY: [["brake", "STOP"], ["land", "LAND"], ["fast", "FAST"]],
 	ID_DRAG_RING: [["free", "FREE"], ["cancel", "BACK"]],
 	ID_DRAG_STRETCH: [["cancel", "BACK"]],
 	ID_DRAG_OFFSET: [["free", "FREE"]],
@@ -567,6 +567,12 @@ const CHORD_FALLBACK: Dictionary = {
 	"type": "TYPE",
 	"yes": "Y",
 	"no": "N",
+	# FLY (ADR 0049). "land" is deliberately NOT "cancel": `diegetic_host.gd` eats ESCAPE to unfocus
+	# the device, so a mode whose only advertised exit is ESC would be a trap in the shipping path.
+	# V is the guaranteed exit and is the same key that entered.
+	"brake": "X",
+	"land": "V",
+	"roll": "Q/E",
 }
 
 ## The NEXT button, in the order it asks (ux.md 3.2.1: "the highest-priority blocker"). It reads

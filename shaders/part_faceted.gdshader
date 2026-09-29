@@ -74,6 +74,40 @@ uniform float rim_power : hint_range(0.5, 8.0) = 2.5;
 // a lit face still climbed to the top band on lambert alone and the rim had nowhere left to go.
 uniform float lambert_strength : hint_range(0.0, 1.0) = 1.0;
 
+// FOURTH CUE, OFF BY DEFAULT: THE TORCH (ADR 0049). The camera-mounted flashlight the author
+// asked for - "a completely dark environment like deep void of space, where a flashlight is
+// attached to camera".
+//
+// WHY IT IS NOT A SpotLight3D. This shader is `unshaded`, so no light is ever consulted; a spot
+// light would light exactly nothing. Worse, making the material shaded to receive one renders it
+// BLACK in this SubViewport (FOLLOWUPS F7 measured a part going from 115,582 px to 0 px). The
+// torch therefore has to be computed here, from a position and direction the view pushes in every
+// tick, exactly as it already pushes depth_near/depth_far.
+//
+// PUSHED INTO `t`, NEVER ADDED AS A COLOUR - the same rule the Fresnel rim follows, and for the
+// same reason: every band must stay an exact palette entry or the 16-colour quantizer downstream
+// maps the lit face onto whatever LUT entry is nearest and a cube comes out as one floating
+// triangle. See the `ramp` note at the top of this file.
+//
+// `torch_strength` 0 (the default) skips the whole term, so every existing mode is untouched -
+// the branch is on a uniform that is constant across a draw call, so it costs nothing.
+uniform vec3 torch_pos = vec3(0.0, 0.0, 0.0);
+uniform vec3 torch_dir = vec3(0.0, 0.0, -1.0);
+uniform float torch_strength : hint_range(0.0, 2.0) = 0.0;
+// cos of the cone's half angle at full brightness, and at its outer edge - between them the beam
+// falls off smoothly, which is what stops the cone edge reading as a hard-quantized disc.
+uniform float torch_cos_inner : hint_range(0.0, 1.0) = 0.955;
+uniform float torch_cos_outer : hint_range(0.0, 1.0) = 0.82;
+// Metres at which the beam has fallen to HALF. Inverse-square referenced to this distance, so the
+// falloff is authored in metres rather than in whatever units the numerator happens to imply.
+//
+// PUSHED FROM THE SCENE'S OWN SIZE, not left at a constant - ShipView3D scales it to the ship's
+// radius the same way it scales the depth cue, and for the same reason. Measured at a fixed 14 m:
+// entering fly on a 12 m ship from the orbit camera's 24 m standoff put the beam at 8% strength,
+// nothing cleared the ramp's first band, and the mode looked like it had simply turned the lights
+// off. A torch that cannot reach your own ship is not a torch.
+uniform float torch_range = 14.0;
+
 // THE CUTAWAY (ADR 0028). The INTERIOR mode discards every fragment on the camera's side of this
 // plane (xyz the normal, w the distance): the near half of the ship is gone and the far half
 // shows as a section - the cavity walls, the wall thickness at the cut, the open passages between
@@ -116,6 +150,27 @@ void fragment() {
 		// reach the top band and every single-part ship rendered a band darker than intended.
 		float far_ness = clamp((part_dist - depth_near) / span, 0.0, 1.0) - 0.5;
 		t -= depth_strength * far_ness;
+	}
+
+	// THE TORCH (see the uniforms). After the depth cue and BEFORE the rim, so a silhouette still
+	// reads at the edge of the beam rather than being washed out by it.
+	if (torch_strength > 0.0) {
+		vec3 to_frag = world_pos - torch_pos;
+		float dist = length(to_frag);
+		if (dist > 0.0001) {
+			vec3 beam = to_frag / dist;
+			// Cone: 1 inside the inner angle, easing to 0 at the outer one.
+			float cone = smoothstep(torch_cos_outer, torch_cos_inner, dot(beam, normalize(torch_dir)));
+			// Inverse-square referenced to torch_range: half strength AT the range, a fifth at
+			// twice it. The first version carried an extra factor of four here, which put the
+			// beam at a fifth of this and made it invisible at any useful standoff.
+			float rel = dist / max(torch_range, 0.001);
+			float fall = 1.0 / (1.0 + rel * rel);
+			// Lambert against the BEAM, so a face turned away from the torch stays dark even
+			// standing in it - that is what makes the beam read as a light rather than as a mask.
+			float face = max(dot(world_n, -beam), 0.0);
+			t += torch_strength * cone * fall * face;
+		}
 	}
 
 	// The Fresnel rim (see the uniforms). VIEW is the view-space direction from the fragment to

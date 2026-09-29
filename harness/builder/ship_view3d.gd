@@ -4,7 +4,8 @@
 ##     └── ShipBuilder
 ##           └── ShipView3D  <- this SubViewportContainer
 ##                 └── SubViewport (own World3D)
-##                       ├── OrbitCamera -> Camera3D
+##                       ├── OrbitCamera -> Camera3D      (the turntable)
+##                       ├── ShipFlyCamera -> Camera3D    (FLY, ADR 0049 - stood down until asked)
 ##                       ├── ShipSceneBuilder -> MeshInstance3D per part
 ##                       ├── WorldEnvironment + DirectionalLight3D
 ##                       └── grid
@@ -173,8 +174,19 @@ const HINT_MARGIN_PX: float = 6.0
 ## without a floor the cue's near and far would collapse together and the shader would skip it.
 const DEPTH_MIN_RADIUS: float = 1.5
 
+
+## FLY lives in [ShipFlyMode] - entering, the void, the torch and the way back are one cohesive
+## unit that drives nodes handed to it and reaches back into nothing here. A public VAR, not four
+## forwarding methods: this class stands at gdlint's thirty-public-method cap and gdlint counts
+## `func`, not `var`, so `view.fly.enter(...)` costs the cap nothing and reads better besides.
+##
+## Never null after `_ready`.
+var fly: ShipFlyMode = null
+
 var _viewport: SubViewport = null
 var _camera_rig: OrbitCamera = null
+# The RIG. Everything about entering, leaving, the void and the torch is [ShipFlyMode]'s (ADR 0049).
+var _fly: ShipFlyCamera = null
 var _scene: ShipSceneBuilder = null
 var _grid: MeshInstance3D = null
 var _env: WorldEnvironment = null
@@ -326,6 +338,14 @@ func _ready() -> void:
 	_camera_rig.name = "OrbitCamera"
 	_viewport.add_child(_camera_rig)
 
+	# FLY (ADR 0049) - a second rig, not a mode of the first. It stands down until asked for; its
+	# Camera3D is not `current` and its _physics_process is off.
+	_fly = ShipFlyCamera.new()
+	_fly.name = "FlyCamera"
+	_viewport.add_child(_fly)
+	_fly.fly_moved.connect(_on_fly_moved)
+	_fly.exit_requested.connect(_on_fly_exit)
+
 	_grid = MeshInstance3D.new()
 	_grid.name = "Grid"
 	_viewport.add_child(_grid)
@@ -360,6 +380,10 @@ func _ready() -> void:
 	_gate_timer.wait_time = GATE_IDLE_SECONDS
 	_gate_timer.timeout.connect(_on_gate_idle)
 	add_child(_gate_timer)
+
+	# Every node the mode drives now exists, so it can be handed them once and never reach back.
+	fly = ShipFlyMode.new(_camera_rig, _fly, _scene, _env, _grid, _bbox_cage, _com_cross)
+	fly.changed.connect(_refresh_hints)
 
 	_rebuild_grid()
 
@@ -575,6 +599,9 @@ func _push_depth_range() -> void:
 	var box: AABB = _scene.scene_aabb()
 	var radius: float = maxf(box.size.length() * 0.5, DEPTH_MIN_RADIUS)
 	var dist: float = _camera_rig.distance
+	if fly != null and fly.is_flying():
+		# KEEP THE CUE FED WHILE FLYING - see ShipFlyMode.distance_to_scene for why.
+		dist = fly.distance_to_scene()
 	# The cut plane stays at NO_CUT: the INTERIOR mode is the far walls from any angle, as
 	# asked; a section through the orbit focus is the shader's to offer when a SECTION mode
 	# wants it (ADR 0028).
@@ -588,6 +615,10 @@ func _push_depth_range() -> void:
 ## never the window (SPEC section 10).
 func _push_handle_scale() -> void:
 	if _scene == null or _camera_rig == null or _viewport == null:
+		return
+	# The gizmo is hidden while flying, so sizing it is wasted work - and it would be sized from
+	# the wrong camera. Run once on the way out instead (see _on_fly_exit).
+	if fly != null and fly.is_flying():
 		return
 	var cam: Camera3D = _camera_rig.get_camera()
 	if cam == null:
@@ -801,6 +832,47 @@ func _on_explode_finished(_modules: int, _seams: int, _ms: int) -> void:
 		frame_aabb(box)
 
 
+# ---------------------------------------------------------------- fly mode (ADR 0049)
+
+
+
+
+## THE MODES THAT OWN THE INPUT ENTIRELY while they are up: FLY, and the exploded/baked views.
+## Returns true when one of them is, whether or not it wanted this particular event - nothing else
+## may act while a mode holds the view.
+##
+## FLY IS CHECKED FIRST, and before the exploded branch on purpose (ADR 0049): flying around a
+## FINISHED hull is the best thing the mode does, and those two views already keep the camera's
+## verbs live, so it comes for free.
+##
+## The two are one function because `_gui_input` has a six-return budget and they are one idea.
+func _handle_mode_input(event: InputEvent) -> bool:
+	if fly != null and fly.is_flying():
+		if _fly.handle_input(event):
+			accept_event()
+		return true
+	if not (_exploded or _baked):
+		return false
+	_handle_explode_input(event)
+	return true
+
+
+func _on_fly_moved() -> void:
+	fly.push_torch()
+	_push_depth_range()
+	_refresh_hints()
+
+
+func _on_fly_exit(restore: bool, frame: bool) -> void:
+	fly.leave(restore, frame)
+	if frame:
+		frame_all()
+	_push_depth_range()
+	# Skipped for the whole flight; run once now so the gizmo is sized for where we ended up.
+	_push_handle_scale()
+	_refresh_hints()
+
+
 # ---------------------------------------------------------------- input
 
 
@@ -808,8 +880,7 @@ func _gui_input(event: InputEvent) -> void:
 	if _camera_rig == null:
 		return
 
-	if _exploded or _baked:
-		_handle_explode_input(event)
+	if _handle_mode_input(event):
 		return
 
 	var key: InputEventKey = event as InputEventKey
@@ -1570,6 +1641,10 @@ func _notification(what: int) -> void:
 		_press_active = false
 		if _camera_rig != null:
 			_camera_rig.release_drag()
+		if _fly != null:
+			# Same reason, worse symptom: a thrust key released outside the view would leave the
+			# rig accelerating forever with nothing on screen explaining why.
+			_fly.release_drag()
 	elif what == NOTIFICATION_FOCUS_EXIT:
 		# The key-up for a held modifier is delivered to whoever has focus, so an A held across a
 		# focus change would otherwise stick down forever.
@@ -1578,6 +1653,8 @@ func _notification(what: int) -> void:
 		# any focus change at all - silently dropped a selected part back to the ball-only gizmo
 		# and left every grab spinning it about its placement vector.
 		_break_symmetry_held = false
+		if _fly != null:
+			_fly.release_drag()
 
 
 ## Picking runs here, not in _gui_input: the direct space state may only be queried
@@ -1777,47 +1854,18 @@ func _build_environment() -> Environment:
 func _rebuild_grid() -> void:
 	if _grid == null:
 		return
-	var grid_color: Color = _role_color("grid", Color(0.08, 0.20, 0.22))
 	var axis_color: Color = _role_color("line", Color(0.15, 0.48, 0.47))
-
-	var grid_mat: StandardMaterial3D = _line_material(grid_color)
-	var axis_mat: StandardMaterial3D = _line_material(axis_color)
-
-	var mesh: ImmediateMesh = ImmediateMesh.new()
-	mesh.surface_begin(Mesh.PRIMITIVE_LINES, grid_mat)
-	var n: int = int(GRID_EXTENT / GRID_STEP)
-	for i: int in range(-n, n + 1):
-		var t: float = float(i) * GRID_STEP
-		if absf(t) < 0.001:
-			continue
-		mesh.surface_add_vertex(Vector3(t, 0.0, -GRID_EXTENT))
-		mesh.surface_add_vertex(Vector3(t, 0.0, GRID_EXTENT))
-		mesh.surface_add_vertex(Vector3(-GRID_EXTENT, 0.0, t))
-		mesh.surface_add_vertex(Vector3(GRID_EXTENT, 0.0, t))
-	mesh.surface_end()
-
-	mesh.surface_begin(Mesh.PRIMITIVE_LINES, axis_mat)
-	mesh.surface_add_vertex(Vector3(-GRID_EXTENT, 0.0, 0.0))
-	mesh.surface_add_vertex(Vector3(GRID_EXTENT, 0.0, 0.0))
-	mesh.surface_add_vertex(Vector3(0.0, 0.0, -GRID_EXTENT))
-	mesh.surface_add_vertex(Vector3(0.0, 0.0, GRID_EXTENT))
-	mesh.surface_end()
-
-	# THE BEACON (ADR 0033): the ship's build centre, at the origin, as a dot - "it can be entirely
-	# internal and viewable as a dot" (2026-09-21). Every class is laid out around it and the root
-	# module is anchored to it, so this is where a ship grows from rather than wherever its first
-	# module happens to be.
-	# Reads THROUGH the hull, like every other overlay line in this view: a reference the ship is
-	# built around is no use only when nothing stands on it.
+	# Reads THROUGH the hull, like every other overlay line here - see ShipViewGrid.build.
 	var beacon_mat: StandardMaterial3D = _line_material(_role_color("accent", axis_color))
 	beacon_mat.no_depth_test = true
-	mesh.surface_begin(Mesh.PRIMITIVE_LINES, beacon_mat)
-	for axis: Vector3 in [Vector3.RIGHT, Vector3.UP, Vector3.BACK]:
-		mesh.surface_add_vertex(-axis * BEACON_ARM_M)
-		mesh.surface_add_vertex(axis * BEACON_ARM_M)
-	mesh.surface_end()
-
-	_grid.mesh = mesh
+	_grid.mesh = ShipViewGrid.build(
+		_line_material(_role_color("grid", Color(0.08, 0.20, 0.22))),
+		_line_material(axis_color),
+		beacon_mat,
+		GRID_EXTENT,
+		GRID_STEP,
+		BEACON_ARM_M
+	)
 
 
 ## The MAX BOUNDING BOX, drawn as eight corner brackets around the ship origin.

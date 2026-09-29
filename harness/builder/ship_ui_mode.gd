@@ -60,6 +60,11 @@ const SHOWN_FROM: Dictionary = {
 	"REDO": Level.BASIC,
 	"HELP": Level.BASIC,
 	"FRAME": Level.BASIC,
+	# FLY IS AT BASIC ON PURPOSE (docs/future/ux.md Q15). ux.md:237 originally put it at SHAPE and
+	# this argues against that: creative flight is the most kid-legible thing in the whole brief,
+	# and "the little kids' mode cannot fly" is the version a child would resent. BASIC flies with
+	# the training wheels on - heavier damping, direct look - not with the verb taken away.
+	"FLY": Level.BASIC,
 	"EXPLODE": Level.MODERATE,
 	"EDIT": Level.MODERATE,
 	"UPDATE MESHES": Level.MODERATE,

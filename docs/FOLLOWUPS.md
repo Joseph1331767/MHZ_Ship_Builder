@@ -2106,3 +2106,32 @@ card reads `BAKED - 14 PIECES` and `SNAP 0.5deg` instead of `0 PIECES` and a def
 STILL DEFAULTED, and deliberately: `STATE_SEAMS` needs an `ShipSdf` solve and `STATE_COMPLEXITY` /
 `STATE_BUDGET` need a metrics pass. A hint is not worth either on every state change - they want
 feeding from the values the gauges already compute, when the gauges are tiered (R6).
+
+---
+
+## F59 - The selfcheck's doc hash is a data-dependent canary, and the value in the ADRs is stale
+
+**Reported 2026-09-28, not fixed.** Every ADR from 0009 to 0048 records the selfcheck's doc hash as
+`5536787c6c35d236`. The tool actually prints **`79445dff48f81978`**, and has been for some time.
+
+**This is not a determinism failure.** The gate itself passes on every run: the same doc hashes the
+same twice, `duplicate_doc()` preserves it, and changing a param moves it. `RULESET_VERSION` is
+untouched at `4.0.0`. What moved is the **fixture**, not the meaning of any stored field.
+
+**Measured, so it is not a guess.** Rolling `core/` back to `e692ab8` - the commit before the
+2026-09-27/28 session touched `core/` at all - and re-running still prints `79445dff48f81978`. So
+the mirror work, the snap-lattice change and the CLAY/fly work did **not** move it. Deeper rollbacks
+are inconclusive by construction: `git checkout <old> -- core/` restores old versions of files that
+existed then but does not delete files added since, so the tree under test is a hybrid.
+
+**Why the canary is weak.** `tools/ship_selfcheck.gd` builds its fixture by INDEX, not by name -
+`family_ids()[0]`, `manufacturers_for(...)[0]`, and "the first family that is not that one". So the
+hash depends on catalogue iteration order, and adding or reordering a `data/` entry silently moves
+it. That is exactly the case AGENTS section 8b calls safe and free ("ranges gate input, the hash
+consumes output") - but it means a moved canary does not distinguish "someone added a family" from
+"someone changed what `round` means", which is the one thing the canary exists to catch.
+
+**The fix, when it is taken:** pin the fixture to NAMED ids (`box_hull`/`kessler`,
+`cylinder_spar`/`halcyon`) instead of indices, then record the hash it produces once and assert it
+in the tool rather than in ADR prose. A canary nobody can read is not a canary. Until then, ADR
+boilerplate should stop quoting a literal value it has not measured in that session.

@@ -5,7 +5,14 @@
 ## dollying moves the child - no quaternion bookkeeping and no drift.
 ##
 ## THE CAMERA IS AN ORBIT/TURNTABLE ONLY: rotate and zoom, nothing else. That is not a
-## simplification, it is the clone target. SPORE_CLONE_SPEC section 2 records four independent
+## simplification, it is the clone target.
+##
+## RETIRED(ADR 0049): true OF THIS CLASS, and no longer true of the builder. `ShipFlyCamera` is a
+## free 6-DOF rig with conserved momentum, added because the brief's audience is a child and
+## because these hulls have INSIDES an orbit rig can never get into. ADR 0049 states the boundary
+## once, in writing: the clone target governs the build gesture grammar, not the camera. It
+## explicitly does NOT reopen `pan_by()` or the axis-snap presets below - those were inventions
+## WITHIN the orbit grammar, where the research does apply, and they stay retired. SPORE_CLONE_SPEC section 2 records four independent
 ## research passes over the official manual, the wikis and the forums finding no pan verb, no
 ## reset-view control and no front/side/top snap views in ANY Spore editor. Both were our own
 ## inventions and both are gone; see the two RETIRED notes below.

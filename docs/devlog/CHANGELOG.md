@@ -4259,3 +4259,94 @@ a copy is an ordinary part with no `mirror_source`; the solve adds no twin on to
 exactly at the reflection, measured on the resolved transform; a part ON the plane lays nothing; the
 direction reflection is exact across fifteen angle pairs; and the spin reverses once per reflection.
 Selfcheck PASSED with the hash unchanged; resolve, explode and visual (5 modes) checks PASSED.
+
+---
+
+## [2026-09-28] Fly mode: blue clay, a deep void, and a flashlight that cannot be a light
+
+> "note i dont see flying mode either.." — and, correcting me when I started building WASD:
+> "fly mode isnt just wsad, its described as pitch black aside whats in players flashlight, for the
+> model to render in blue clay shadowing mode."
+
+The author was right to stop me. The design was already written up in full (`docs/future/ux.md`
+§7.2.5) as five separable pieces, and the look is most of it. All five landed.
+
+### ADR 0049 — the clone target does not govern the camera
+
+`orbit_camera.gd` has said since 2026-08-31 that the camera is an orbit turntable and that this is
+"not a simplification, it is the clone target". Two verbs were deleted under that heading. A fly
+camera is strictly more camera freedom than either, so shipping it silently would have left the code
+disagreeing with the spec — the exact failure AGENTS §9 exists to prevent.
+
+The boundary is now stated once, in writing: **the Spore research governs the build gesture grammar,
+not the camera**, because two premises of this project are not Spore's — the audience is a child,
+and these hulls have INSIDES an orbit rig can never get into. It explicitly does **not** reopen
+`pan_by()` or the axis-snap presets; those were inventions *within* the orbit grammar and stay
+retired. `orbit_camera.gd` is marked in place, not edited.
+
+### The flashlight cannot be a light
+
+`part_faceted.gdshader` is `render_mode unshaded`, so a `SpotLight3D` would light exactly nothing —
+and making the material shaded to receive one renders it **black** in this SubViewport (FOLLOWUPS F7
+measured 115,582 px → 0 px). The torch is therefore a cone × falloff × lambert term computed in the
+shader and pushed **into the ramp index**, never added as a colour, so the 16-entry quantizer stays
+a no-op on parts.
+
+### Three things the captures caught that no test would have
+
+1. **The void was not dark.** Ambient dropped to 0.12 and the ship stayed as bright as static clay:
+   the shader's `light_dir` is a FIXED WORLD direction that knows nothing about flying, so a face
+   turned toward it still climbed to the top band. `lambert_strength` now stands the fake sun down
+   entirely while flying — the body sits at `ambient` and only the torch can lift it.
+2. **There was nothing left to be dark WITH.** The first clay ramp trimmed four bands to three from
+   the *dark* end, which threw away the only dark colour. The body floor was a mid blue. Bands are
+   now picked across the ramp, and in the void the body is replaced outright by a near-black.
+3. **The torch could not reach.** At a fixed 14 m, entering fly on a 12 m ship from the orbit
+   camera's standoff put the beam at 8% strength. The reach is now scaled to the scene radius, the
+   same way the distance cue already is, and for the same reason.
+
+### The integrator is pure static, so the physics is testable
+
+`ShipFlyState.step(state, input, dt, tune)` — no node, no clock. Thirteen gdUnit4 cases hold the
+claims: |v| and |w| constant to 1e-5 over 10,000 ticks at zero damping, the quaternion unit to 1e-6
+after 60 s of continuous spin, the damping half-life exact, 60 Hz and 240 Hz agreeing to 1e-4, the
+brake landing on zero rather than crossing it, and thrust following the body.
+
+One test earned its keep immediately: terminal speed came out **47.8995** against an asserted
+48.0 ± 0.1. That is not a near miss — it is the *discrete* fixed point, `a·dt·d/(1−d)`, about 0.2%
+under the continuous limit and exactly the first-order offset semi-implicit Euler is known for. The
+test now asserts the discrete value to 1e-3 rather than the textbook one with slack that would have
+hidden a real change.
+
+### Two real extractions, because the file-length alarm was right
+
+`ship_view3d.gd` passed 2000 lines. Per `.gdlintrc` ("the cap is a smoke alarm, not an order to
+split") the question was whether a seam existed, and two did: **`ShipFlyMode`** (entering, the void,
+the torch, the way back — it drives nodes handed to it in `_init` and reaches back into the view for
+nothing) and **`ShipViewGrid`** (the floor grid and the beacon as pure geometry: colours and sizes
+in, one mesh out). 2148 → 1978 lines, and both halves are statically testable on their own.
+
+`ShipView3D.fly` and `ShipSceneBuilder.torch`/`.flying` are public **vars** with private setters —
+both classes stand at gdlint's 30-public-method cap, and gdlint counts `func`, not `var`.
+
+### Also
+
+`ShipHintText` has been able to *describe* flying since the hint bar landed — `ID_FLY`,
+`STATE_FLYING` and a `FLY · {speed} M/S` strip, all written against a mode that did not exist. Two
+lines in `_hint_state()` finally feed them. The directive was corrected too: it named no brake, no
+roll and no non-ESC exit, and called right-drag "look" when it is torque.
+
+FLY sits at **BASIC**, against `ux.md:237`, with heavier damping and direct look — "the little kids'
+mode cannot fly" is the version a child would resent.
+
+### Verified
+
+**gdUnit4 491/491** (13 new on the integrator, 1 on the keymap's fly rows); gdlint clean across
+`core/`, `harness/` and `tests/harness/`; selfcheck PASSED; data validator PASSED (0 warnings);
+resolve, explode and visual (5 modes) checks PASSED; five windowed captures read as intended.
+
+**Not a determinism event:** nothing in `core/` was touched. See FOLLOWUPS **F59** — the selfcheck's
+doc hash is `79445dff48f81978`, not the `5536787c6c35d236` that ADRs 0009–0048 quote. Rolling `core/`
+back to before this session's first `core/` commit reproduces `79445dff48f81978`, so neither this
+work nor the mirror/snap work moved it; the canary is picked by catalogue INDEX and drifted with a
+`data/` change at some earlier point. The gate itself passes on every run.

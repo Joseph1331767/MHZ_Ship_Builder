@@ -98,6 +98,12 @@ var load_errors: PackedStringArray = PackedStringArray()
 ## "" when no budget is alerting, else the budget key whose LUT is live.
 var active_alert: String = ""
 
+## Render-type palette variants by name, each a full 16-entry LUT. See [method set_variant].
+var variants: Dictionary = {}
+
+## The variant in force, or "" for base. See [method set_variant] for the precedence rule.
+var active_variant: String = ""
+
 var dither_enabled: bool = false
 var dither_strength: float = 0.06
 
@@ -204,6 +210,7 @@ func load_pack(data: ShipData = null) -> void:
 	else:
 		_parse_pack(pack)
 	active_alert = ""
+	active_variant = ""
 	active_palette = base_palette
 	_push_palette_uniform()
 	_apply_theme_colors()
@@ -231,6 +238,16 @@ func _parse_pack(pack: Dictionary) -> void:
 		base_palette = _fallback_palette()
 
 	alerts = {}
+	var raw_variants: Variant = pack.get("variants", null)
+	if typeof(raw_variants) == TYPE_DICTIONARY:
+		var variant_dict: Dictionary = raw_variants
+		for key: Variant in variant_dict:
+			# `_description` is prose for the reader, not a palette.
+			if str(key).begins_with("_"):
+				continue
+			var colors: PackedColorArray = _colors_from(variant_dict[key], "variants." + str(key))
+			if colors.size() == PALETTE_SIZE:
+				variants[str(key)] = colors
 	var raw_alerts: Variant = pack.get("alerts", null)
 	if typeof(raw_alerts) == TYPE_DICTIONARY:
 		var alert_dict: Dictionary = raw_alerts
@@ -400,10 +417,45 @@ func clear_alert() -> void:
 	if active_alert == "":
 		return
 	active_alert = ""
-	active_palette = base_palette
+	# Back to the VARIANT if one is live, not straight to base - otherwise a budget alert that
+	# came and went while CLAY was on would drop the render type's palette on the floor.
+	active_palette = _palette_now()
 	_push_palette_uniform()
 	_apply_theme_colors()
 	palette_changed.emit(active_palette)
+
+
+# ---------------------------------------------------------------- render-type variants
+
+
+## Wear a named render-type palette variant - "clay" is the only one authored (ADR 0049). Passing
+## "" clears it. Unknown names clear it too, rather than inventing a LUT.
+##
+## THE ONE PRECEDENCE RULE: AN ACTIVE BUDGET ALERT ALWAYS BEATS A VARIANT. A maxed budget is the
+## most important thing on the screen and must never be hidden by a pretty render mode, so this
+## records the variant and then defers - the alert's own palette stays up, and the variant takes
+## effect the moment [method clear_alert] runs.
+func set_variant(name: String) -> void:
+	var wanted: String = name if variants.has(name) else ""
+	if wanted == active_variant:
+		return
+	active_variant = wanted
+	if active_alert != "":
+		# Recorded, deferred. clear_alert() picks it up.
+		return
+	active_palette = _palette_now()
+	_push_palette_uniform()
+	_apply_theme_colors()
+	palette_changed.emit(active_palette)
+
+
+## The LUT that should be up right now, alert first, then variant, then base.
+func _palette_now() -> PackedColorArray:
+	if active_alert != "" and alerts.has(active_alert):
+		return alerts[active_alert]
+	if active_variant != "" and variants.has(active_variant):
+		return variants[active_variant]
+	return base_palette
 
 
 # ---------------------------------------------------------------- shader
