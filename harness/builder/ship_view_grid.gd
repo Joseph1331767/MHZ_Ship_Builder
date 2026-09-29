@@ -57,3 +57,45 @@ static func build(
 		mesh.surface_add_vertex(axis * beacon_arm)
 	mesh.surface_end()
 	return mesh
+
+
+## THE MAX BOUNDING BOX as eight CORNER BRACKETS, not a full cage.
+##
+## The shipped budget is 250 x 120 x 250 m against a 5 m starting hull: twelve full edges at that
+## scale is a box drawn around the entire grid floor and reads as scenery. Eight short brackets read
+## as LIMITS, which is the CAD convention and is what the thing actually is.
+##
+## [param half] is half the budget per axis; [param fraction] how far along each edge a bracket
+## reaches. Pure geometry - the colour is the caller's, because the colour IS the readout: line
+## while the ship fits, warning the moment it does not.
+static func brackets(mat: StandardMaterial3D, half: Vector3, fraction: float) -> ImmediateMesh:
+	var arm: Vector3 = Vector3(
+		minf(half.x * fraction, half.x),
+		minf(half.y * fraction, half.y),
+		minf(half.z * fraction, half.z)
+	)
+	var mesh: ImmediateMesh = ImmediateMesh.new()
+	mesh.surface_begin(Mesh.PRIMITIVE_LINES, mat)
+	for sx: int in [-1, 1]:
+		for sy: int in [-1, 1]:
+			for sz: int in [-1, 1]:
+				var corner: Vector3 = Vector3(half.x * sx, half.y * sy, half.z * sz)
+				mesh.surface_add_vertex(corner)
+				mesh.surface_add_vertex(corner - Vector3(arm.x * sx, 0.0, 0.0))
+				mesh.surface_add_vertex(corner)
+				mesh.surface_add_vertex(corner - Vector3(0.0, arm.y * sy, 0.0))
+				mesh.surface_add_vertex(corner)
+				mesh.surface_add_vertex(corner - Vector3(0.0, 0.0, arm.z * sz))
+	mesh.surface_end()
+	return mesh
+
+
+## Does [param box] reach outside [param half] on any axis? Measured from the SCENE bounds rather
+## than by re-running the metrics pass, which costs a full attach solve and this runs every sync.
+static func outside(box: AABB, half: Vector3) -> bool:
+	var reach: Vector3 = Vector3(
+		maxf(absf(box.position.x), absf(box.end.x)),
+		maxf(absf(box.position.y), absf(box.end.y)),
+		maxf(absf(box.position.z), absf(box.end.z))
+	)
+	return reach.x > half.x or reach.y > half.y or reach.z > half.z

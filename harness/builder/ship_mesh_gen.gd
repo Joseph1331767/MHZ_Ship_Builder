@@ -452,6 +452,9 @@ func _build_wire(m: Mesh) -> Mesh:
 		return null
 	var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
 	var idx: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
+	var norms: PackedVector3Array = PackedVector3Array()
+	if arrays.size() > Mesh.ARRAY_NORMAL and arrays[Mesh.ARRAY_NORMAL] != null:
+		norms = arrays[Mesh.ARRAY_NORMAL]
 	if verts.is_empty() or idx.is_empty():
 		return null
 
@@ -468,6 +471,14 @@ func _build_wire(m: Mesh) -> Mesh:
 	out_arrays.resize(Mesh.ARRAY_MAX)
 	out_arrays[Mesh.ARRAY_VERTEX] = verts
 	out_arrays[Mesh.ARRAY_INDEX] = lines
+	# NORMALS ON A LINE MESH, which looks odd until you want the edges LIT. They are the solid's own
+	# vertex normals, carried across unchanged, and every mode but CLAY ignores them because its wire
+	# material is unshaded. CLAY's is not: the author, 2026-09-28 - "i can see the wire frames outside
+	# of the flashlight. they should not be lit up, however they should shine white when flashlight is
+	# on them". Without a normal a lit line has nothing to compute N dot L against and stays dark
+	# everywhere, which is the same failure in the other direction.
+	if norms.size() == verts.size():
+		out_arrays[Mesh.ARRAY_NORMAL] = norms
 	var am: ArrayMesh = ArrayMesh.new()
 	am.add_surface_from_arrays(Mesh.PRIMITIVE_LINES, out_arrays)
 	return am

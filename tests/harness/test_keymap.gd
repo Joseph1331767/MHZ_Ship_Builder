@@ -255,8 +255,11 @@ func test_a_row_that_is_not_live_explains_itself() -> void:
 ## become a LIVE row. If you have fixed one, change its row AND this assertion in the same commit.
 func test_the_known_broken_bindings_are_on_the_record() -> void:
 	var expected: Dictionary = {
-		"undo": ShipKeymap.STATUS_DEAD,  # B1 - the 3D view eats CTRL+Z as a Z axis lock
-		"redo": ShipKeymap.STATUS_DEAD,  # B1 - and CTRL+Y as a Y axis lock
+		# B1 IS FIXED: _dispatch_press refuses any chord carrying CTRL before the axis-lock table
+		# is consulted, so CTRL+Z and CTRL+Y reach the builder again. Both were STATUS_DEAD here
+		# for as long as the defect lasted; the note on the rows keeps the record.
+		"undo": ShipKeymap.STATUS_LIVE,
+		"redo": ShipKeymap.STATUS_LIVE,
 		"scale_wheel": ShipKeymap.STATUS_LIES,  # B7 - the legend prints WHEEL ZOOM
 		"snap_bypass": ShipKeymap.STATUS_UNBOUND,  # B8 - no key survived the Shift reassignment
 		"isolate_exit": ShipKeymap.STATUS_DEAD,  # ESC is promised and never leaves isolation
@@ -282,7 +285,7 @@ func test_the_known_broken_bindings_are_on_the_record() -> void:
 ## instead of the building one (ADR 0049).
 func test_the_fly_rows_are_listed_at_their_own_context() -> void:
 	var fly: Array[Dictionary] = ShipKeymap.for_context(ShipKeymap.CONTEXT_FLY)
-	assert_int(fly.size()).is_equal(13)
+	assert_int(fly.size()).is_equal(15)
 	for row: Dictionary in fly:
 		(
 			assert_str(str(row[ShipKeymap.FIELD_GROUP]))

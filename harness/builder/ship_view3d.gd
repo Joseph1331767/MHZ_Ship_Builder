@@ -346,6 +346,7 @@ func _ready() -> void:
 	_viewport.add_child(_fly)
 	_fly.fly_moved.connect(_on_fly_moved)
 	_fly.exit_requested.connect(_on_fly_exit)
+	_fly.solid_toggled.connect(_on_fly_solid)
 
 	_grid = MeshInstance3D.new()
 	_grid.name = "Grid"
@@ -383,7 +384,14 @@ func _ready() -> void:
 	add_child(_gate_timer)
 
 	# Every node the mode drives now exists, so it can be handed them once and never reach back.
-	fly = ShipFlyMode.new(_camera_rig, _fly, _scene, _env, _grid, _bbox_cage, _com_cross, _light)
+	# SOLID WALLS while flying, off until asked for (ADR 0049). Its own node so the colliders it
+	# builds live outside the ship's own tree and cannot be mistaken for it.
+	var collide: ShipFlyCollide = ShipFlyCollide.new()
+	collide.name = "FlyCollide"
+	_viewport.add_child(collide)
+	fly = ShipFlyMode.new(
+		_camera_rig, _fly, _scene, _env, _grid, _bbox_cage, _com_cross, _light, _explode, collide
+	)
 	fly.changed.connect(_refresh_hints)
 
 	_rebuild_grid()
@@ -839,6 +847,9 @@ func get_explode_view() -> ShipExplodeView:
 
 
 func _on_explode_finished(_modules: int, _seams: int, _ms: int) -> void:
+	# The pieces the fly colliders were built from have just been replaced.
+	if fly != null:
+		fly.rebuild_solids()
 	if not _exploded or _explode == null:
 		return
 	var box: AABB = _explode.bounds()
@@ -876,6 +887,10 @@ func _on_fly_moved() -> void:
 	# only the shader's distance cue still needs feeding.
 	_push_depth_range()
 	_refresh_hints()
+
+
+func _on_fly_solid() -> void:
+	fly.set_solid(not fly.is_solid())
 
 
 func _on_fly_exit(restore: bool, frame: bool) -> void:
@@ -1937,43 +1952,10 @@ func _rebuild_bbox_cage() -> void:
 		_bbox_cage.visible = false
 		return
 	# The colour is the whole readout: line while the ship fits, warning the moment it does not.
-	var over: bool = _bbox_over(half)
+	var over: bool = _scene != null and ShipViewGrid.outside(_scene.scene_aabb(), half)
 	var tint: Color = _role_color("warning" if over else "grid", Color(0.08, 0.20, 0.22))
-	var arm: Vector3 = Vector3(
-		minf(half.x * BBOX_BRACKET_FRACTION, half.x),
-		minf(half.y * BBOX_BRACKET_FRACTION, half.y),
-		minf(half.z * BBOX_BRACKET_FRACTION, half.z)
-	)
-	var mesh: ImmediateMesh = ImmediateMesh.new()
-	mesh.surface_begin(Mesh.PRIMITIVE_LINES, _line_material(tint))
-	for sx: int in [-1, 1]:
-		for sy: int in [-1, 1]:
-			for sz: int in [-1, 1]:
-				var corner: Vector3 = Vector3(half.x * sx, half.y * sy, half.z * sz)
-				mesh.surface_add_vertex(corner)
-				mesh.surface_add_vertex(corner - Vector3(arm.x * sx, 0.0, 0.0))
-				mesh.surface_add_vertex(corner)
-				mesh.surface_add_vertex(corner - Vector3(0.0, arm.y * sy, 0.0))
-				mesh.surface_add_vertex(corner)
-				mesh.surface_add_vertex(corner - Vector3(0.0, 0.0, arm.z * sz))
-	mesh.surface_end()
-	_bbox_cage.mesh = mesh
+	_bbox_cage.mesh = ShipViewGrid.brackets(_line_material(tint), half, BBOX_BRACKET_FRACTION)
 	_bbox_cage.visible = true
-
-
-## Whether the CURRENT ship reaches outside the cage, measured from the parts already resolved in
-## the scene rather than by re-running the metrics pass - this runs on every sync and the metrics
-## bbox costs a full attach solve.
-func _bbox_over(half: Vector3) -> bool:
-	if _scene == null:
-		return false
-	var box: AABB = _scene.scene_aabb()
-	var reach: Vector3 = Vector3(
-		maxf(absf(box.position.x), absf(box.end.x)),
-		maxf(absf(box.position.y), absf(box.end.y)),
-		maxf(absf(box.position.z), absf(box.end.z))
-	)
-	return reach.x > half.x or reach.y > half.y or reach.z > half.z
 
 
 ## A line that IGNORES DEPTH, for a mark that has to be found rather than looked at.

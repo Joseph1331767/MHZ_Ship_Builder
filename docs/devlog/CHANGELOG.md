@@ -4507,3 +4507,87 @@ have failed identically**, and that palette exists to make a maxed budget imposs
 **gdUnit4 491/491**; gdlint clean; selfcheck PASSED; validator PASSED (0 warnings); resolve, explode
 and visual (5 modes) PASSED; captures show uniform blue clay, per-face shading, visible tunnels and
 visible framing.
+
+---
+
+## [2026-09-28] SPACE halts you, walls are solid, the wire stops glowing, every button teaches its key
+
+Four asks from a fly-mode test, all landed.
+
+### The wireframe was glowing through the dark
+
+> "i can see the wire frames outside of the flashlight. they should not be lit up, however they
+> should shine white when flashlight is on them."
+
+The wire material was UNSHADED, so it drew at full brightness whatever the light was doing - every
+edge of the whole ship shone through the void and gave the silhouette away, which is the exact
+opposite of carrying a torch. In CLAY it is shaded now: an edge outside the beam falls to the ambient
+floor (zero while flying) and one inside it goes white.
+
+It needed a change one layer down: **a line mesh carries no normals**, so a lit line has nothing to
+compute N dot L against and would have gone black everywhere instead. `ShipMeshGen` now writes the
+solid's own vertex normals onto the wire mesh. Every other mode ignores them.
+
+### SPACE halts
+
+> "i need space to halt the player to rest (think cmputer in game that perfectly counters player
+> movement via thrust as a mental model)."
+
+SPACE is the handbrake; rise moved to `R`; `X` still brakes as an alias. The mental model is in the
+constant's docstring now, because it explains the implementation: it is counter-THRUST with authority
+of its own rather than damping turned up, so it always wins and lands exactly on zero instead of
+overshooting into a reverse drift.
+
+### Solid walls, inner and outer
+
+> "i need a btn on screen when in fly mode that turns on collision both inner and outer. and a hot
+> key for it"
+
+`ShipFlyCollide`: a GHOST/SOLID button that appears only while flying, `C` to toggle, off by default.
+
+**Trimesh shapes, and that is the whole point of "inner and outer".** The picking bodies are CONVEX
+hulls - a convex hull of a hollow room is a solid block, so with those you could not enter a room at
+all, and once inside you could leave through a wall. A `ConcavePolygonShape3D` built from the drawn
+triangles is the actual surface.
+
+**Resolved by moving a body, not by raycasting.** FOLLOWUPS records that concave bodies get no
+raycast hits in this SubViewport; rather than re-fight that, `move_and_collide` sweeps a sphere - a
+physics query, not a ray - and slides along a hull instead of stopping dead, which is also the nicer
+feel. Its own collision layer, so picking cannot start returning it.
+
+**Verified, not asserted**: `tests/harness/test_fly_collide.gd` - a step from z=12 to z=-12 through a
+4 m box lands at **z=2.44** (the 2 m surface plus the 0.35 m body radius plus the contact margin),
+and after `clear()` the same step passes straight through. Plus: a line mesh contributes no collider,
+and a blocked step keeps only the velocity along the wall.
+
+### Every button teaches its own hotkey
+
+> "ALL Btns with hotkeys in all view modes should have the hotkey appear as the btn text when
+> hovering the btn for easy learning. (can also appear in the directive/hint box)"
+
+`ShipHotkeys`: hover a button and its label swaps for the chord, the tooltip says both, and the hint
+bar says it in a sentence. The chord comes from `ShipKeymap`, never from a literal, so a rebinding
+changes the button and the key legend together - and a binding the table records as DEAD or LYING is
+never advertised. **Nothing moves when it swaps**: the button's minimum width is set to the wider of
+the two strings at registration, because a control that jumps while you are aiming at it is worse
+than no hint.
+
+### And one stale record found by building it
+
+`ShipKeymap` still recorded `undo` and `redo` as **STATUS_DEAD** with the note "the 3D view eats
+CTRL+Z as a Z axis lock". That was fixed on 2026-09-27 by the CTRL guard in `_dispatch_press`, and
+nobody updated the table - so the hotkey hint would have refused to advertise CTRL+Z on the UNDO
+button, correctly, for a defect that no longer existed. Both rows are LIVE again and the test that
+pins the known-broken list moved with them.
+
+### A fourth extraction
+
+`ship_builder.gd` passed the 2000-line cap; `ShipFlyToolbar` (the FLY and SOLID buttons, the render
+type they force, and the palette variant that goes with it - one decision, one place) came out, and
+`ShipViewGrid` took the bounding-box brackets so `ship_view3d.gd` stayed under too.
+
+### Verified
+
+**gdUnit4 495/495** (4 new on collision); gdlint clean; selfcheck PASSED; data validator PASSED
+(0 warnings); resolve, explode and visual (5 modes) PASSED; capture shows the wire dark outside the
+beam, LAND/GHOST on the toolbar and CLAY in the dropdown.

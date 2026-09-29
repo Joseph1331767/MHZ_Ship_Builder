@@ -63,9 +63,6 @@ const LINK_CYCLE: Array = ["wall", "doorway", "hatched", "open"]
 ## Where the EDIT menu starts, in DESIGN pixels: clear of the layers panel above it.
 const EDIT_MENU_TOP: float = 96.0
 
-## How hard the palette quantizer is dithered while CLAY is up. Far above the shipped default,
-## because CLAY is the only mode with a genuinely continuous gradient to preserve - see _wear_clay.
-const CLAY_DITHER: float = 0.22
 
 const HEADER_HEIGHT: int = 30
 const LEFT_WIDTH: int = 236
@@ -125,7 +122,8 @@ var _hint_bar: ShipHintBar = null
 ## The raw line the 78 `set_status()` callers write, handed on to the hint as STATE_STATUS.
 var _status_text: String = ""
 var _layers: ShipLayersControl = null
-var _fly_button: Button = null
+var _hotkeys: ShipHotkeys = null
+var _fly_toolbar: ShipFlyToolbar = null
 var _edit_tool: ShipEditTool = null
 var _undo_button: Button = null
 var _redo_button: Button = null
@@ -210,6 +208,7 @@ func _ready() -> void:
 	_build_post_process()
 	_view.setup(_ship_theme, self)
 	_layers.use(_view)
+	_fly_toolbar.use(_view, _ui_mode, _ship_theme, _mode_option, _hotkeys, _placement_busy)
 	_edit_tool.use(_view)
 	_explode_opts = ShipExplodeControl.new(
 		_view.get_parent() as Control, _view, _config, _ship_theme
@@ -832,6 +831,25 @@ func _placing_name() -> String:
 	return str(_placement.get("_family_id")).replace("_", " ").to_upper()
 
 
+## A button is under the pointer and it has a key. Say so in the hint bar as well as on the button -
+## "can also appear in the directive/hiunt box" (2026-09-28) - so a player reading the directive
+## learns the shortcut without having to look back up at the toolbar.
+func _on_hotkey_hovered(action: String, chord: String) -> void:
+	if action.is_empty():
+		set_status("")
+	else:
+		var row: Dictionary = ShipKeymap.row_for(action)
+		var what: String = str(row.get(ShipKeymap.FIELD_LABEL, action)).to_upper()
+		set_status("%s  -  PRESS %s" % [what, chord])
+	_refresh_hint()
+
+
+## Is a placement live? ShipFlyToolbar asks before entering fly, because the builder owns the
+## placement and the toolbar should not learn about it.
+func _placement_busy() -> bool:
+	return _placement != null and _placement.active
+
+
 func _refresh_hint() -> void:
 	if _hint_bar != null:
 		_hint_bar.show_hint(ShipHintText.resolve(_hint_state()))
@@ -1307,6 +1325,15 @@ func _build_layout() -> void:
 
 
 func _build_header() -> PanelContainer:
+	# BEFORE any button is made: _make_button registers with this, and a register that does not exist
+	# yet silently teaches nothing.
+	if _hotkeys == null:
+		_hotkeys = ShipHotkeys.new()
+		_hotkeys.hovered.connect(_on_hotkey_hovered)
+	if _fly_toolbar == null:
+		_fly_toolbar = ShipFlyToolbar.new()
+		_fly_toolbar.say.connect(set_status)
+		_fly_toolbar.changed.connect(_refresh_hint)
 	var frame: PanelContainer = PanelContainer.new()
 	frame.name = "Header"
 	frame.custom_minimum_size = Vector2(0.0, ShipTheme.pxf(float(HEADER_HEIGHT)))
@@ -1332,9 +1359,9 @@ func _build_header() -> PanelContainer:
 	bar.add_child(_make_button("OPEN", _on_open_pressed))
 	bar.add_child(_make_button("SAVE", _on_save_pressed))
 	bar.add_child(VSeparator.new())
-	_undo_button = _make_button("UNDO", undo)
+	_undo_button = _make_button("UNDO", undo, "undo")
 	bar.add_child(_undo_button)
-	_redo_button = _make_button("REDO", redo)
+	_redo_button = _make_button("REDO", redo, "redo")
 	bar.add_child(_redo_button)
 	bar.add_child(VSeparator.new())
 
@@ -1359,15 +1386,11 @@ func _build_header() -> PanelContainer:
 	_view_toggles = ShipViewToggles.new(bar, _ship_theme)
 
 	bar.add_child(_make_button("HELP", _on_help_pressed))
-	bar.add_child(_make_button("FRAME", _on_frame_pressed))
-	_explode_button = _make_button("EXPLODE", _on_explode_pressed)
+	bar.add_child(_make_button("FRAME", _on_frame_pressed, "frame_all"))
+	_explode_button = _make_button("EXPLODE", _on_explode_pressed, "explode_toggle")
 	bar.add_child(_explode_button)
-	# FLY (ADR 0049). Named so ShipUiMode.SHOWN_FROM can gate it by rung.
-	_fly_button = _make_button("FLY", _on_fly_pressed)
-	_fly_button.tooltip_text = (
-		"FLY AROUND AND INSIDE THE SHIP - W A S D, SPACE AND Z, X TO STOP, V TO COME BACK"
-	)
-	bar.add_child(_fly_button)
+	# FLY and SOLID, and the render type they force with them, all live in ShipFlyToolbar.
+	_fly_toolbar.build(bar, _make_button)
 	_edit_button = _make_button("EDIT", _on_edit_pressed)
 	_edit_button.tooltip_text = "SWAP BETWEEN THE BAKED MESHES AND THE SHAPES YOU EDIT"
 	bar.add_child(_edit_button)
@@ -1387,12 +1410,17 @@ func _build_header() -> PanelContainer:
 ## NAMED FROM ITS LABEL, so [ShipUiMode] can address a button without matching on display text -
 ## EXPLODE reads ASSEMBLE once the view is exploded and ROOMS: PIECES reads ROOMS: WHOLE, while a
 ## node name set at build time never moves.
-func _make_button(label: String, handler: Callable) -> Button:
+## [param action] is the [ShipKeymap] action this button is the on-screen twin of. Given one, the
+## button teaches its own hotkey: hovering swaps the label for the chord and the hint bar says the
+## same thing in a sentence (see [ShipHotkeys]). Omitted, the button behaves exactly as before.
+func _make_button(label: String, handler: Callable, action: String = "") -> Button:
 	var b: Button = Button.new()
 	b.name = label
 	b.text = label
 	b.focus_mode = Control.FOCUS_NONE
 	b.pressed.connect(handler)
+	if _hotkeys != null and not action.is_empty():
+		_hotkeys.watch(b, action)
 	return b
 
 
@@ -1659,79 +1687,8 @@ func _on_pick_cleared() -> void:
 func _on_mode_selected(index: int) -> void:
 	if _view != null:
 		_view.set_display_mode(index)
-	_wear_clay(index == ShipSceneBuilder.DisplayMode.CLAY)
-
-
-## CLAY swaps the whole sixteen-entry LUT for the blue one, so the console goes with the ship - the
-## alternative is blue clay sitting in a teal frame, which reads as a bug. A budget alert still
-## beats it: ShipTheme.set_variant defers while one is up (ADR 0049).
-##
-## AND IT TURNS THE DITHER UP, which is what makes a real light look real. CLAY is the one mode
-## whose shading is a SMOOTH continuous falloff rather than bands chosen from the palette, and a
-## smooth falloff pushed through a 16-entry quantizer comes out as hard concentric rings - which is
-## why the author said a genuine SpotLight3D "just doesnt read as a real light seems still very
-## faked". It was a real light; the quantizer was posterizing it. At the shipped 0.06 the dither is
-## a texture; at CLAY_DITHER it actually dissolves the boundary between two palette entries, and the
-## falloff reads continuous again.
-func _wear_clay(on: bool) -> void:
-	if _ship_theme == null:
-		return
-	_ship_theme.set_variant("clay" if on else "")
-	_ship_theme.set_dither_strength(CLAY_DITHER if on else ShipTheme.DITHER_DEFAULT)
-
-
-## FLY (ADR 0049). The author asked twice - "also camera fly around modes", then in full
-## detail, then "note i dont see flying mode either..". Entering forces CLAY and the void;
-## leaving puts back exactly what was there.
-##
-## BASIC FLIES TOO, with heavier damping and direct look instead of torque (docs/future/ux.md Q15):
-## "the little kids mode cannot fly" is the version a child would resent.
-func _on_fly_pressed() -> void:
-	if _view == null:
-		return
-	if _view.fly.is_flying():
-		_view.fly.leave(true, false)
-		# The view has already put its own render type back; follow it with the dropdown and the
-		# palette so all three agree again.
-		_sync_render_type()
-	else:
-		# fly.enter() FORCES CLAY on the view, and the toolbar has to be told or it goes on reading
-		# SHADED+WIRE over a blue screen - "the toolbar label lies about what is on screen", which
-		# the dropdown's own comment already warns about. The VIEW remembers the previous mode and
-		# restores it on the way out, so nothing is stashed here.
-		var basic: bool = _ui_mode != null and _ui_mode.level == ShipUiMode.Level.BASIC
-		# REFUSED while something else owns the view: a live placement, or a handle grab in
-		# progress. Read off the view the same way STATE_PIVOT_HELD is, so the mode class stays
-		# free of any knowledge of the view's gesture state.
-		var busy: bool = _placement != null and _placement.active
-		busy = busy or int(_view.get("_handle_drag")) != 0
-		if not _view.fly.enter(basic, busy):
-			# Refused: a live placement or a handle drag owns the view. Say why rather than doing
-			# nothing, which reads as a dead button.
-			set_status("FINISH PLACING FIRST, THEN FLY")
-			return
-		_sync_render_type()
-	_refresh_fly_button()
-	_refresh_hint()
-
-
-## Point the dropdown and the console palette at whatever render type the VIEW is actually showing.
-## The view is the authority here, because fly changes it without going through the toolbar.
-func _sync_render_type() -> void:
-	if _view == null or _mode_option == null:
-		return
-	var mode: int = _view.get_display_mode()
-	for i: int in _mode_option.item_count:
-		if _mode_option.get_item_id(i) == mode:
-			_mode_option.select(i)
-			break
-	_wear_clay(mode == ShipSceneBuilder.DisplayMode.CLAY)
-
-
-func _refresh_fly_button() -> void:
-	if _fly_button == null or _view == null:
-		return
-	_fly_button.text = "LAND" if _view.fly.is_flying() else "FLY"
+	if _fly_toolbar != null:
+		_fly_toolbar.wear_clay(index == ShipSceneBuilder.DisplayMode.CLAY)
 
 
 func _on_frame_pressed() -> void:

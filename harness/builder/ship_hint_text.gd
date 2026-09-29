@@ -502,7 +502,7 @@ const CHIPS: Dictionary = {
 	ID_MODAL_DIALOG: [],
 	ID_BAKING: [],
 	ID_TYPING: [["enter", "SET"], ["cancel", "DROP"]],
-	ID_FLY: [["brake", "STOP"], ["land", "LAND"], ["fast", "FAST"]],
+	ID_FLY: [["brake", "STOP"], ["land", "LAND"], ["solid", "WALLS"]],
 	ID_DRAG_RING: [["free", "FREE"], ["cancel", "BACK"]],
 	ID_DRAG_STRETCH: [["cancel", "BACK"]],
 	ID_DRAG_OFFSET: [["free", "FREE"]],
@@ -570,9 +570,10 @@ const CHORD_FALLBACK: Dictionary = {
 	# FLY (ADR 0049). "land" is deliberately NOT "cancel": `diegetic_host.gd` eats ESCAPE to unfocus
 	# the device, so a mode whose only advertised exit is ESC would be a trap in the shipping path.
 	# V is the guaranteed exit and is the same key that entered.
-	"brake": "X",
+	"brake": "SPACE",
 	"land": "V",
 	"roll": "Q/E",
+	"solid": "C",
 }
 
 ## The NEXT button, in the order it asks (ux.md 3.2.1: "the highest-priority blocker"). It reads

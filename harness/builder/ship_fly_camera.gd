@@ -30,6 +30,10 @@ extends Node3D
 ## the torch. Named to match [signal OrbitCamera.camera_moved]'s role without colliding.
 signal fly_moved
 
+## Emitted when `C` is pressed: solid walls on or off. [ShipFlyMode] owns the state, so this only
+## reports the press.
+signal solid_toggled
+
 ## Emitted when a key that leaves the mode was pressed. [param restore] true means "put the orbit
 ## camera back exactly as it was" (V / ESC); false means "keep looking at what I am looking at"
 ## (ENTER). [param frame] true means "and frame the whole ship" (F).
@@ -48,12 +52,17 @@ const TORQUE_PER_PX: float = 2.5
 const LOOK_DEG_PER_PX: float = 0.22
 
 ## Which held key contributes what. Thrust is body-frame: x strafe, y rise, z forward (-Z).
+##
+## RISE MOVED TO `R` so SPACE could become the handbrake. The author, 2026-09-28: "i need space
+## to halt the player to rest (think cmputer in game that perfectly counters player movement via
+## thrust as a mental model)". SPACE is the biggest key on the board and stopping is what you reach
+## for in a panic, so it gets that key rather than a secondary axis. `X` still brakes too.
 const THRUST_KEYS: Dictionary = {
 	KEY_W: Vector3(0.0, 0.0, -1.0),
 	KEY_S: Vector3(0.0, 0.0, 1.0),
 	KEY_A: Vector3(-1.0, 0.0, 0.0),
 	KEY_D: Vector3(1.0, 0.0, 0.0),
-	KEY_SPACE: Vector3(0.0, 1.0, 0.0),
+	KEY_R: Vector3(0.0, 1.0, 0.0),
 	KEY_Z: Vector3(0.0, -1.0, 0.0),
 }
 
@@ -86,6 +95,10 @@ var _looking: bool = false
 var _look_torque: Vector3 = Vector3.ZERO
 var _flying: bool = false
 
+## Set by [ShipFlyMode] when collision is switched on; null the rest of the time, which is the
+## common case and costs a null check per tick.
+var _collide: ShipFlyCollide = null
+
 
 func _ready() -> void:
 	if _camera == null:
@@ -107,6 +120,11 @@ func get_camera() -> Camera3D:
 
 func is_flying() -> bool:
 	return _flying
+
+
+## Hand the rig the collider to obey, or null to pass through everything as before.
+func use_collider(c: ShipFlyCollide) -> void:
+	_collide = c
 
 
 ## Where the rig is, and where it looks - what the torch is fed from.
@@ -221,8 +239,12 @@ func _handle_hold_key(key: InputEventKey) -> bool:
 		else:
 			_held.erase(key.keycode)
 		return true
+	if key.keycode == KEY_C:
+		if key.pressed:
+			solid_toggled.emit()
+		return true
 	match key.keycode:
-		KEY_X:
+		KEY_SPACE, KEY_X:
 			_brake = key.pressed
 		KEY_SHIFT:
 			_boost = key.pressed
@@ -310,7 +332,19 @@ func _physics_process(delta: float) -> void:
 	input[ShipFlyState.PRECISE] = _precise
 
 	var before: Transform3D = transform
+	var was: Vector3 = _state.get(ShipFlyState.POS, Vector3.ZERO)
 	_state = ShipFlyState.step(_state, input, delta, ShipFlyState.tune(lin_damp, ang_damp))
+	# COLLISION, when it is switched on: the step is resolved against the hull and the velocity
+	# loses whatever was pointing into it, so pressing against a wall does not store up speed that
+	# fires you off the moment the wall ends.
+	if _collide != null and _collide.is_built():
+		var wanted: Vector3 = _state[ShipFlyState.POS]
+		var landed: Vector3 = _collide.resolve(was, wanted)
+		if not landed.is_equal_approx(wanted):
+			_state[ShipFlyState.POS] = landed
+			_state[ShipFlyState.VEL] = _collide.slide_velocity(
+				_state[ShipFlyState.VEL], landed, wanted
+			)
 	transform = ShipFlyState.transform_of(_state)
 	# Only report real movement: the torch and the distance cue are both rebuilt on this signal.
 	if not before.is_equal_approx(transform):

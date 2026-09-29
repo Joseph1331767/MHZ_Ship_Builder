@@ -1519,6 +1519,11 @@ func _wire_material(mode: int, selected: bool) -> StandardMaterial3D:
 	if _wire_materials.has(key):
 		return _wire_materials[key]
 
+	if mode == DisplayMode.CLAY:
+		var lit: StandardMaterial3D = _clay_wire_material()
+		_wire_materials[key] = lit
+		return lit
+
 	var m: StandardMaterial3D = StandardMaterial3D.new()
 	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	m.cull_mode = BaseMaterial3D.CULL_DISABLED
@@ -1540,6 +1545,30 @@ func _wire_material(mode: int, selected: bool) -> StandardMaterial3D:
 		m.albedo_color.a = 0.65
 
 	_wire_materials[key] = m
+	return m
+
+
+## THE WIRE IN CLAY IS LIT, and it is the only mode where it is.
+##
+## The author, 2026-09-28: "i can see the wire frames outside of the flashlight. they should not be
+## lit up, however they should shine white when flashlight is on them."
+##
+## An UNSHADED wire draws at full brightness whatever the light is doing, so in the void every edge
+## of the whole ship glowed through the dark and gave the silhouette away - the exact opposite
+## of carrying a torch. Shaded, an edge outside the beam falls to the ambient floor (which is zero
+## while flying) and an edge inside it goes white, which is what an edge catching a light does.
+##
+## IT NEEDS THE NORMALS [ShipMeshGen] now writes onto the line mesh. A line mesh normally carries
+## none, and without one there is nothing to compute N dot L against - every edge would stay black
+## instead, which is the same bug pointing the other way.
+func _clay_wire_material() -> StandardMaterial3D:
+	var m: StandardMaterial3D = StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_PER_PIXEL
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	# The brightest entry in the palette: an edge in the beam should read as a highlight.
+	m.albedo_color = _role_color("text")
+	m.roughness = 1.0
+	m.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
 	return m
 
 

@@ -123,9 +123,12 @@ const LABEL_MAX: int = 48
 ## with a bare keycode and no modifier test, and `_gui_input` then calls `accept_event()`, so with
 ## the 3D view focused - which it grabs on every left click - Ctrl+Z sets the Z axis lock and
 ## Ctrl+Y sets the Y one. The undo never runs and nothing on screen says so.
+## RETIRED(2026-09-27): "Dead while the 3D view has focus: _handle_axis_key takes the bare keycode,
+## so this sets an axis lock instead (ux.md B1)." FIXED - ShipView3D._dispatch_press now refuses any
+## chord carrying CTRL or META before the axis-lock table is consulted, so CTRL+Z and CTRL+Y reach
+## the builder. Both rows are LIVE again, and the note stays as the record of what B1 was.
 const NOTE_UNDO_SWALLOWED: String = (
-	"Dead while the 3D view has focus: _handle_axis_key takes the bare keycode, so this sets an "
-	+ "axis lock instead (ux.md B1)."
+	"Was dead while the 3D view had focus (ux.md B1); fixed by the CTRL guard in _dispatch_press."
 )
 
 ## The other half of B1, recorded on the lock rows as well as on the undo rows: whoever fixes one
@@ -180,6 +183,9 @@ const NOTE_FLY_DRIFT: String = (
 )
 const NOTE_FLY_EXIT: String = (
 	"V is the guaranteed exit and the same key that entered; the diegetic host eats ESC."
+)
+const NOTE_FLY_SOLID: String = (
+	"Off by default. Trimesh colliders, so the inner cavity stops you as well as the outer hull."
 )
 const NOTE_FLY_TORQUE: String = (
 	"Torque, not look: the drag leaves a spin behind. BASIC turns directly instead."
@@ -283,6 +289,20 @@ const ROWS: Array[Dictionary] = [
 		FIELD_TIER: TIER_SHAPE,
 		FIELD_GROUP: GROUP_LOOK,
 		FIELD_HANDLER: "harness/builder/ship_view3d.gd:_handle_left_button",
+		FIELD_STATUS: STATUS_LIVE,
+		FIELD_NOTE: "",
+	},
+	{
+		FIELD_ACTION: "fly_toggle",
+		FIELD_CHORD: "V",
+		FIELD_ALTS: [],
+		FIELD_CODE: KEY_V,
+		FIELD_MODS: MOD_NONE,
+		FIELD_LABEL: "Fly around and inside your ship",
+		FIELD_CONTEXT: CONTEXT_ALWAYS,
+		FIELD_TIER: TIER_BUILD,
+		FIELD_GROUP: GROUP_LOOK,
+		FIELD_HANDLER: "harness/builder/ship_builder.gd:_on_fly_pressed",
 		FIELD_STATUS: STATUS_LIVE,
 		FIELD_NOTE: "",
 	},
@@ -509,7 +529,7 @@ const ROWS: Array[Dictionary] = [
 		FIELD_TIER: TIER_BUILD,
 		FIELD_GROUP: GROUP_CHANGE,
 		FIELD_HANDLER: "harness/builder/ship_builder.gd:_handle_edit_hotkey",
-		FIELD_STATUS: STATUS_DEAD,
+		FIELD_STATUS: STATUS_LIVE,
 		FIELD_NOTE: NOTE_UNDO_SWALLOWED,
 	},
 	{
@@ -523,7 +543,7 @@ const ROWS: Array[Dictionary] = [
 		FIELD_TIER: TIER_BUILD,
 		FIELD_GROUP: GROUP_CHANGE,
 		FIELD_HANDLER: "harness/builder/ship_builder.gd:_handle_edit_hotkey",
-		FIELD_STATUS: STATUS_DEAD,
+		FIELD_STATUS: STATUS_LIVE,
 		FIELD_NOTE: NOTE_UNDO_SWALLOWED,
 	},
 	{
@@ -1255,13 +1275,15 @@ static func _fly_rows() -> Array[Dictionary]:
 		["fly_roll", "Q", ["E"], KEY_Q, "Roll left - E rolls right", ""],
 		["fly_pitch", "UP", ["DOWN"], KEY_UP, "Tip your nose up - DOWN tips it down", NOTE_FLY_DRIFT],
 		["fly_yaw", "LEFT", ["RIGHT"], KEY_LEFT, "Turn left - RIGHT turns right", NOTE_FLY_DRIFT],
-		["fly_brake", "X", [], KEY_X, "STOP - kills your drift and your spin", NOTE_FLY_DRIFT],
+		["fly_brake", "X", ["SPACE"], KEY_X, "STOP - kills your drift and your spin", NOTE_FLY_DRIFT],
 		["fly_fast", "SHIFT", [], KEY_SHIFT, "Three times the push while held", ""],
 		["fly_slow", "ALT", [], KEY_ALT, "A third of the push, for fine moves", ""],
 		["fly_look", "RMB DRAG", [], KEY_NONE, "Swing your view round", NOTE_FLY_TORQUE],
 		["fly_land", "V", ["ESC"], KEY_V, "Land - puts the view back exactly as it was", NOTE_FLY_EXIT],
 		["fly_land_fit", "F", [], KEY_F, "Land and fit the whole ship on screen", ""],
 		["fly_land_keep", "ENTER", [], KEY_ENTER, "Land looking where you are looking", NOTE_FLY_EXIT],
+		["fly_halt", "SPACE", ["X"], KEY_SPACE, "STOP - kills your drift and your spin", NOTE_FLY_DRIFT],
+		["fly_solid", "C", [], KEY_C, "Solid walls on or off - bump into the ship", NOTE_FLY_SOLID],
 	]
 	var out: Array[Dictionary] = []
 	for row: Array in spec:

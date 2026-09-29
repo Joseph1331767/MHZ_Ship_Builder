@@ -47,8 +47,15 @@ const ANG_DAMP: float = 0.35
 ## limit, not a physical one. Reached only by holding a torque key for several seconds.
 const MAX_SPIN: float = 100.0
 
-## Braking. `X` kills both momenta - the single most important key in the mode, because "I cannot
-## stop" is how a beginner abandons a flying camera. A full stop from terminal speed takes ~2 s.
+## THE HANDBRAKE. Kills linear AND angular momentum - the single most important control in the mode,
+## because "I cannot stop" is how a beginner abandons a flying camera.
+##
+## THE MENTAL MODEL IS A FLIGHT COMPUTER, not friction. The author: "a cmputer in game that
+## perfectly counters player movement via thrust". So it is counter-THRUST with authority of its
+## own rather than as damping turned up: it always wins, it is frame-rate independent, and
+## [method _toward_zero] lands it exactly on zero instead of overshooting into a reverse drift. A
+## full stop from terminal speed takes about two seconds, which reads as a ship arresting itself
+## rather than as a handbrake in a car.
 const BRAKE_A: float = 24.0
 const BRAKE_ANG: float = 240.0
 

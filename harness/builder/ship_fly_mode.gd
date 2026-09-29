@@ -76,6 +76,9 @@ var _cage: MeshInstance3D = null
 var _com: MeshInstance3D = null
 var _torch: SpotLight3D = null
 var _key: DirectionalLight3D = null
+var _collide: ShipFlyCollide = null
+var _explode: Node3D = null
+var _solid: bool = false
 var _return: Dictionary = {}
 var _prev_mode: int = -1
 var _key_was: float = 0.0
@@ -89,7 +92,9 @@ func _init(
 	grid: MeshInstance3D,
 	cage: MeshInstance3D,
 	com: MeshInstance3D,
-	key: DirectionalLight3D = null
+	key: DirectionalLight3D = null,
+	explode: Node3D = null,
+	collider: ShipFlyCollide = null
 ) -> void:
 	_rig = rig
 	_fly = fly
@@ -99,10 +104,52 @@ func _init(
 	_cage = cage
 	_com = com
 	_key = key
+	_explode = explode
+	_collide = collider
 
 
 func is_flying() -> bool:
 	return _fly != null and _fly.is_flying()
+
+
+## Are the hull surfaces solid right now?
+func is_solid() -> bool:
+	return _solid
+
+
+## SOLID WALLS ON OR OFF (ADR 0049) - "i need a btn on screen when in fly mode that turns on
+## collision both inner and outer" (2026-09-28).
+##
+## OFF BY DEFAULT, deliberately: the reason to fly is usually to LOOK, and a camera that snags on
+## geometry while you are inspecting something is infuriating. Building the colliders is deferred to
+## the moment it is switched on for the same reason - nobody pays for a trimesh of the whole ship
+## unless they have asked to bump into it.
+func set_solid(on: bool) -> void:
+	if on == _solid:
+		return
+	_solid = on
+	if _collide == null:
+		return
+	if on:
+		rebuild_solids()
+	else:
+		_collide.clear()
+	if _fly != null:
+		_fly.use_collider(_collide if on else null)
+	changed.emit()
+
+
+## Re-derive the colliders from what is currently drawn. Called when collision is switched on, and
+## again after a bake, because the pieces they were built from are replaced by then.
+func rebuild_solids() -> void:
+	if _collide == null or not _solid:
+		return
+	var roots: Array[Node3D] = []
+	if _scene != null:
+		roots.append(_scene)
+	if _explode != null:
+		roots.append(_explode)
+	_collide.build(roots)
 
 
 ## Metres per second, for the mode strip.
@@ -142,6 +189,9 @@ func enter(basic: bool, refuse: bool) -> bool:
 	# orbit. Anything else is a teleport and costs the player their bearings immediately.
 	var cam: Camera3D = _rig.get_camera()
 	_fly.begin(cam.global_transform if cam != null else Transform3D.IDENTITY)
+	if _solid:
+		rebuild_solids()
+		_fly.use_collider(_collide)
 	# AFTER begin(), so is_flying() is true and the torch is actually lit. Lighting it before would
 	# push strength 0 and leave the void pitch black until the first frame the rig happened to
 	# move, which on a still stick is never.
@@ -158,6 +208,11 @@ func leave(restore: bool = true, frame: bool = false) -> void:
 		return
 	var pose: Dictionary = _fly.keep_view_pose(LOOK_AHEAD_M)
 	_fly.end()
+	# The colliders are only meaningful while something is flying, and a trimesh of the whole ship
+	# is not worth keeping around for the orbit view.
+	if _collide != null:
+		_collide.clear()
+		_fly.use_collider(null)
 	_set_void(false)
 	if _scene != null and _prev_mode >= 0:
 		_scene.set_display_mode(_prev_mode)
