@@ -86,6 +86,9 @@ const PICK_LAYER: int = 1
 ## Faceted solid shading — see _faceted_material. (FOLLOWUPS F7 is RESOLVED: real lights work
 ## here; the banding is a style choice, not a workaround.)
 const FACETED_SHADER: String = "res://shaders/part_faceted.gdshader"
+## THE CLAY VIEW's material — genuinely lit, and the one shader in this file that is. See
+## shaders/part_clay.gdshader for why it cannot be a StandardMaterial3D.
+const CLAY_SHADER: String = "res://shaders/part_clay.gdshader"
 ## The shader's own default cut plane: infinitely far behind everything (ADR 0028).
 ## The INTERIOR set's shading (ADR 0028): the cavity shades hard so it reads as a hollow, the
 ## far outer wall keeps a floor so the wall thickness reads, and the distance cue is light.
@@ -110,8 +113,13 @@ const FRESNEL_RIM_STRENGTH: float = 0.95
 const FRESNEL_RIM_POWER: float = 1.8
 const FRESNEL_AMBIENT: float = 0.04
 
-## DisplayMode.CLAY (ADR 0049). CLAY IS MATTE, and every number here says so: roughness 1, no
-## metal, no specular lobe. The light is the engine's - see [method _clay_material].
+## DisplayMode.CLAY (ADR 0049). The flat, evenly-lit, uniform-material read every 3D modelling
+## package has: "its a flat, shadow view, sometimes shows framing" (2026-09-28).
+##
+## ONE COLOUR ON EVERY PART, THE SELECTED ONE INCLUDED. A clay view that tinted the selection would
+## be a material view, which is the thing it exists not to be - "the selected node remained yellow
+## and it should be clay". Selection still reads, through the WIREFRAME, which is the "framing" in
+## the author's own description and is the convention every package follows.
 ##
 ## THE ALBEDO IS DELIBERATELY BRIGHT, and that is the whole lesson of FOLLOWUPS F7. A lit material
 ## MULTIPLIES its albedo by the incoming light, so it can only ever get DARKER than what is written
@@ -119,7 +127,9 @@ const FRESNEL_AMBIENT: float = 0.04
 ## the background. F7's "shaded materials render black" was a mid-dark teal albedo (palette index
 ## 5) doing exactly that, diagnosed as a lighting failure and left open for a month. Start bright,
 ## and let the light take it down.
-const CLAY_ROUGHNESS: float = 1.0
+const CLAY_ROUGHNESS: float = 0.92
+const CLAY_SPECULAR: float = 0.08
+const CLAY_RIM: float = 0.10
 
 ## Transparent-queue priorities of the gizmo's two passes. Both draw after every opaque part;
 ## the DIM pass (no depth test) draws first and everywhere, the BRIGHT pass (depth-tested)
@@ -1264,7 +1274,7 @@ func _solid_material(mode: int, selected: bool, flipped: bool) -> Material:
 		return _solid_materials[key]
 
 	if mode == DisplayMode.CLAY:
-		var clay: StandardMaterial3D = _clay_material(selected)
+		var clay: ShaderMaterial = _clay_material(selected)
 		_solid_materials[key] = clay
 		return clay
 	if mode == DisplayMode.INSIDE:
@@ -1363,20 +1373,28 @@ func _hidden_material() -> StandardMaterial3D:
 ## landed on the BACKGROUND entry under the quantizer. The same reasoning is already written out
 ## three hundred lines above for the X-RAY path; nobody connected it back to F7.
 ##
-## SO THE ALBEDO STARTS BRIGHT and the light brings it down. CULL_DISABLED because you fly INSIDE
-## these hulls and a culled back face is a hole you can see the void through; it also keeps a
-## mirrored twin's negative-determinant basis shading correctly with one material.
-func _clay_material(selected: bool) -> StandardMaterial3D:
-	var m: StandardMaterial3D = StandardMaterial3D.new()
-	# The clay palette variant makes `accent` a light blue and `selection` the amber that is held
-	# byte-identical across every variant, so a selected part still reads as selected in the void.
-	m.albedo_color = _role_color("selection" if selected else "accent")
-	m.shading_mode = BaseMaterial3D.SHADING_MODE_PER_PIXEL
-	m.metallic = 0.0
-	m.roughness = CLAY_ROUGHNESS
-	# Clay has no specular lobe. A highlight is wet plastic, which is what FRESNEL is for.
-	m.specular_mode = BaseMaterial3D.SPECULAR_DISABLED
-	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+## SO THE ALBEDO STARTS BRIGHT and the light brings it down.
+##
+## IT IS A SHADER, NOT A StandardMaterial3D, and that is not a preference. A standard material with
+## `cull_mode = DISABLED` shades a back face with its authored normal - pointing away from the
+## camera and away from every light - so it renders BLACK. The author hit it within minutes: "the
+## linking tunnels are pitch black regardless of lighting". Looking down a tunnel IS looking at back
+## faces, and so is standing in any hollow room this builder makes. `part_clay.gdshader` flips the
+## normal on back faces, exactly as `part_faceted.gdshader` has always done for the same reason.
+##
+## [param selected] is accepted and deliberately IGNORED - see the constants above.
+func _clay_material(_selected: bool) -> ShaderMaterial:
+	var m: ShaderMaterial = ShaderMaterial.new()
+	m.shader = load(CLAY_SHADER) as Shader
+	# A MID blue (`text_dim` is #5c8fc9 in the clay variant), not the bright `accent`. Two forces
+	# meet here and both were measured: too DARK and light multiplies it onto the background entry,
+	# which is F7; too BRIGHT and every face clips past 1.0 onto the top entry, which is the flat
+	# white blob the author got. Mid leaves range on both sides, which is what surface shading IS.
+	var c: Color = _role_color("text_dim")
+	m.set_shader_parameter("clay_color", Vector3(c.r, c.g, c.b))
+	m.set_shader_parameter("clay_roughness", CLAY_ROUGHNESS)
+	m.set_shader_parameter("clay_specular", CLAY_SPECULAR)
+	m.set_shader_parameter("clay_rim", CLAY_RIM)
 	return m
 
 

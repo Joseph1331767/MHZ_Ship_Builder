@@ -25,6 +25,12 @@ signal changed
 ## THE FLASHLIGHT IS A REAL [SpotLight3D] (ADR 0049, revised 2026-09-28) - real cone, real inverse
 ## -square falloff, real shadows, parented to the camera so it points where you look.
 ##
+## RETUNED 2026-09-28 after the author flew it: "makes viewing inside of the ship near impossible
+## like a flashlight in a mirror". That was not the void being wrong - the void is exactly what was
+## asked for, twice - it was the BEAM being wrong. At energy 6 with a 34-degree cone, a surface an
+## arm's length away saturates, and a saturated surface has no gradient left to read, so a room
+## you fly into turns into one flat white shape. Dimmer and much narrower reads as a torch.
+##
 ## IT WAS FAKED FIRST, AND THAT WAS A MISTAKE BUILT ON AN UNCLOSED BUG. FOLLOWUPS F7 recorded
 ## "shaded materials render black in this SubViewport" as OPEN, ROOT CAUSE UNKNOWN, and I treated
 ## it as a property of the engine. The author pushed back - "godot cant render real light sources,
@@ -32,21 +38,27 @@ signal changed
 ## settled it in one run: a shaded box in this very viewport reads luma 0.836 under the existing
 ## directional light, 0.922 with an OmniLight3D and 0.928 with a SpotLight3D. F7 was a dark albedo
 ## quantizing onto the background, not a lighting failure - see FOLLOWUPS F7, now RESOLVED.
-const TORCH_ENERGY: float = 6.0
+const TORCH_ENERGY: float = 3.4
 
-## The beam's half-angle in degrees - the flashlight's FOV. Tight enough to read as a torch rather
-## than as a headlamp, wide enough to see a room you are standing in.
-const TORCH_ANGLE_DEG: float = 34.0
+## The beam's half-angle in degrees - the flashlight's FOV. NARROW, deliberately: "flashlight fov
+## very narrow, the player should feel like they are in a black void and cant see anything outside
+## of their light source" (2026-09-28). A wide cone lights the whole room at once and the void stops
+## being a void.
+const TORCH_ANGLE_DEG: float = 19.0
 
 ## How hard the cone's edge falls off (0 hard, 1 soft) and how the brightness falls with distance.
 ## 1.0 is Godot's physically-plausible inverse-square; lower spreads the light further.
-const TORCH_ANGLE_FALLOFF: float = 0.35
-const TORCH_ATTENUATION: float = 1.1
+const TORCH_ANGLE_FALLOFF: float = 0.55
+const TORCH_ATTENUATION: float = 1.2
 
-## The beam reaches this many scene radii, so it lights the ship you are flying around whatever
-## size that ship is - the same reasoning the distance cue already uses.
-const TORCH_REACH_RADII: float = 3.0
-const TORCH_REACH_MIN_M: float = 25.0
+## The beam reaches this many scene radii. GENEROUS, and it has to be: Godot's spot attenuation is
+## `pow(1 - d/range, attenuation)`, which is essentially ZERO at the range itself. The first tuning
+## set the range to the scene radius and the camera enters fly at about that distance, so the beam
+## arrived at roughly 1% strength and the mode looked like the torch was not on at all. The CONE is
+## what makes the void a void; the range only has to be far enough not to be the thing that stops
+## the light.
+const TORCH_REACH_RADII: float = 6.0
+const TORCH_REACH_MIN_M: float = 50.0
 
 ## Where ENTER-to-keep-the-view puts the orbit rig's new focus point. The rig orbits a POINT, so
 ## leaving fly has to invent one, and the point you were flying toward is the only defensible pick.

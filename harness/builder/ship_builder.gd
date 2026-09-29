@@ -63,6 +63,10 @@ const LINK_CYCLE: Array = ["wall", "doorway", "hatched", "open"]
 ## Where the EDIT menu starts, in DESIGN pixels: clear of the layers panel above it.
 const EDIT_MENU_TOP: float = 96.0
 
+## How hard the palette quantizer is dithered while CLAY is up. Far above the shipped default,
+## because CLAY is the only mode with a genuinely continuous gradient to preserve - see _wear_clay.
+const CLAY_DITHER: float = 0.22
+
 const HEADER_HEIGHT: int = 30
 const LEFT_WIDTH: int = 236
 const RIGHT_WIDTH: int = 292
@@ -1661,9 +1665,19 @@ func _on_mode_selected(index: int) -> void:
 ## CLAY swaps the whole sixteen-entry LUT for the blue one, so the console goes with the ship - the
 ## alternative is blue clay sitting in a teal frame, which reads as a bug. A budget alert still
 ## beats it: ShipTheme.set_variant defers while one is up (ADR 0049).
+##
+## AND IT TURNS THE DITHER UP, which is what makes a real light look real. CLAY is the one mode
+## whose shading is a SMOOTH continuous falloff rather than bands chosen from the palette, and a
+## smooth falloff pushed through a 16-entry quantizer comes out as hard concentric rings - which is
+## why the author said a genuine SpotLight3D "just doesnt read as a real light seems still very
+## faked". It was a real light; the quantizer was posterizing it. At the shipped 0.06 the dither is
+## a texture; at CLAY_DITHER it actually dissolves the boundary between two palette entries, and the
+## falloff reads continuous again.
 func _wear_clay(on: bool) -> void:
-	if _ship_theme != null:
-		_ship_theme.set_variant("clay" if on else "")
+	if _ship_theme == null:
+		return
+	_ship_theme.set_variant("clay" if on else "")
+	_ship_theme.set_dither_strength(CLAY_DITHER if on else ShipTheme.DITHER_DEFAULT)
 
 
 ## FLY (ADR 0049). The author asked twice - "also camera fly around modes", then in full

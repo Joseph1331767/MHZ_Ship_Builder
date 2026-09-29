@@ -22,6 +22,9 @@ extends RefCounted
 signal palette_changed(palette: PackedColorArray)
 
 const PALETTE_SIZE: int = 16
+## The shipped dither strength. Named so a mode that needs more of it (CLAY, whose shading is a
+## continuous gradient rather than palette bands) can put it back afterwards.
+const DITHER_DEFAULT: float = 0.06
 const PALETTE_PATH: String = "res://data/palette.json"
 
 ## Design font sizes, in pixels AT THE DEVICE RESOLUTION (DESIGN_SIZE). Never used raw for a
@@ -105,7 +108,7 @@ var variants: Dictionary = {}
 var active_variant: String = ""
 
 var dither_enabled: bool = false
-var dither_strength: float = 0.06
+var dither_strength: float = DITHER_DEFAULT
 
 var _post_material: ShaderMaterial = null
 var _theme: Theme = null

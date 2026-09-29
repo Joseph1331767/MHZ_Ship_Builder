@@ -175,6 +175,7 @@ const HINT_MARGIN_PX: float = 6.0
 const DEPTH_MIN_RADIUS: float = 1.5
 
 
+
 ## FLY lives in [ShipFlyMode] - entering, the void, the torch and the way back are one cohesive
 ## unit that drives nodes handed to it and reaches back into nothing here. A public VAR, not four
 ## forwarding methods: this class stands at gdlint's thirty-public-method cap and gdlint counts
@@ -421,6 +422,14 @@ func on_palette_changed() -> void:
 		_env.environment = _build_environment()
 	if _scene != null:
 		_scene.refresh_materials()
+	# THE BAKED PIECES TOO, and they were being missed. `ShipExplodeView` holds its own dressed
+	# MeshInstance3Ds and only re-asks for materials when told, so a palette swap recoloured the
+	# preview parts and the whole console while every baked piece kept the palette it was dressed
+	# under. It showed as CLAY rendering TEAL parts on a navy background (2026-09-28), and it would
+	# have done the same to a BUDGET ALERT on a baked ship - the more serious case, since that
+	# palette exists to make a maxed budget impossible to miss.
+	if _explode != null:
+		_explode.refresh_materials()
 	_rebuild_grid()
 	_refresh_hints()
 
@@ -645,6 +654,11 @@ func set_selection(ids: PackedStringArray) -> void:
 func set_display_mode(mode: int) -> void:
 	if _scene != null:
 		_scene.set_display_mode(mode)
+	# CLAY carries its own environment (ambient occlusion, raised ambient), so switching the render
+	# type has to rebuild it - otherwise clay renders with the ordinary modes' lighting and the
+	# whole point of the view is missing.
+	if _env != null:
+		_env.environment = _build_environment()
 	if _explode != null:
 		_explode.set_display_mode(mode)
 
@@ -1837,24 +1851,13 @@ func _pid_under(local_pos: Vector2) -> String:
 
 
 func _build_environment() -> Environment:
-	var env: Environment = Environment.new()
-	env.background_mode = Environment.BG_COLOR
-	env.background_color = _role_color("background", Color(0.03, 0.07, 0.09))
-	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	# Ambient is a MULTIPLIER on albedo, so a dark ambient colour and a dark albedo compound:
-	# two mid-dark teals multiply to something the 16-entry quantizer rounds to background.
-	# Ambient therefore sits high on the ramp and the albedo carries the hue.
-	env.ambient_light_color = _role_color("accent", Color(0.47, 0.85, 0.67))
-	# ZERO WHILE FLYING, because this function is also how a palette change rebuilds the
-	# environment - and CLAY swaps the palette on the way INTO fly. Without this the void was
-	# switched on by ShipFlyMode and then switched straight back off again one signal later, which
-	# is the kind of bug that looks like the feature simply not working.
-	var flying: bool = fly != null and fly.is_flying()
-	env.ambient_light_energy = 0.0 if flying else 0.75
-	# Linear tonemap: anything filmic would re-map the ramp before the palette quantizer
-	# ever sees it, and the palette is meant to be the only colour authority.
-	env.tonemap_mode = Environment.TONE_MAPPER_LINEAR
-	return env
+	return ShipViewEnv.build(
+		_role_color("background", Color(0.03, 0.07, 0.09)),
+		_role_color("accent", Color(0.47, 0.85, 0.67)),
+		_role_color("line", Color(0.15, 0.48, 0.47)),
+		get_display_mode() == ShipSceneBuilder.DisplayMode.CLAY,
+		fly != null and fly.is_flying()
+	)
 
 
 func _rebuild_grid() -> void:

@@ -4433,3 +4433,77 @@ before a user who had never read it asked why the lights were fake.
 **gdUnit4 491/491**; gdlint clean; selfcheck PASSED; data validator PASSED (0 warnings); resolve,
 explode and visual (5 modes) PASSED; captures show a real cone, real falloff and a real shadow.
 
+---
+
+## [2026-09-28] CLAY is a clay view, and the tunnels were never missing
+
+> "are you familiar with 3d modeling software clay views? its a flat, shadow view, sometimes shows
+> framing.. thats what we are after." ... "the linking tunnels are pitch black regardless of
+> lighting. also the selected node remained yellow and it should be clay ... it looses the fine
+> surgace shading that helps the player identify the mesh and surface."
+
+And, correcting a wrong turn mid-fix: "dark pitch black environment is what we want, with a camera
+mounted headlamp ... flashlight fov very narrow". The void stays. It was never the problem.
+
+### Three wrong diagnoses before the right one, recorded because the pattern is the point
+
+1. **Back faces from inside** - wrong, and the author said so directly: "i wasnt looking down
+   tunnels. i was outside the ship."
+2. **Mirrored winding** - wrong, and measured: mirroring places REAL parts now, so a twin has a
+   positive-determinant basis. Source and twin both read `flipped=false` and both lit, in both modes.
+3. **The hidden WALLS layer** - wrong. Showing every layer changed the ship pixel count by zero.
+
+Three guesses from reading code, where one reproduction would have answered it.
+
+### What it actually was: exposure, and it is ONE bug not two
+
+Baked a carbon class and captured the same pose in SHADED and in CLAY. The ship silhouette was
+**138,628 px in both** - identical. The tunnels were never missing. They were **blown out**: ambient
+1.25 with the bright `accent` colour, plus the key light, put every face past 1.0; the 16-entry
+quantizer clipped them all onto the top palette entry; and the class came out as one flat white
+shape with the tunnels merged into the pods. "Pitch black" and "missing" were the same defect seen
+at two framings.
+
+Measured as a number - **luma spread across the ship own pixels**: 0.841 in SHADED, and 0.880 in
+CLAY after the fix. Before it, every ship pixel sat on one entry.
+
+### A second, older bug found on the way
+
+`ShipView3D.on_palette_changed()` refreshed the preview parts and the console but **never the baked
+pieces** - `ShipExplodeView` holds its own dressed nodes and only re-asks when told. So CLAY rendered
+TEAL parts on a navy background. This was never clay-specific: a **budget alert on a baked ship would
+have failed identically**, and that palette exists to make a maxed budget impossible to miss.
+
+### What CLAY is now
+
+- **One matte material on every part, the selected one included** - "the selected node remained
+  yellow and it should be clay". Selection reads through the WIREFRAME, which is the "framing" in the
+  author own description and the convention every package uses.
+- **`shaders/part_clay.gdshader`** - lit by the engine, `cull_disabled`, and it **flips the normal on
+  back faces**. That is the whole reason it is not a `StandardMaterial3D`: Godot standard material
+  shades a back face with its authored normal, pointing away from every light, so it renders black.
+  `part_faceted.gdshader` has always done this flip and says why; swapping it out threw that away.
+- **A mid-blue albedo, not a bright one.** Two measured forces meet: too dark and light multiplies it
+  onto the background (F7), too bright and it clips onto the top entry (this bug).
+- **Ambient occlusion**, with `ssao_light_affect` - because Godot SSAO modulates AMBIENT, and in the
+  void the ambient is zero, so at the stock setting the occlusion would do nothing exactly where it
+  is needed most: on a surface lit only by the flashlight.
+- **The dither goes up** (0.06 -> 0.22) while clay is on. CLAY is the one mode whose shading is a
+  continuous gradient rather than palette bands, and a continuous gradient through a 16-entry
+  quantizer comes out as hard rings - which is why a genuine `SpotLight3D` "just doesnt read as a
+  real light seems still very faked". It was real; the quantizer was posterizing it.
+- **The void and the flashlight stay**, retuned: 34 deg -> **19 deg**, energy 6.0 -> 3.4, and the
+  range is no longer the scene radius. Godot spot attenuation is `pow(1 - d/range, k)`, essentially
+  zero AT the range - so with range == radius the beam arrived at about 1% and the torch looked
+  switched off entirely.
+
+### A third extraction
+
+`ship_view3d.gd` hit the 2000-line alarm again; `ShipViewEnv` (background, ambient, tonemap, clay AO
+- colours and two flags in, one `Environment` out) came out, and it is back to exactly 2000.
+
+### Verified
+
+**gdUnit4 491/491**; gdlint clean; selfcheck PASSED; validator PASSED (0 warnings); resolve, explode
+and visual (5 modes) PASSED; captures show uniform blue clay, per-face shading, visible tunnels and
+visible framing.
