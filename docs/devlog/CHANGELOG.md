@@ -4737,3 +4737,69 @@ An agent was asked to judge the session's DIRECTIONS, bluntly. Its findings that
 **gdUnit4 498/498** (3 new); gdlint clean; selfcheck PASSED (hash `79445dff48f81978`, unmoved);
 validator PASSED (0 warnings); visual check PASSED at **7 modes**; resolve and explode PASSED; the
 6-cycle fly/solid/bake stress survives.
+
+---
+
+## [2026-09-29] CLAY comes out of the quantizer - real shadows, real gradients (ADR 0050)
+
+> "can we get rid of the styalized shadows in the clay flying mode.. i want real shadows, real soft
+> gradiants. not these moray bands of color that i see. just regular rendering shadows on the
+> surfaces and such."
+
+That is the decision the previous day's critique said had to be made rather than tuned, and it names
+the right option.
+
+### The contradiction, stated plainly
+
+SPEC section 11 puts ONE palette-quantization pass over the whole app viewport, and
+`part_faceted.gdshader` is built to live inside it - every band it emits is an exact palette entry,
+so the quantizer is a **no-op on parts**. That design stays.
+
+CLAY is the one render type that wants the opposite. ADR 0049 made it genuinely engine-lit, and a
+continuous light gradient is precisely what a sixteen-entry nearest-colour search cannot represent.
+It comes out as concentric bands - the moire the author is looking at.
+
+**Dither was the wrong fix and had already been tried.** Raising it from 0.06 to 0.22 trades bands
+for noise; it cannot invent colours the LUT does not hold, and ordered dithering actively harms the
+UI (it scatters small glyphs - a failure this project recorded once already, 2026-08-31).
+
+### What shipped
+
+`palette_post.gdshader` gains a **`bypass_rect`** in FRAGCOORD pixels. A fragment inside it passes
+through untouched; zero size - the default, and every mode but one - leaves the whole viewport
+quantized exactly as before. `ShipFlyToolbar.wear_clay` sets it to the 3D view's own rect while CLAY
+is up and clears it otherwise, so **the 3D panel renders raw and the console around it stays
+sixteen-colour**.
+
+With the panel out of the quantizer, two things that were previously pointless become worth having:
+
+- **The key light casts shadows in CLAY.** It never has, on the stated grounds that "at 16 colours a
+  shadow is a hard-edged blotch, not information" - true of a quantized panel, not of this one.
+- **The torch gets a `light_size`**, so its penumbra is soft rather than stencilled, and a
+  `shadow_blur` so a moving light's edge does not crawl.
+- **The dither goes back to `DITHER_DEFAULT`.** It was only ever raised to fight this banding.
+
+Measured on a baked carbon class: luma spread across the ship's own pixels **0.841 shaded -> 0.943
+clay**, and the fly capture shows a smooth falloff from the beam centre to black with no rings.
+
+### The rule is scoped, not weakened
+
+The exemption is per render type and per rectangle, and ADR 0050 says so: the default stays
+"everything is quantized", and any future mode that wants out has to argue for it there. The ADR also
+records the cost honestly - CLAY is now the only mode whose appearance is not fully determined by the
+LUT, so `data/palette.json`'s clay blues matter as *albedo* rather than as quantizer targets.
+
+### And the lint cap was raised, finally, with evidence
+
+`ship_view3d.gd` hit the 2000-line cap for the fifth time in two days. `.gdlintrc` has always said
+what to do - "if the cap fires and there is no seam, revisit this number rather than inventing one" -
+and that advice had been ignored four times running, most recently by deleting sentences out of
+docstrings written the same day. Four real extractions were taken from that file first
+(`ShipFlyMode`, `ShipViewGrid`, `ShipViewEnv`) and it was STILL at the cap. Raised to **2400**, with
+the evidence written into the config beside the original note.
+
+### Verified
+
+**gdUnit4 498/498**; gdlint clean; selfcheck PASSED (hash `79445dff48f81978`, unmoved); validator
+PASSED (0 warnings); visual check PASSED at 7 modes; resolve and explode PASSED; captures show smooth
+gradients and no banding in both static clay and the fly void.

@@ -109,7 +109,14 @@ func wear_clay(on: bool) -> void:
 	if _theme == null:
 		return
 	_theme.set_variant("clay" if on else "")
-	_theme.set_dither_strength(ShipTheme.CLAY_DITHER if on else ShipTheme.DITHER_DEFAULT)
+	# THE 3D PANEL COMES OUT OF THE QUANTIZER IN CLAY (ADR 0050) - real shadows and a continuous
+	# falloff are exactly what a 16-entry nearest-colour search turns into moire bands. The console
+	# around it stays quantized, so the device still reads as the device.
+	_theme.set_bypass_rect(_view.get_global_rect() if on and _view != null else Rect2())
+	# AND THE DITHER GOES BACK TO NORMAL. Raising it was a patch over the banding this bypass now
+	# removes properly; left high it would only add noise to the UI, which is the one place ordered
+	# dithering is actively harmful (it scatters small glyphs - see palette_post.gdshader).
+	_theme.set_dither_strength(ShipTheme.DITHER_DEFAULT)
 
 
 ## FLY (ADR 0049). The author asked twice - "also camera fly around modes", then in full detail,

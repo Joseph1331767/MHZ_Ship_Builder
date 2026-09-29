@@ -116,6 +116,9 @@ var variants: Dictionary = {}
 ## The variant in force, or "" for base. See [method set_variant] for the precedence rule.
 var active_variant: String = ""
 
+## See [method set_bypass_rect]. Empty means the whole viewport is quantized.
+var bypass_rect: Rect2 = Rect2()
+
 var dither_enabled: bool = false
 var dither_strength: float = DITHER_DEFAULT
 
@@ -480,6 +483,13 @@ func bind_post_material(mat: ShaderMaterial) -> void:
 	_push_palette_uniform()
 
 
+## THE RECTANGLE THE QUANTIZER LEAVES ALONE, in app-viewport pixels (ADR 0050). An empty Rect2
+## restores the one-palette rule, which is the state every mode but CLAY is in.
+func set_bypass_rect(rect: Rect2) -> void:
+	bypass_rect = rect
+	_push_palette_uniform()
+
+
 func set_dither(on: bool) -> void:
 	dither_enabled = on
 	_push_palette_uniform()
@@ -499,6 +509,10 @@ func _push_palette_uniform() -> void:
 		vecs.append(Vector3(c.r, c.g, c.b))
 	_post_material.set_shader_parameter("palette", vecs)
 	_post_material.set_shader_parameter("palette_size", active_palette.size())
+	_post_material.set_shader_parameter(
+		"bypass_rect",
+		Vector4(bypass_rect.position.x, bypass_rect.position.y, bypass_rect.size.x, bypass_rect.size.y)
+	)
 	_post_material.set_shader_parameter("dither_enabled", dither_enabled)
 	_post_material.set_shader_parameter("dither_strength", dither_strength)
 

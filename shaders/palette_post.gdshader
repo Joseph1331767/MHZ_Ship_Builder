@@ -35,6 +35,21 @@ uniform int palette_size = 16;
 uniform bool dither_enabled = false;
 uniform float dither_strength : hint_range(0.0, 0.5) = 0.06;
 
+// A RECTANGLE THAT IS NOT QUANTIZED, in FRAGCOORD pixels as (x, y, width, height). Zero width or
+// height means no bypass, which is every mode but one.
+//
+// WHY THE ONE PALETTE HAS AN EXCEPTION (ADR 0050). The whole point of this shader is that the 3D
+// view and the UI share a colour language by construction. CLAY is the one render type that wants
+// the opposite: it is lit by the ENGINE - a real SpotLight3D with real shadows and a real
+// inverse-square falloff - and a continuous gradient is precisely what a 16-entry nearest-colour
+// search cannot represent. It comes out as concentric moire bands, which is what the author
+// reported: "not these moray bands of color... i want real shadows, real soft gradiants".
+//
+// Dithering only trades the bands for noise; it cannot invent colours the LUT does not hold. So in
+// CLAY the 3D panel is handed through untouched and the console around it stays quantized, which is
+// a deliberate, mode-scoped exception and not a weakening of the rule.
+uniform vec4 bypass_rect = vec4(0.0, 0.0, 0.0, 0.0);
+
 // Dev bypass. Uniform branch - coherent across the whole draw, so effectively free.
 uniform bool enabled = true;
 
@@ -64,7 +79,12 @@ float bayer4(vec2 pix) {
 void fragment() {
 	vec3 src = texture(screen_tex, SCREEN_UV).rgb;
 
-	if (!enabled || palette_size < 1) {
+	// The un-quantized rectangle. Tested first and cheaply: a fragment inside it is the raw render.
+	bool bypassed = bypass_rect.z > 0.0 && bypass_rect.w > 0.0
+		&& FRAGCOORD.x >= bypass_rect.x && FRAGCOORD.x < bypass_rect.x + bypass_rect.z
+		&& FRAGCOORD.y >= bypass_rect.y && FRAGCOORD.y < bypass_rect.y + bypass_rect.w;
+
+	if (bypassed || !enabled || palette_size < 1) {
 		COLOR = vec4(src, 1.0);
 	} else {
 		// Bias by the ordered-dither threshold, centred so it does not shift overall

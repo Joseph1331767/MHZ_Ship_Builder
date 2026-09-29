@@ -174,6 +174,10 @@ const HINT_MARGIN_PX: float = 6.0
 ## without a floor the cue's near and far would collapse together and the shader would skip it.
 const DEPTH_MIN_RADIUS: float = 1.5
 
+## How far a shadow edge is blurred in CLAY. Soft, because a clay render is about form rather than a
+## crisp stencil - and because the torch is a moving light, whose hard edge would crawl.
+const CLAY_SHADOW_BLUR: float = 2.0
+
 
 
 ## FLY lives in [ShipFlyMode] - entering, the void, the torch and the way back are one cohesive unit

@@ -68,6 +68,12 @@ const TORCH_ATTENUATION: float = 2.0
 ## 15 m 0.03. That is a torch: bright where you point it, gone a room away.
 const TORCH_REACH_M: float = 18.0
 
+## How soft the torch's shadows are. `light_size` is the emitter's radius in metres - a bigger lamp
+## casts a softer penumbra, which is what a real torch does and what the author asked for: "real
+## shadows, real soft gradiants".
+const TORCH_SHADOW_BLUR: float = 1.5
+const TORCH_SIZE_M: float = 0.35
+
 ## Where ENTER-to-keep-the-view puts the orbit rig's new focus point. The rig orbits a POINT, so
 ## leaving fly has to invent one, and the point you were flying toward is the only defensible pick.
 const LOOK_AHEAD_M: float = 12.0
@@ -370,6 +376,10 @@ func _light_void(on: bool) -> void:
 		_torch.spot_attenuation = TORCH_ATTENUATION
 		_torch.light_energy = TORCH_ENERGY
 		_torch.shadow_enabled = true
+		# SOFT. A moving light with a hard shadow edge crawls, and the panel is out of the quantizer
+		# now (ADR 0050) so a gradient survives instead of banding.
+		_torch.shadow_blur = TORCH_SHADOW_BLUR
+		_torch.light_size = TORCH_SIZE_M
 		# A spot light points down its own -Z, which is also where the camera looks, so parenting it
 		# to the camera is the whole of "the flashlight is attached to the camera".
 		var cam: Camera3D = _fly.get_camera()

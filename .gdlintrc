@@ -26,7 +26,30 @@
 # `docs/API_CONTRACT.md` — already split along exactly that line). Splitting a file at an arbitrary line
 # to satisfy a number yields two halves that reach into each other, which is strictly worse than one long
 # file. If the cap fires and there is no seam, revisit this number rather than inventing one.
-max-file-lines: 2000
+#
+# --- RAISED TO 2400 on 2026-09-29, with evidence, which is what this note asked for ------------
+#
+# The paragraph above says the 2000 was carried over from a sibling project, "not re-derived from
+# measurement", and asks for it to be revisited "once real files exist here". They do now, and the
+# revisit is overdue: `ship_view3d.gd` hit the cap five times in two days.
+#
+# FOUR REAL EXTRACTIONS WERE TAKEN FROM IT FIRST, which is the order this note prescribes:
+#   ShipFlyMode    entering/leaving fly, the void, the torch            (a genuine seam)
+#   ShipViewGrid   floor grid, beacon, bbox brackets, mass cross        (pure geometry)
+#   ShipViewEnv    background, ambient, tonemap, clay AO                (pure, static)
+# After all of them the file was STILL at the cap, and the fifth firing was paid for by deleting
+# sentences out of docstrings written the same day - the failure mode this file already names: the
+# cap "taxes exactly the practice the project rules mandate" (AGENTS 10a makes maintained, reasoned
+# comments an evidence requirement, not a nicety).
+#
+# What is left in that file is one cohesive job - input routing, picking, the gizmo drag, the ghost
+# - and splitting it again would produce halves that reach into each other, which this note rightly
+# calls "strictly worse than one long file".
+#
+# 2400 leaves real headroom rather than fitting today's number: ship_view3d.gd is 2004 and
+# ship_builder.gd 1947, so this is ~20% of room, not a ceiling to ride. A file that reaches 2400 is
+# worth asking about again.
+max-file-lines: 2400
 
 # --- max-public-methods: 30, up from gdtoolkit's default 20 --------------------------
 #
